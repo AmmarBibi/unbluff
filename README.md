@@ -19,8 +19,18 @@ Only requirement: **Python 3.8+ on your PATH** (no `pip install` - stdlib only).
 ```bash
 git clone https://github.com/AmmarBibi/unbluff.git
 cd unbluff
-python install.py --dry-run   # preview every change before it touches anything
-python install.py             # apply (backs up settings.json first; --uninstall reverses it)
+```
+
+Preview exactly what it will change (writes nothing):
+
+```bash
+python install.py --dry-run
+```
+
+Then install it (backs up your `settings.json` first; `python install.py --uninstall` reverses it):
+
+```bash
+python install.py
 ```
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
@@ -101,12 +111,24 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 
 ## Install details
 
-Beyond the plain `python install.py` (shown in Quickstart above), these tailor or reverse it - add `--dry-run` to any of them to preview first:
+Beyond the plain `python install.py`, you can tailor or reverse the install - add `--dry-run` to any of these to preview it first.
+
+Install just the Stop-time hooks:
 
 ```bash
-python install.py --only stop_dispatcher     # install just the Stop-time hooks
-python install.py --without rate_prompt      # install everything except the prompt rater
-python install.py --uninstall                # remove everything and restore your settings.json
+python install.py --only stop_dispatcher
+```
+
+Install everything except the prompt rater:
+
+```bash
+python install.py --without rate_prompt
+```
+
+Remove everything and restore your `settings.json`:
+
+```bash
+python install.py --uninstall
 ```
 
 It wires **3 `settings.json` entries** (one each for UserPromptSubmit / SessionStart / Stop) that drive the eight pieces.
