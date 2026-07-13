@@ -11,8 +11,8 @@ First public release.
 - **`show_your_proof`** (Stop) - nudges when the last reply claims success ("it works", "tests pass",
   "verified") but the turn ran zero tools.
 - **`rate_prompt`** (UserPromptSubmit) - injects a standing instruction that makes Claude rate each
-  prompt X/10 and act on a sharpened rewrite. Deterministic, `$0`, zero added latency (no model call
-  of its own). Off-switch via `CLAUDE_RATE_PROMPTS=off`; skips one-word confirmations and honors a
+  prompt X/10 and act on a sharpened rewrite. Makes no extra model call (no API round-trip); the inline
+  rating costs a few tokens. Off-switch via `CLAUDE_RATE_PROMPTS=off`; skips one-word confirmations and honors a
   "verbatim/literal" escape hatch.
 - **`fast_test_on_stop`** (Stop) - runs the project's fast tests when source changed and feeds a
   failure back to Claude. Auto-detects `.claude/fast-test.cmd`, `package.json` test script, or pytest.

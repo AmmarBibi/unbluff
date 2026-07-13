@@ -61,7 +61,7 @@ def desired_groups() -> dict:
         "UserPromptSubmit": {
             "hooks": [{"type": "command", "command": _cmd("rate_prompt.py"), "timeout": 10}],
             "id": ID_PREFIX + "rate-prompt",
-            "description": "Rate each prompt X/10 and act on a sharpened rewrite (deterministic, $0).",
+            "description": "Rate each prompt X/10 and act on a sharpened rewrite (no extra model call).",
         },
         "SessionStart": {
             "matcher": "*",

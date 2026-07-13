@@ -7,9 +7,9 @@ Behaviour:
   - Off-switch: set CLAUDE_RATE_PROMPTS=off (e.g. in ~/.claude/settings.json "env") to disable
     without editing or removing the hook.
 
-Local, deterministic, $0, zero-latency - it makes NO model call of its own; it prints a standing
+Local and deterministic - it makes NO extra model call (no API round-trip); it prints a standing
 instruction to stdout (which Claude Code adds to context) and the main model does the rating and
-rewrite inline. Prints nothing when skipped. Run with --selftest to verify the routing logic.
+rewrite inline (a few tokens). Prints nothing when skipped. Run with --selftest to verify the routing logic.
 """
 
 from __future__ import annotations

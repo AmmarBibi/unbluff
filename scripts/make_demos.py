@@ -167,7 +167,7 @@ RATE = [
     ("box", "| Reproduce, fix, and add a regression test.                |"),
     ("box", "+-----------------------------------------------------------+"),
     ("blank",),
-    ("dim", "[proceeds on the sharpened prompt - no model call, $0]"),
+    ("dim", "[proceeds on the sharpened prompt - no extra model call]"),
     ("hold", 400),
 ]
 
