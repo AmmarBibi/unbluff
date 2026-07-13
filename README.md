@@ -50,7 +50,7 @@ Rates every prompt X/10 and rewrites it to a sharper version inline before the a
 ![rate_prompt scoring a prompt and rewriting it inline](docs/rate-prompt.gif)
 
 ### meta-review · skill
-A deliberate reasoning pass that audits for parked work, instance-only fixes, optimization gaps, and what's silently missing - then schedules or fixes each. You run it at milestones (or when you ask "am I missing anything?"). It is the judgment the mechanical hooks cannot do: the hooks surface state, this skill decides what to do about it.
+A deliberate reasoning pass that audits for parked work, instance-only fixes, optimization gaps, and what's silently missing - then schedules or fixes each. You invoke it on purpose - type `/meta-review`, or ask Claude to run it. (Its description also lists cues like "am I missing anything?", so Claude will often reach for it on those - but unlike the hooks, a skill fires on Claude's judgment, not as a hard trigger.) It is the judgment the mechanical hooks cannot do: the hooks surface state, this skill decides what to do about it.
 
 ![meta-review example report](docs/meta-review.png)
 
