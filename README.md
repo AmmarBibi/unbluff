@@ -1,6 +1,6 @@
 # unbluff
 
-**Make Claude Code prove its work.** A set of fail-silent hooks and a reasoning skill that each catch one way Claude cuts a corner - bluffed *"it works"* claims, unverified success, hidden TODOs, rotting memory - mechanically, the moment it happens.
+**Keep Claude Code honest.** A suite of fail-silent hooks and a reasoning skill that make the agent back up its own work instead of cutting corners - across your prompts, its claims, your tests, parked work, and memory. Mechanical, `$0`, zero-latency.
 
 *An independent, unofficial community project. Not affiliated with or endorsed by Anthropic. Designed and directed by the author, implemented with AI assistance.*
 
