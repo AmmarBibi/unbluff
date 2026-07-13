@@ -1,0 +1,47 @@
+name: Bug report
+description: A hook fires wrongly, crashes, or does nothing it should
+labels: [bug]
+body:
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 11 / macOS 14 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "output of: python --version"
+    validations:
+      required: true
+  - type: dropdown
+    id: hook
+    attributes:
+      label: Which hook / component?
+      options:
+        - show_your_proof
+        - rate_prompt
+        - fast_test_on_stop
+        - meta_audit_on_stop
+        - memory_hygiene_guard
+        - hook_health_check
+        - stop_dispatcher
+        - meta-review skill
+        - install.py
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal repro
+      description: Ideally a failing `--selftest` fixture, or the exact steps and the hook's stderr/output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Hook runtime state (created under ~/.claude/hooks/state at runtime; never commit local copies)
+state/
+*.done
+fire_ledger.jsonl*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.bak
+*.bak-*

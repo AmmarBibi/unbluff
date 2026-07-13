@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Example wiring only. Replace /ABSOLUTE/PATH/TO with where you cloned this repo (or just run install.py, which writes the resolved absolute paths for you). On Windows use the full python.exe path or 'py'.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/rate_prompt.py\"",
+            "timeout": 10
+          }
+        ],
+        "id": "unbluff:rate-prompt"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/hook_health_check.py\""
+          }
+        ],
+        "id": "unbluff:hook-health"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/stop_dispatcher.py\"",
+            "timeout": 300
+          }
+        ],
+        "id": "unbluff:stop-dispatcher"
+      }
+    ]
+  }
+}
