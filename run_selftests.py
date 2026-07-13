@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run every self-testable hook's --selftest and exit nonzero if any fail.
 
-Cross-platform (used by CI on Linux/macOS/Windows and locally). rate_prompt.py has no
---selftest (it is a pure instruction-injector), so it is skipped.
+Cross-platform (used by CI on Linux/macOS/Windows and locally). Every hook in SELFTESTABLE
+is run with --selftest; add new hooks here as they are created.
 """
 
 import glob

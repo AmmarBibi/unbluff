@@ -24,3 +24,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run hook selftests
         run: python run_selftests.py
+
+  integration:
+    name: integration (install -> fire -> uninstall)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: End-to-end integration test
+        run: python tests/test_integration.py

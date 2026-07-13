@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""End-to-end integration test for unbluff: install -> fire each hook as Claude Code would -> uninstall.
+
+Uses a throwaway HOME and temp projects. Fires the EXACT command strings install.py writes into
+settings.json, piping realistic Claude Code hook JSON on stdin, and checks behaviour + exit codes.
+Stdlib-only; needs `git` on PATH. Runs in CI.
+"""
+import json, os, subprocess, sys, tempfile, shutil
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tests/ -> repo root
+PYEXE = sys.executable
+results = []
+
+
+def record(name, ok, detail=""):
+    results.append((name, ok, detail))
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  -> {detail}" if detail and not ok else ""))
+
+
+def child_env(home):
+    e = dict(os.environ)
+    e["USERPROFILE"] = home
+    e["HOME"] = home
+    e["HOMEDRIVE"], e["HOMEPATH"] = os.path.splitdrive(home)
+    return e
+
+
+def run(cmd, env, stdin=""):
+    p = subprocess.run(cmd, shell=True, input=stdin, capture_output=True, text=True, env=env)
+    return p.returncode, p.stdout or "", p.stderr or ""
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True,
+                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def main():
+    home = tempfile.mkdtemp(prefix="unbluff-home-")
+    env = child_env(home)
+    os.makedirs(os.path.join(home, ".claude"))
+    # seed a pre-existing unrelated hook + env to prove we preserve them
+    seed = {"hooks": {"Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo other"}],
+                                "id": "someone-else:keep"}]}, "env": {"FOO": "bar"}}
+    settings_path = os.path.join(home, ".claude", "settings.json")
+    json.dump(seed, open(settings_path, "w"))
+
+    try:
+        # --- A. INSTALL ---
+        rc, out, err = run(f'"{PYEXE}" "{os.path.join(REPO, "install.py")}"', env)
+        s = json.load(open(settings_path))
+        ids = [g.get("id") for gs in s["hooks"].values() for g in gs]
+        record("A1 install exit 0", rc == 0, f"rc={rc} err={err[:200]}")
+        record("A2 three unbluff groups wired",
+               sum(1 for i in ids if str(i).startswith("unbluff:")) == 3, str(ids))
+        record("A3 preexisting hook preserved", "someone-else:keep" in ids)
+        record("A4 env preserved", s.get("env", {}).get("FOO") == "bar")
+        record("A5 skill installed",
+               os.path.isfile(os.path.join(home, ".claude", "skills", "meta-review", "SKILL.md")))
+
+        ups = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        ss = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        stop = next(g["hooks"][0]["command"] for g in s["hooks"]["Stop"]
+                    if str(g.get("id", "")).startswith("unbluff:"))
+
+        # --- B. rate_prompt (UserPromptSubmit) ---
+        rc, out, err = run(ups, env, json.dumps({"prompt": "fix the login bug and confirm"}))
+        record("B1 rate_prompt fires on substantive prompt",
+               rc == 0 and "one-line rating (X/10)" in out, f"rc={rc} out={out[:80]!r}")
+        rc, out, err = run(ups, env, json.dumps({"prompt": "ok"}))
+        record("B2 rate_prompt silent on trivial reply", rc == 0 and out.strip() == "", f"out={out!r}")
+
+        # --- C. hook_health_check (SessionStart) ---
+        rc, out, err = run(ss, env, "{}")
+        record("C1 hook_health reports OK", rc == 0 and "[hook-health] OK" in out,
+               f"rc={rc} out={out[:120]!r}")
+
+        # --- D. show-your-proof via the Stop dispatcher (end to end) ---
+        proj = tempfile.mkdtemp(prefix="unbluff-proj-")  # plain dir: only show_your_proof should fire
+        tpath = os.path.join(proj, "transcript.jsonl")
+        with open(tpath, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "fix the bug"}}) + "\n")
+            f.write(json.dumps({"type": "assistant", "message": {"role": "assistant",
+                    "content": [{"type": "text", "text": "Done - it works now."}]}}) + "\n")
+        payload = json.dumps({"session_id": "itest-proof", "cwd": proj,
+                              "transcript_path": tpath, "stop_hook_active": False})
+        rc, out, err = run(stop, env, payload)
+        record("D1 show-your-proof fires (rc 2 + nudge)",
+               rc == 2 and "[show-your-proof]" in err, f"rc={rc} err={err[:120]!r}")
+        ledger = os.path.join(home, ".claude", "hooks", "state", "fire_ledger.jsonl")
+        fired = json.loads(open(ledger).readlines()[-1]).get("fired") if os.path.exists(ledger) else None
+        record("D2 fire-ledger records 'proof'", fired == ["proof"], f"fired={fired}")
+        rc2, _, _ = run(stop, env, payload)  # same session -> once-per-session guard
+        record("D3 once-per-session (second fire quiet)", rc2 == 0, f"rc={rc2}")
+
+        # --- E. fast-test-on-stop via the dispatcher (end to end) ---
+        repo2 = tempfile.mkdtemp(prefix="unbluff-git-")
+        git(repo2, "init")
+        os.makedirs(os.path.join(repo2, ".claude"))
+        with open(os.path.join(repo2, ".claude", "fast-test.cmd"), "w") as f:
+            f.write(f'"{PYEXE}" -c "raise SystemExit(1)"\n')  # deterministic failing test, no pytest needed
+        with open(os.path.join(repo2, "app.py"), "w") as f:
+            f.write("x = 1\n")
+        git(repo2, "add", "-A"); git(repo2, "commit", "-m", "init")
+        with open(os.path.join(repo2, "app.py"), "a") as f:
+            f.write("y = 2  # changed source\n")  # porcelain now shows a changed .py
+        rc, out, err = run(stop, env, json.dumps({"session_id": "itest-test", "cwd": repo2,
+                                                  "stop_hook_active": False}))
+        record("E1 fast-test fires on failing tests (rc 2)",
+               rc == 2 and "[fast-test] FAILING" in err, f"rc={rc} err={err[:120]!r}")
+        rc2, _, _ = run(stop, env, json.dumps({"session_id": "itest-test2", "cwd": repo2,
+                                               "stop_hook_active": False}))
+        record("E2 fast-test debounced on immediate re-run", rc2 == 0, f"rc={rc2}")
+
+        # --- F. quiet path: nothing wrong -> dispatcher exits 0 ---
+        clean = tempfile.mkdtemp(prefix="unbluff-clean-")
+        rc, out, err = run(stop, env, json.dumps({"session_id": "itest-clean", "cwd": clean,
+                                                  "stop_hook_active": False}))
+        record("F1 dispatcher quiet when nothing is wrong", rc == 0, f"rc={rc} err={err[:120]!r}")
+
+        # --- G. UNINSTALL ---
+        rc, out, err = run(f'"{PYEXE}" "{os.path.join(REPO, "install.py")}" --uninstall', env)
+        s2 = json.load(open(settings_path))
+        ids2 = [g.get("id") for gs in s2.get("hooks", {}).values() for g in gs]
+        record("G1 uninstall exit 0", rc == 0, f"rc={rc}")
+        record("G2 all unbluff entries removed",
+               not any(str(i).startswith("unbluff:") for i in ids2), str(ids2))
+        record("G3 preexisting hook still there", "someone-else:keep" in ids2)
+        record("G4 env still there", s2.get("env", {}).get("FOO") == "bar")
+        record("G5 skill removed",
+               not os.path.exists(os.path.join(home, ".claude", "skills", "meta-review")))
+
+        for d in (proj, repo2, clean):
+            shutil.rmtree(d, ignore_errors=True)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+    passed = sum(1 for _, ok, _ in results if ok)
+    print(f"\n==== {passed}/{len(results)} scenarios passed ====")
+    return 0 if passed == len(results) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
