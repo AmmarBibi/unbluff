@@ -99,19 +99,10 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 ==== 19/19 scenarios passed ====
 ```
 
-## How this compares
-
-| Project | What it is for |
-|---------|----------------|
-| [claude-code-hooks-mastery](https://github.com/disler/claude-code-hooks-mastery) | Learn every hook event (a comprehensive reference) |
-| [claude-code-prompt-improver](https://github.com/severity1/claude-code-prompt-improver) | A model-call prompt rewrite (adds latency, worth it for many) |
-| **unbluff** | Mechanical, stdlib-only, fail-silent self-verification you install and forget |
-
-The wedge: the hooks make **no model calls** and send **nothing over the network** - they just catch a class of mistake at turn-end.
-
 ## Install details
 
 ```bash
+python install.py                            # install everything (all 8 pieces) - the default
 python install.py --uninstall               # remove everything, restore your settings.json
 python install.py --only stop_dispatcher     # just the Stop-time hooks
 python install.py --without rate_prompt      # everything except the prompt rater
