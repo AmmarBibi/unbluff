@@ -146,8 +146,9 @@ DEMO = [
     ("blank",),
     ("a", "Fixed calc.py - it works now."),
     ("blank",),
-    ("nudge", '[show-your-proof] Claims success ("it works") but this turn'),
-    ("nudge", "ran no tools. Show verification or soften the claim."),
+    ("nudge", "[show-your-proof] The last reply claims success ('it works') but"),
+    ("nudge", "this turn ran no tools. Show verification (run the test/build/"),
+    ("nudge", "command) or soften the claim to what was actually verified."),
     ("blank",),
     ("a", "You're right - let me actually run it."),
     ("cmd", "$ pytest -q"),
@@ -189,7 +190,7 @@ FASTTEST = [
     ("blank",),
     ("a", "Refactored tokenizer.py - should be faster now."),
     ("blank",),
-    ("nudge", "[fast-test] FAILING at stop - fix before finishing (pytest -x -q):"),
+    ("nudge", "[fast-test] FAILING at stop - fix before finishing (cmd: pytest -x -q):"),
     ("red", "  FAILED tests/test_tokenizer.py::test_roundtrip"),
     ("blank",),
     ("a", "Good catch - the refactor broke roundtripping. Fixing."),
@@ -201,15 +202,15 @@ FASTTEST = [
 META_AUDIT = [
     ("[meta-audit] parked/unpushed state at stop:", AMBER),
     ("- PLAN.md:42: TODO: wire the retry backoff", DEFAULT),
-    ("- 2 commit(s) unpushed (surface, not push)", DEFAULT),
-    ("Schedule each item, or tag its decision (SCHEDULED/DECIDED/...).", DIM),
+    ("- 2 commit(s) unpushed (push only on user say-so - surface, not push)", DEFAULT),
+    ("Schedule each named item into the plan order, or tag the line with its decision (SCHEDULED/DECIDED/BACKLOG/...).", DIM),
 ]
 
 MEMORY_HYGIENE = [
     ("[memory-hygiene] memory rot for this project:", AMBER),
     ("  - MEMORY.md:7: commit hash in index: fixed in abc1234 on main", DEFAULT),
     ("  - notes.md:12: NEXT ORDER: wire the API -> ship", DEFAULT),
-    ("Move evolving state to the project plan; memory keeps durable facts.", DIM),
+    ("Move evolving state to the project plan/docs; memory keeps pointers + durable facts only.", DIM),
 ]
 
 HOOK_HEALTH = [
@@ -218,8 +219,8 @@ HOOK_HEALTH = [
 
 STOP_DISPATCHER = [
     ("$ tail -2 ~/.claude/hooks/state/fire_ledger.jsonl", BLUE),
-    ('{"ts":"14:02","results":{"proof":2,"audit":0,"memory":0,"test":0},"fired":["proof"]}', DIM),
-    ('{"ts":"14:19","results":{"proof":0,"audit":2,"memory":0,"test":2},"fired":["audit","test"]}', DIM),
+    ('{"ts":"2026-07-13T16:58:04","cwd":"~/proj","results":{"proof":2,"audit":0,"memory":0,"test":0},"fired":["proof"]}', DIM),
+    ('{"ts":"2026-07-13T17:12:39","cwd":"~/proj","results":{"proof":0,"audit":2,"memory":0,"test":2},"fired":["audit","test"]}', DIM),
     ("", DEFAULT),
     ("One process per turn-end runs all four Stop hooks; the ledger shows what fired.", DEFAULT),
 ]
