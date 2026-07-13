@@ -101,12 +101,12 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 
 ## Install details
 
+Beyond the plain `python install.py` (shown in Quickstart above), these tailor or reverse it - add `--dry-run` to any of them to preview first:
+
 ```bash
-python install.py                            # install everything (all 8 pieces) - the default
-python install.py --uninstall               # remove everything, restore your settings.json
-python install.py --only stop_dispatcher     # just the Stop-time hooks
-python install.py --without rate_prompt      # everything except the prompt rater
-python install.py --dry-run                  # preview any of the above
+python install.py --only stop_dispatcher     # install just the Stop-time hooks
+python install.py --without rate_prompt      # install everything except the prompt rater
+python install.py --uninstall                # remove everything and restore your settings.json
 ```
 
 It wires **3 `settings.json` entries** (one each for UserPromptSubmit / SessionStart / Stop) that drive the eight pieces.
