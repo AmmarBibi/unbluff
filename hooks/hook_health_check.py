@@ -26,8 +26,9 @@ import sys
 
 # Hooks in this suite that expose a --selftest (existence-check -> self-testing net).
 _HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
-_LOCAL_HOOKS = ("fast_test_on_stop.py", "show_your_proof.py", "meta_audit_on_stop.py",
-                "memory_hygiene_guard.py", "stop_dispatcher.py", "hook_health_check.py")
+_LOCAL_HOOKS = ("rate_prompt.py", "fast_test_on_stop.py", "show_your_proof.py",
+                "meta_audit_on_stop.py", "memory_hygiene_guard.py", "stop_dispatcher.py",
+                "hook_health_check.py")
 _STATE_DIR = os.environ.get("UNBLUFF_STATE_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "hooks", "state")
 _WEEKLY_MARKER = "hook-health-weekly-selftest.txt"

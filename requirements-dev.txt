@@ -1,0 +1,3 @@
+# Dev-only: needed to regenerate the demo assets via scripts/make_demos.py.
+# The hooks themselves have ZERO runtime dependencies (Python stdlib only).
+Pillow>=9
