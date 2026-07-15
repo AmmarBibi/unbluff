@@ -52,17 +52,21 @@ def main():
         s = json.load(open(settings_path))
         ids = [g.get("id") for gs in s["hooks"].values() for g in gs]
         record("A1 install exit 0", rc == 0, f"rc={rc} err={err[:200]}")
-        record("A2 three unbluff groups wired",
-               sum(1 for i in ids if str(i).startswith("unbluff:")) == 3, str(ids))
+        record("A2 four unbluff groups wired",
+               sum(1 for i in ids if str(i).startswith("unbluff:")) == 4, str(ids))
         record("A3 preexisting hook preserved", "someone-else:keep" in ids)
         record("A4 env preserved", s.get("env", {}).get("FOO") == "bar")
         record("A5 skill installed",
                os.path.isfile(os.path.join(home, ".claude", "skills", "meta-review", "SKILL.md")))
+        record("A6 source-coverage skill installed",
+               os.path.isfile(os.path.join(home, ".claude", "skills", "source-coverage", "SKILL.md")))
 
         ups = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         ss = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         stop = next(g["hooks"][0]["command"] for g in s["hooks"]["Stop"]
                     if str(g.get("id", "")).startswith("unbluff:"))
+        ptu = next(g["hooks"][0]["command"] for g in s["hooks"]["PostToolUse"]
+                   if str(g.get("id", "")).startswith("unbluff:"))
 
         # --- B. rate_prompt (UserPromptSubmit) ---
         rc, out, err = run(ups, env, json.dumps({"prompt": "fix the login bug and confirm"}))
@@ -118,6 +122,15 @@ def main():
         rc, out, err = run(stop, env, json.dumps({"session_id": "itest-clean", "cwd": clean,
                                                   "stop_hook_active": False}))
         record("F1 dispatcher quiet when nothing is wrong", rc == 0, f"rc={rc} err={err[:120]!r}")
+
+        # --- H. plan_defer_guard (PostToolUse) fires on optional-forever plan language ---
+        planf = os.path.join(tempfile.mkdtemp(prefix="unbluff-plan-"), "MASTER_PLAN.md")
+        with open(planf, "w", encoding="utf-8") as f:
+            f.write("| 1 | low-pri refactor -> park.\n")
+        rc, out, err = run(ptu, env, json.dumps({"session_id": "itest-defer",
+                           "tool_input": {"file_path": planf}}))
+        record("H1 plan-defer-guard fires on '-> park' plan edit (rc 2 + nudge)",
+               rc == 2 and "[plan-defer-guard]" in err, f"rc={rc} err={err[:120]!r}")
 
         # --- G. UNINSTALL ---
         rc, out, err = run(f'"{PYEXE}" "{os.path.join(REPO, "install.py")}" --uninstall', env)
