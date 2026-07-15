@@ -3,6 +3,32 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.1.0] - 2026-07-15
+
+Closes a real blind spot found in the field: a plan can claim "everything is covered" while
+(a) hiding deferrals in lowercase decision-shaped language `meta_audit_on_stop` treats as prose,
+and (b) never mentioning whole families of the source's requirements at all - which no grep can find.
+
+### Added
+- **`plan_defer_guard`** (PostToolUse: Edit|Write|MultiEdit) - on a plan/roadmap edit, flags the
+  LOWERCASE "optional-forever" phrases that read like a decision but mean never (`-> park`,
+  `on demand`, `wait for a concrete failing case`, `only on real user demand`, `deferred
+  opportunistic`, `pick when value beats ...`). These slip past `meta_audit_on_stop` by design (its
+  markers are uppercase `PARKED/DEFERRED/TODO` and its allow-tags whitelist `deprioritized`/`backlog`),
+  so a badly-tagged deferral hides in plain sight. Fires once per session; exempts already-reclassified
+  / finalized-exclusion lines; fail-silent, stdlib-only, `--selftest`.
+- **`source-coverage`** skill - the reasoning half: verify a plan covers 100% of its authoritative
+  source(s) by reading the SOURCE and reconciling every item to BUILT | SCHEDULED | FINALIZED-EXCLUSION,
+  refreshing a coverage ledger. Catches the dangerous gap a hook never can - content the plan does not
+  mention. (Motivating case: a plan asserting "essentially all built" had silently dropped an entire
+  method family; one source-coverage pass surfaced ~40 uncovered items.)
+- `install.py` now wires both new pieces on a fresh install (a 4th settings.json entry for
+  `plan_defer_guard`; both skills copied); `run_selftests.py` + CI now cover the new hook.
+
+### Design
+- The two-halves guarantee: a **mechanical hook** catches optional-forever language the plan *contains*;
+  a **reasoning skill** catches source items the plan *omits*. A grep can only find what is written down.
+
 ## [1.0.0] - 2026-07-13
 
 First public release.

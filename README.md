@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all eight pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all ten pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -64,6 +64,11 @@ A deliberate reasoning pass that audits for parked work, instance-only fixes, op
 
 ![meta-review example report](docs/meta-review.png)
 
+### source-coverage · skill
+The reasoning half of the completeness story, and the one that catches the *dangerous* gap. A hook can only flag optional-forever language the plan **contains** - it can never find content the plan **never mentions**. This skill reads the authoritative source(s) themselves and reconciles every item - table, equation, method, requirement - to `BUILT` / `SCHEDULED` / `FINALIZED-EXCLUSION`, refreshing a coverage ledger. A plan can confidently assert "everything is covered" while an entire family of the source's requirements was silently never catalogued; only reading the source, not re-reading the plan, surfaces it. (In the field, one pass over a plan that claimed "essentially all built" turned up ~40 uncovered items.) You invoke it on purpose - `/source-coverage`, or on cues like "is this complete? / did we forget anything?".
+
+![source-coverage reconciling a plan against its source and surfacing missed items](docs/source-coverage.png)
+
 ### fast_test_on_stop · Stop
 When source changed, runs your fast tests at the end of a turn and feeds any failure back to the agent - so a "green" claim is an actually-green claim. It auto-detects pytest or a `package.json` test script (or point it at a subset with `.claude/fast-test.cmd`), and it is debounced so it will not re-run constantly.
 
@@ -73,6 +78,11 @@ When source changed, runs your fast tests at the end of a turn and feeds any fai
 Surfaces parked / deferred / TODO work that has no decision, plus unpushed commits. It stays quiet about items that carry a decision tag (SCHEDULED / DECIDED / BACKLOG / ...) - it is the hidden, unrecorded work that gets flagged, at most once per session.
 
 ![meta_audit_on_stop output](docs/meta-audit.png)
+
+### plan_defer_guard · PostToolUse
+Catches the class `meta_audit_on_stop` deliberately ignores. When you edit a plan or roadmap file, it flags the **lowercase, decision-shaped "optional-forever" phrases** - `-> park`, `on demand`, `wait for a concrete failing case`, `only on real user demand`, `deferred opportunistic` - that read like a decision but quietly mean *never*. Those slip past `meta_audit` on purpose (its markers are uppercase `PARKED/DEFERRED/TODO`, and its allow-tags whitelist `deprioritized`/`backlog`), so a badly-tagged deferral hides in plain sight. It exempts lines you have already reclassified or finalized-excluded, fires once per session, and nudges you to turn each into a scheduled item or a justified exclusion - so the plan carries zero optional-forever items.
+
+![plan_defer_guard flagging optional-forever language on a plan edit](docs/plan-defer-guard.gif)
 
 ### memory_hygiene_guard · Stop
 Flags rot in Claude Code's auto-memory (index bloat, stale commit hashes, evolving state). The idea: memory should hold durable pointers and facts, not fast-changing state - next steps, test counts, live commit hashes - which belongs in your plan. Opinionated and optional; if you do not use auto-memory, it stays silent.
@@ -96,7 +106,7 @@ Don't take the demos on faith - run it yourself (this is exactly what CI runs on
 ```text
 $ python run_selftests.py
 rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop: OK
-memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK
+memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
 all 7 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
@@ -131,7 +141,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **3 `settings.json` entries** (one each for UserPromptSubmit / SessionStart / Stop) that drive the eight pieces.
+It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the ten pieces.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 

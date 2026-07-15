@@ -9,7 +9,7 @@ them), refuses to clobber a settings.json it cannot parse, and supports --dry-ru
 The hooks are referenced IN PLACE from this repo, so `git pull` updates them with no re-install.
 
 Usage:
-    python install.py                       # install all 8 pieces (3 settings.json entries)
+    python install.py                       # install all 10 pieces (4 settings.json entries)
     python install.py --only show_your_proof   # (see --help) install a subset
     python install.py --without rate_prompt    # install everything except one
     python install.py --dry-run             # show exactly what would change; write nothing
