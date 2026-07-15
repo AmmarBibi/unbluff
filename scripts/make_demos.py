@@ -235,11 +235,34 @@ META_REVIEW = [
     ("  6 Mechanism      hooks green; one coherent recommended-order list", DEFAULT),
 ]
 
+PLAN_DEFER = [
+    ("u", "> update the plan - park the low-priority refactor for now"),
+    ("blank",),
+    ("a", "Updated MASTER_PLAN.md -> added: | 9.2 | low-pri refactor -> park."),
+    ("blank",),
+    ("nudge", "[plan-defer-guard] optional-forever language in MASTER_PLAN.md:"),
+    ("red", "  L92: | 9.2 | low-pri refactor -> park."),
+    ("blank",),
+    ("a", "Right - that reads decided but means never. Reclassifying: | 9.2 | low-pri refactor (SCHEDULED, low)."),
+    ("hold", 400),
+]
+
+SOURCE_COVERAGE = [
+    ("[source-coverage] plan reconciled against its source docs:", AMBER),
+    ("  BUILT        128 items   (module + test named)", DEFAULT),
+    ("  SCHEDULED     14 items   (real plan rows)", DEFAULT),
+    ("  EXCLUSION      3 items   (justified, in the ledger)", DEFAULT),
+    ("  GAP          ~40 items   NOT in the plan - e.g. a whole refining-method family", AMBER),
+    ("A grep can't find what the plan never names; scheduled each gap, refreshed the ledger.", DIM),
+]
+
 if __name__ == "__main__":
     build(DEMO, "demo.gif")
+    build(PLAN_DEFER, "plan-defer-guard.gif")
     build(RATE, "rate-prompt.gif")
     build(FASTTEST, "fast-test.gif")
     still(META_AUDIT, "meta-audit.png")
+    still(SOURCE_COVERAGE, "source-coverage.png")
     still(MEMORY_HYGIENE, "memory-hygiene.png")
     still(HOOK_HEALTH, "hook-health.png")
     still(STOP_DISPATCHER, "stop-dispatcher.png")
