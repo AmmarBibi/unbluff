@@ -13,7 +13,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SELFTESTABLE = {
     "rate_prompt", "fast_test_on_stop", "show_your_proof", "meta_audit_on_stop",
-    "memory_hygiene_guard", "stop_dispatcher", "hook_health_check",
+    "memory_hygiene_guard", "stop_dispatcher", "hook_health_check", "plan_defer_guard",
 }
 
 

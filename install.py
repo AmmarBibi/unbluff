@@ -31,11 +31,12 @@ import time
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
-SKILL_SRC = os.path.join(REPO_ROOT, "skills", "meta-review")
+SKILLS_DIR = os.path.join(REPO_ROOT, "skills")
+SKILL_NAMES = ("meta-review", "source-coverage")
 
 CLAUDE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
 SETTINGS_PATH = os.path.join(CLAUDE_DIR, "settings.json")
-SKILL_DEST = os.path.join(CLAUDE_DIR, "skills", "meta-review")
+SKILLS_DEST_DIR = os.path.join(CLAUDE_DIR, "skills")
 
 ID_PREFIX = "unbluff:"
 PY = f'"{sys.executable}"'
@@ -43,12 +44,13 @@ PY = f'"{sys.executable}"'
 # Short group names used by --only / --without, mapped to the event they wire.
 GROUP_EVENTS = {"rate_prompt": "UserPromptSubmit",
                 "hook_health": "SessionStart",
-                "stop_dispatcher": "Stop"}
+                "stop_dispatcher": "Stop",
+                "plan_defer_guard": "PostToolUse"}
 
 # Every hook file the suite depends on (the dispatcher imports the four Stop sub-hooks).
 REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py",
                   "show_your_proof.py", "meta_audit_on_stop.py", "memory_hygiene_guard.py",
-                  "fast_test_on_stop.py")
+                  "fast_test_on_stop.py", "plan_defer_guard.py")
 
 
 def _cmd(script: str) -> str:
@@ -74,6 +76,12 @@ def desired_groups() -> dict:
             "hooks": [{"type": "command", "command": _cmd("stop_dispatcher.py"), "timeout": 300}],
             "id": ID_PREFIX + "stop-dispatcher",
             "description": "Run show-your-proof / meta-audit / memory-hygiene / fast-test in one process.",
+        },
+        "PostToolUse": {
+            "matcher": "Edit|Write|MultiEdit",
+            "hooks": [{"type": "command", "command": _cmd("plan_defer_guard.py")}],
+            "id": ID_PREFIX + "plan-defer-guard",
+            "description": "On plan/roadmap edits, flag optional-forever language (park/on-demand/...).",
         },
     }
 
@@ -147,25 +155,30 @@ def write_settings(settings: dict) -> None:
 
 
 def install_skill(dry_run: bool) -> None:
-    if not os.path.isdir(SKILL_SRC):
-        print(f"  ! skill source missing ({SKILL_SRC}); skipping")
-        return
-    if dry_run:
-        print(f"  would copy skill -> {SKILL_DEST}")
-        return
-    os.makedirs(SKILL_DEST, exist_ok=True)
-    shutil.copy2(os.path.join(SKILL_SRC, "SKILL.md"), os.path.join(SKILL_DEST, "SKILL.md"))
-    print(f"  copied skill -> {SKILL_DEST}")
+    for name in SKILL_NAMES:
+        src = os.path.join(SKILLS_DIR, name)
+        dest = os.path.join(SKILLS_DEST_DIR, name)
+        if not os.path.isdir(src):
+            print(f"  ! skill source missing ({src}); skipping")
+            continue
+        if dry_run:
+            print(f"  would copy skill -> {dest}")
+            continue
+        os.makedirs(dest, exist_ok=True)
+        shutil.copy2(os.path.join(src, "SKILL.md"), os.path.join(dest, "SKILL.md"))
+        print(f"  copied skill -> {dest}")
 
 
 def remove_skill(dry_run: bool) -> None:
-    if not os.path.isdir(SKILL_DEST):
-        return
-    if dry_run:
-        print(f"  would remove skill <- {SKILL_DEST}")
-        return
-    shutil.rmtree(SKILL_DEST, ignore_errors=True)
-    print(f"  removed skill <- {SKILL_DEST}")
+    for name in SKILL_NAMES:
+        dest = os.path.join(SKILLS_DEST_DIR, name)
+        if not os.path.isdir(dest):
+            continue
+        if dry_run:
+            print(f"  would remove skill <- {dest}")
+            continue
+        shutil.rmtree(dest, ignore_errors=True)
+        print(f"  removed skill <- {dest}")
 
 
 def resolve_events(only: str, without: str) -> set:
