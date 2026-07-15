@@ -62,11 +62,25 @@ _EXEMPT_RE = re.compile(
 _PLAN_GLOBS = ("*plan*.md", "*roadmap*.md")
 
 
+# A marker preceded by a negation within this many chars is the plan ASSERTING completeness
+# ("NOT on-demand", "never on demand") - honest phrasing, not an optional-forever item. Mirrors
+# show_your_proof's negation window so the guard rewards, not punishes, "NOT deferred".
+_NEGATION_TOKENS = ("not ", "n't ", "never ", "without ")
+_NEG_WINDOW = 16
+
+
+def _negated(line: str, start: int) -> bool:
+    """True if a negation token sits just before the marker match at `start`. Pure."""
+    window = line[max(0, start - _NEG_WINDOW):start].lower()
+    return any(tok in window for tok in _NEGATION_TOKENS)
+
+
 def is_soft_defer_line(line: str) -> bool:
-    """True iff the line carries an optional-forever phrase AND is not an exempt/recorded decision."""
-    if not _MARKER_RE.search(line):
+    """True iff the line carries a NON-negated optional-forever phrase AND is not an
+    exempt/recorded decision. A marker that is negated ("NOT on-demand") does not count."""
+    if _EXEMPT_RE.search(line):
         return False
-    return not _EXEMPT_RE.search(line)
+    return any(not _negated(line, m.start()) for m in _MARKER_RE.finditer(line))
 
 
 def is_plan_file(path: str) -> bool:
@@ -155,6 +169,8 @@ def _selftest_line_cases() -> list:
         ("| 9.4 | was parked; now scheduled 8.11", False),   # reclassified -> exempt
         ("| 9.3 | FINALIZED justified exclusion: not in corpus", False),
         ("| 9.2 | NO 'park' remains (completeness mandate)", False),
+        ("| 9.15 | SCHEDULED as a real build item, NOT on-demand; ships next", False),  # negated
+        ("| 9.12 | ships eagerly, never on demand", False),   # negated -> exempt
         ("| 9.1 | PARKED: uppercase is meta_audit's job, not ours", False),
         ("| 9.0 | ordinary roadmap prose with no marker", False),
     ]
