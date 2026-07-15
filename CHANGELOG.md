@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.1.1] - 2026-07-15
+
+### Fixed
+- CI integration test (`install -> fire -> uninstall`): the `A2` scenario hard-coded "three unbluff
+  groups" and only checked the `meta-review` skill, so it went red after v1.1 correctly added a 4th
+  group (`plan_defer_guard` on PostToolUse) and a 2nd skill (`source-coverage`). The shipped hook,
+  skill, and installer were all correct - only the test's own expectation was stale. Updated the group
+  count, added coverage for the `source-coverage` skill, and added a scenario that fires
+  `plan_defer_guard` end to end. All 21 integration scenarios now pass on Linux/macOS/Windows.
+
 ## [1.1.0] - 2026-07-15
 
 Closes a real blind spot found in the field: a plan can claim "everything is covered" while
