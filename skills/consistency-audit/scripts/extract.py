@@ -304,11 +304,18 @@ def find_table_captions(text: str) -> Dict[str, Tuple[int, str]]:
     return _captions(text, _TBL_CAPTION_RE)
 
 
+def table_structure_lines(text: str) -> List[int]:
+    """1-based line numbers where a RENDERED table (markdown/html/latex) begins."""
+    lines = set()
+    for regex in (_MD_TABLE_SEP_RE, _HTML_TABLE_RE, _TEX_TABLE_RE):
+        for m in regex.finditer(text):
+            lines.add(_line_of(text, m.start()))
+    return sorted(lines)
+
+
 def count_table_structures(text: str) -> int:
     """Number of RENDERED tables (markdown/html/latex) present in the text."""
-    return (len(_MD_TABLE_SEP_RE.findall(text))
-            + len(_HTML_TABLE_RE.findall(text))
-            + len(_TEX_TABLE_RE.findall(text)))
+    return len(table_structure_lines(text))
 
 
 def find_placeholders(text: str, cap: int = 40) -> List[Tuple[int, str]]:
@@ -326,16 +333,18 @@ def find_placeholders(text: str, cap: int = 40) -> List[Tuple[int, str]]:
     return out
 
 
-def find_figure_embeds(path: str, text: str) -> List[str]:
-    """Embedded-image identifiers: md/html/tex paths, or docx media members."""
+def find_figure_embeds(path: str, text: str) -> List[Tuple[str, int]]:
+    """Embedded images as (identifier, line): md/html/tex paths carry their real line;
+    docx media members carry line 0 (they have no text position)."""
     if os.path.splitext(path)[1].lower() == ".docx":
         try:
             with zipfile.ZipFile(path) as zf:
-                return sorted(n for n in zf.namelist()
-                              if n.startswith("word/media/"))
+                return [(n, 0) for n in sorted(zf.namelist())
+                        if n.startswith("word/media/")]
         except (OSError, zipfile.BadZipFile):
             return []
-    embeds: List[str] = []
+    embeds: List[Tuple[str, int]] = []
     for regex in (_MD_IMG_RE, _HTML_IMG_RE, _TEX_IMG_RE):
-        embeds.extend(m.group(1) for m in regex.finditer(text))
+        for m in regex.finditer(text):
+            embeds.append((m.group(1), _line_of(text, m.start())))
     return embeds

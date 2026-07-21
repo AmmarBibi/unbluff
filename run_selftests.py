@@ -32,6 +32,16 @@ def main():
         print(f"{name}: {'OK' if rc == 0 else 'FAIL'}")
         if rc != 0:
             failed.append(name)
+    # Also gate the consistency-audit skill's mechanical extractor: its scripts ship in the
+    # repo and expose a --selftest, but they live outside hooks/ so the glob above misses them.
+    skill_audit = os.path.join(HERE, "skills", "consistency-audit", "scripts", "audit.py")
+    if os.path.exists(skill_audit):
+        ran += 1
+        rc = subprocess.run([sys.executable, skill_audit, "--selftest"],
+                            stdin=subprocess.DEVNULL).returncode
+        print(f"consistency-audit-skill: {'OK' if rc == 0 else 'FAIL'}")
+        if rc != 0:
+            failed.append("consistency-audit-skill")
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
         return 1

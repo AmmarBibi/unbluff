@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Bash
 
 A deliverable drifts from its data silently. Prose is edited, a CSV is regenerated,
 a figure is swapped - and a cited number, a figure reference, or a claim quietly
-stops matching the source of truth. This skill catches four drift classes, splitting
+stops matching the source of truth. This skill catches six drift classes, splitting
 the work the way it must be split: a **script** does the deterministic extraction and
 tolerance cross-check; **Claude** does the judgment a script cannot.
 

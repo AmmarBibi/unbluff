@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.2.1] - 2026-07-21
+
+Fixes from a three-lens self-audit (meta-review / completeness / consistency) of the v1.2.0 release.
+
+### Fixed
+- **consistency-audit skill now regression-gated.** Its `scripts/audit.py --selftest` (which covers
+  all six drift classes) lives outside `hooks/`, so `run_selftests.py` and CI never ran it - the
+  flagship script could regress green. `run_selftests.py` now also runs it (11 selftests total).
+- **Drift class (F) is per-table, not all-or-nothing.** It was gated on *total* tables == 0, so a
+  captioned-but-empty "Table N" next to any real table was missed. Now a promised table with no
+  rendered body near its caption is flagged even when other tables exist.
+- **Drift class (B) now detects bare embeds.** `find_figure_embeds` was defined but never called
+  (`uncaptioned_embeds` was hardcoded `[]`), so an embedded image with no caption and no "Figure N"
+  reference was missed. It is now wired in and reported.
+- **numbers-match fire marker is keyed by (session, report path).** Previously one report firing
+  suppressed a *different* report's fabricated number for the rest of the session. The source index
+  is also cached by source mtimes so a clean report is not re-walked on every edit.
+- **Hook/skill `SOURCE_EXTS` drift resolved + guarded.** The hook lacked `.log`; aligned with the
+  skill and added an `H3` integration scenario asserting parity so they cannot silently diverge.
+- **Docs reconciled with the code:** README verification block `22/22 -> 24/24` scenarios (and
+  `10 -> 11` selftests); `SKILL.md` + `audit.py` intro "four drift classes" -> "six"; `install.py`
+  docstring/help "10 pieces" / "the meta-review skill" (singular) / "four sub-hooks" generalized.
+
 ## [1.2.0] - 2026-07-21
 
 Extends the anti-bluffing theme from claims to numbers: a report can confidently cite a value that
