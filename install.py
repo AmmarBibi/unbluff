@@ -32,7 +32,7 @@ import time
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
 SKILLS_DIR = os.path.join(REPO_ROOT, "skills")
-SKILL_NAMES = ("meta-review", "source-coverage")
+SKILL_NAMES = ("meta-review", "source-coverage", "consistency-audit")
 
 CLAUDE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
 SETTINGS_PATH = os.path.join(CLAUDE_DIR, "settings.json")
@@ -166,8 +166,9 @@ def install_skill(dry_run: bool) -> None:
         if dry_run:
             print(f"  would copy skill -> {dest}")
             continue
-        os.makedirs(dest, exist_ok=True)
-        shutil.copy2(os.path.join(src, "SKILL.md"), os.path.join(dest, "SKILL.md"))
+        # Copy the whole skill dir (SKILL.md + any bundled scripts/), not just SKILL.md.
+        shutil.copytree(src, dest, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         print(f"  copied skill -> {dest}")
 
 
