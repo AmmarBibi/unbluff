@@ -318,6 +318,30 @@ def count_table_structures(text: str) -> int:
     return len(table_structure_lines(text))
 
 
+def table_structure_ranges(text: str) -> List[Tuple[int, int]]:
+    """(start_line, end_line) covering each rendered table's full extent, so a caption
+    directly above OR below a table (even a tall one) is recognised as having a body.
+
+    Markdown blocks are expanded around their separator row across contiguous pipe-rows;
+    HTML/LaTeX tables use their opening line (their caption sits inside the block anyway).
+    """
+    doc_lines = text.splitlines()
+    ranges: List[Tuple[int, int]] = []
+    for m in _MD_TABLE_SEP_RE.finditer(text):
+        i = _line_of(text, m.start()) - 1  # 0-based index of the separator row
+        start = end = i
+        while start - 1 >= 0 and "|" in doc_lines[start - 1] and doc_lines[start - 1].strip():
+            start -= 1
+        while end + 1 < len(doc_lines) and "|" in doc_lines[end + 1] and doc_lines[end + 1].strip():
+            end += 1
+        ranges.append((start + 1, end + 1))
+    for regex in (_HTML_TABLE_RE, _TEX_TABLE_RE):
+        for m in regex.finditer(text):
+            ln = _line_of(text, m.start())
+            ranges.append((ln, ln))
+    return ranges
+
+
 def find_placeholders(text: str, cap: int = 40) -> List[Tuple[int, str]]:
     """Unfilled placeholders left in the deliverable as (line, matched text).
 

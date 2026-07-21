@@ -139,7 +139,7 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] D1 show-your-proof fires (rc 2 + nudge)
 [PASS] E1 fast-test fires on failing tests (rc 2)
 [PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
-[PASS] A7 consistency-audit skill installed with scripts
+[PASS] A7 consistency-audit skill installed with bundled scripts
 [PASS] H3 hook/skill SOURCE_EXTS parity   [PASS] G2 all unbluff entries removed
 ==== 24/24 scenarios passed ====
 ```

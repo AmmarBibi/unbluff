@@ -263,7 +263,10 @@ def _cached_index(sources: "list[str]", root: str, state_dir: str) -> "list[floa
             p = entry if os.path.isabs(entry) else os.path.join(root, entry)
             for f in ([p] if os.path.isfile(p) else _walk_source_files(p)):
                 try:
-                    parts.append("%s:%d" % (f, int(os.path.getmtime(f))))
+                    st = os.stat(f)
+                    # nanosecond mtime + size: a sub-second content change (same whole
+                    # second) still invalidates the cache, closing a false-negative window.
+                    parts.append("%s:%d:%d" % (f, st.st_mtime_ns, st.st_size))
                 except OSError:
                     pass
         key = hashlib.sha1("|".join(sorted(parts)).encode("utf-8", "replace")).hexdigest()[:16]
