@@ -413,9 +413,17 @@ def _selftest_pipeline() -> "list[str]":
             fails.append("should-fire wrong: code=%s msg=%r" % (code, msg))
         if "94.8" in msg or "8.65" in msg:
             fails.append("matched numbers wrongly flagged: %r" % msg)
-        code2, msg2 = run(payload, state)  # once per session
+        code2, msg2 = run(payload, state)  # same report, same session -> once per report
         if (code2, msg2) != (0, ""):
-            fails.append("second fire same session: %s %r" % (code2, msg2))
+            fails.append("second fire same report/session: %s %r" % (code2, msg2))
+        # a DIFFERENT report in the same session must still be checked (marker is per-path)
+        report_b = os.path.join(proj, "SECOND_REPORT.md")
+        with open(report_b, "w", encoding="utf-8") as f:
+            f.write("Another figure: peak 777.7 MPa, unsourced.\n")
+        payload_b = {"session_id": "nm-fire", "cwd": proj, "tool_input": {"file_path": report_b}}
+        code_b, msg_b = run(payload_b, state)
+        if code_b != 2 or "777.7" not in msg_b:
+            fails.append("second distinct report should still be checked: %s %r" % (code_b, msg_b))
     # no config -> silent (opt-in)
     with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as state:
         report = os.path.join(proj, "REPORT.md")
