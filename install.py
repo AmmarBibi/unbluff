@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Installer for unbluff.
 
-Wires the suite into ~/.claude/settings.json and installs the meta-review skill. Safe by design:
-it backs up settings.json before writing, writes atomically (temp file + os.replace, so the live
-file is never left half-written), is idempotent (re-running replaces our entries, never duplicates
-them), refuses to clobber a settings.json it cannot parse, and supports --dry-run and --uninstall.
+Wires the suite into ~/.claude/settings.json and installs its skills (meta-review, source-coverage,
+consistency-audit). Safe by design: it backs up settings.json before writing, writes atomically
+(temp file + os.replace, so the live file is never left half-written), is idempotent (re-running
+replaces our entries, never duplicates them), refuses to clobber a settings.json it cannot parse,
+and supports --dry-run and --uninstall.
 
 The hooks are referenced IN PLACE from this repo, so `git pull` updates them with no re-install.
 
 Usage:
-    python install.py                       # install all 10 pieces (4 settings.json entries)
+    python install.py                       # install all pieces (4 settings.json entries + skills)
     python install.py --only show_your_proof   # (see --help) install a subset
     python install.py --without rate_prompt    # install everything except one
     python install.py --dry-run             # show exactly what would change; write nothing
     python install.py --uninstall           # remove this suite's entries (backs up first)
-    python install.py --no-skill            # skip copying the meta-review skill
+    python install.py --no-skill            # skip copying the skills
 
 Stdlib-only, cross-platform (Windows / macOS / Linux), Python 3.8+.
 """
@@ -204,7 +205,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Install unbluff into ~/.claude")
     ap.add_argument("--dry-run", action="store_true", help="show changes without writing")
     ap.add_argument("--uninstall", action="store_true", help="remove this suite's entries")
-    ap.add_argument("--no-skill", action="store_true", help="do not install/remove the meta-review skill")
+    ap.add_argument("--no-skill", action="store_true", help="do not install/remove the skills")
     ap.add_argument("--only", default="", metavar="a,b",
                     help="install only these groups: " + ", ".join(GROUP_EVENTS))
     ap.add_argument("--without", default="", metavar="a,b",
@@ -230,7 +231,7 @@ def main() -> int:
         missing = [s for s in REQUIRED_HOOKS if not os.path.exists(os.path.join(HOOKS_DIR, s))]
         if missing:
             sys.exit(f"ERROR: missing hook files in {HOOKS_DIR}: {missing}\n"
-                     f"(Partial checkout? The Stop dispatcher needs all four sub-hooks.)")
+                     f"(Partial checkout? The Stop and PostToolUse dispatchers import their sub-hooks.)")
 
     settings = load_settings()
     updated = apply_changes(json.loads(json.dumps(settings)), install, events)  # work on a copy
