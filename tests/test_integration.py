@@ -60,6 +60,10 @@ def main():
                os.path.isfile(os.path.join(home, ".claude", "skills", "meta-review", "SKILL.md")))
         record("A6 source-coverage skill installed",
                os.path.isfile(os.path.join(home, ".claude", "skills", "source-coverage", "SKILL.md")))
+        record("A7 consistency-audit skill installed with bundled scripts",
+               os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit", "SKILL.md"))
+               and os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit",
+                                               "scripts", "audit.py")))
 
         ups = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         ss = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]

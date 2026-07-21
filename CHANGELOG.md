@@ -22,14 +22,22 @@ no longer appears anywhere in the data it was computed from. `show_your_proof` c
   and `numbers_match_on_write` in one process per edit (one spawn, not two), with a shared
   fire-ledger line tagged `event=PostToolUse`. Each sub-hook stays independently runnable and
   `--selftest`-able; the installer now points the single PostToolUse entry at the dispatcher.
-- `run_selftests.py` + CI now cover both new modules; the integration test fires `numbers-match`
-  end to end (H2) and confirms `plan_defer_guard` still fires through the new dispatcher (H1).
+- **`consistency-audit`** skill - the reasoning half that pairs with `numbers-match`, the way
+  `source-coverage` pairs with `plan_defer_guard`. Ships a bundled, format-agnostic extractor
+  (docx/pdf/tex/md) that surfaces four drift classes - numbers with no source match, figures
+  embedded but never referenced, cross-references with no matching caption, and claims whose
+  supporting number is absent - which the model then adjudicates against the data. The installer
+  now copies a skill's whole directory (SKILL.md + any bundled `scripts/`), not just SKILL.md.
+- `run_selftests.py` + CI now cover both new hook modules; the integration test fires `numbers-match`
+  end to end (H2), confirms `plan_defer_guard` still fires through the new dispatcher (H1), and
+  checks the `consistency-audit` skill installs with its scripts (A7).
 
 ### Design
-- The mechanical/reasoning split holds: this hook surfaces the "number with no source" *state*;
-  deciding whether an unmatched number is drift, a derived quantity, or definitional is a reasoning
-  pass for the model/user (a bundled `consistency-audit` skill adds figure/claim/cross-section
-  checks a hook cannot do). A grep can only confirm a number is missing, never that it is wrong.
+- The mechanical/reasoning split holds: the `numbers-match` hook surfaces the "number with no
+  source" *state*; the `consistency-audit` skill carries the judgment a hook cannot - is an
+  unmatched number drift, a derivation, or a definition, is a figure orphaned, is a claim actually
+  supported and consistent across sections. A grep can only confirm a number is missing, never
+  that it is wrong.
 
 ## [1.1.1] - 2026-07-15
 

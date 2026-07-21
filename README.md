@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all twelve pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all thirteen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -99,6 +99,9 @@ is a mechanical check, not a judge.
 
 It shares one **PostToolUse dispatcher** (`post_tooluse_dispatcher`) with `plan_defer_guard`, the same one-process design as `stop_dispatcher`: two PostToolUse hooks run in a single spawn per edit rather than two, and the shared fire-ledger records which fired.
 
+### consistency-audit · skill
+The reasoning half that pairs with `numbers-match`, the way `source-coverage` pairs with `plan_defer_guard`. The hook can mechanically flag "this number appears in no source file"; it cannot decide whether an unmatched number is drift, a legitimate derivation, or a definition - nor can it check figures, cross-references, and whether a *claim* is actually supported and consistent across sections. This skill does. It runs a bundled, format-agnostic extractor (docx/pdf/tex/md) that surfaces four drift classes - numbers with no source match, figures embedded but never referenced, cross-references with no matching caption, and claims whose supporting number is absent - then you adjudicate each against the data. You invoke it on purpose - `/consistency-audit`, or on cues like "do the numbers still match the data? / is anything stale or fabricated?".
+
 ### memory_hygiene_guard · Stop
 Flags rot in Claude Code's auto-memory (index bloat, stale commit hashes, evolving state). The idea: memory should hold durable pointers and facts, not fast-changing state - next steps, test counts, live commit hashes - which belongs in your plan. Opinionated and optional; if you do not use auto-memory, it stays silent.
 
@@ -158,7 +161,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the twelve pieces.
+It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the thirteen pieces.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 
