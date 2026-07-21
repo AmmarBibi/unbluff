@@ -66,7 +66,9 @@ def analyse(deliverable: str, source_dirs, rel_tol: float, abs_tol: float):
             })
 
     figures = _figure_findings(text)
+    tables = _table_findings(text)
     claims = _claim_candidates(text, {u["value"] for u in unmatched})
+    placeholders = [{"line": ln, "text": t} for ln, t in extract.find_placeholders(text)]
 
     return {
         "deliverable": name,
@@ -78,13 +80,17 @@ def analyse(deliverable: str, source_dirs, rel_tol: float, abs_tol: float):
         "orphan_figures": figures["orphans"],
         "dangling_figure_refs": figures["dangling"],
         "uncaptioned_embeds": figures["uncaptioned_embeds"],
+        "placeholders": placeholders,
+        "table_structures": tables["structures"],
+        "dangling_table_refs": tables["dangling"],
+        "tables_referenced_not_rendered": tables["missing"],
         "claim_candidates": claims,
         "tolerance": {"rel": rel_tol, "abs": abs_tol},
     }
 
 
 def _figure_findings(text: str):
-    captions = extract.find_captions(text)
+    captions = extract.find_figure_captions(text)
     refs = extract.find_figure_refs(text)
     ref_lines = {}
     for num, line in refs:
@@ -99,6 +105,35 @@ def _figure_findings(text: str):
         if num not in captions:
             dangling.append({"figure": num, "lines": sorted(set(lines))})
     return {"orphans": orphans, "dangling": dangling, "uncaptioned_embeds": []}
+
+
+def _table_findings(text: str):
+    """Table cross-refs with no caption, and 'Table N' cited/captioned but no table rendered.
+
+    The complement of the figure checks, plus the placeholder-table case: a report can
+    reference or caption 'Table N' while the actual table body was never filled in.
+    """
+    structures = extract.count_table_structures(text)
+    captions = extract.find_table_captions(text)
+    refs = extract.find_table_refs(text)
+    ref_lines = {}
+    for num, line in refs:
+        ref_lines.setdefault(num, []).append(line)
+    dangling = []
+    for num, lines in sorted(ref_lines.items()):
+        cap_line = captions[num][0] if num in captions else None
+        other = [ln for ln in lines if ln != cap_line]
+        if num not in captions and other:
+            dangling.append({"table": num, "lines": sorted(set(other))})
+    # Tables are referenced or captioned, but the deliverable renders no table at all
+    # -> the bodies are missing/placeholder. (The prose promises a table; none exists.)
+    missing = None
+    if structures == 0 and (captions or ref_lines):
+        promised = sorted(set(list(captions) + list(ref_lines)))
+        missing = {"promised": promised,
+                   "captions": sorted(captions),
+                   "referenced": sorted(ref_lines)}
+    return {"structures": structures, "dangling": dangling, "missing": missing}
 
 
 def _claim_candidates(text: str, unmatched_values, cap: int = 15):
@@ -170,6 +205,28 @@ def render_text(r: dict) -> str:
     for c in r["claim_candidates"]:
         lines.append("  L%-5s (%s) %s" % (c["line"], c["why"], c["text"]))
     if not r["claim_candidates"]:
+        lines.append("  (none)")
+    lines.append("")
+
+    lines.append("[E] UNFILLED PLACEHOLDERS LEFT IN THE DELIVERABLE  -> %d"
+                 % len(r["placeholders"]))
+    for p in r["placeholders"]:
+        lines.append("  L%-5s %s" % (p["line"], p["text"]))
+    if not r["placeholders"]:
+        lines.append("  (none)")
+    lines.append("")
+
+    lines.append("[F] TABLES REFERENCED/CAPTIONED BUT NOT RENDERED  (%d table(s) found)"
+                 % r["table_structures"])
+    miss = r["tables_referenced_not_rendered"]
+    if miss:
+        lines.append("  Table(s) %s promised in prose but NO table is rendered in the "
+                     "deliverable - likely placeholder/unfilled."
+                     % ", ".join(miss["promised"]))
+    for d in r["dangling_table_refs"]:
+        lines.append("  'Table %s' referenced at L%s but no such caption"
+                     % (d["table"], ",".join(map(str, d["lines"]))))
+    if not miss and not r["dangling_table_refs"]:
         lines.append("  (none)")
     lines.append("")
     lines.append("NOTE: every item above is a CANDIDATE. A number may be legitimately "
@@ -255,6 +312,37 @@ def selftest() -> int:
             fails.append("Figure 4 should be a dangling ref (no caption)")
         if not r["claim_candidates"]:
             fails.append("'highest observed' claim should be a candidate")
+
+    # 4) placeholders + table structure (the added mechanical checks)
+    ph = [t for _, t in extract.find_placeholders(
+        "Overshoot [TODO] and see Table 2 [insert value]. Cite [12] stays. [N/A] stays. "
+        "[Table of contents](#toc) is a link.")]
+    if "[TODO]" not in ph or not any("insert" in t.lower() for t in ph):
+        fails.append("placeholders missed: %r" % ph)
+    if any(t == "[12]" for t in ph) or any("N/A" in t for t in ph) or any("toc" in t.lower() for t in ph):
+        fails.append("citation / N-A / md-link wrongly flagged: %r" % ph)
+    if extract.find_figure_captions("Table 1: results\n"):
+        fails.append("table caption leaked into figure captions (collision)")
+    if extract.count_table_structures("| a | b |\n|---|---|\n| 1 | 2 |\n") != 1:
+        fails.append("markdown table not counted")
+
+    # 5) end-to-end: Table 3 promised but no table rendered (placeholder), Table 9 dangling
+    with tempfile.TemporaryDirectory() as d:
+        csv = os.path.join(d, "data.csv")
+        with open(csv, "w", encoding="utf-8") as fh:
+            fh.write("v\n1.0\n")
+        rep = os.path.join(d, "report.md")
+        with open(rep, "w", encoding="utf-8") as fh:
+            fh.write("Results are summarised in Table 3.\n"
+                     "Table 3: [TABLE TO BE INSERTED]\n"
+                     "See also Table 9 for details.\n")
+        r = analyse(rep, [csv], 0.01, 1e-9)
+        if not r["placeholders"]:
+            fails.append("placeholder table not flagged")
+        if not r["tables_referenced_not_rendered"]:
+            fails.append("Table 3 promised but not rendered should be flagged")
+        if not any(dd["table"] == "9" for dd in r["dangling_table_refs"]):
+            fails.append("Table 9 should be a dangling table ref")
 
     for f in fails:
         print("SELFTEST FAIL:", f)

@@ -276,6 +276,8 @@ CONSISTENCY_AUDIT = [
     ("  [B] figure never referenced   1   Figure 7 embedded, never cited", DEFAULT),
     ("  [C] dangling cross-reference  1   'Figure 4' has no such caption", DEFAULT),
     ("  [D] claim to verify           2   'lowest overshoot' vs the sweep", DEFAULT),
+    ("  [E] unfilled placeholder      2   [TABLE], [TODO] left in the prose", AMBER),
+    ("  [F] table promised, none rendered  'Table 3' cited but no table", DEFAULT),
     ("The hook flags a number with no source; the skill judges drift vs derived vs definitional.", DIM),
 ]
 
