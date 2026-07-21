@@ -28,7 +28,8 @@ import sys
 _HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 _LOCAL_HOOKS = ("rate_prompt.py", "fast_test_on_stop.py", "show_your_proof.py",
                 "meta_audit_on_stop.py", "memory_hygiene_guard.py", "stop_dispatcher.py",
-                "hook_health_check.py")
+                "hook_health_check.py", "plan_defer_guard.py", "post_tooluse_dispatcher.py",
+                "numbers_match_on_write.py")
 _STATE_DIR = os.environ.get("UNBLUFF_STATE_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "hooks", "state")
 _WEEKLY_MARKER = "hook-health-weekly-selftest.txt"
