@@ -236,17 +236,43 @@ def find_numbers(text: str, context_chars: int = 60) -> List[NumberCite]:
 
 
 # --------------------------------------------------------------------------- #
-# Figure references, embeds and captions
+# Figure / table references, embeds, captions - and unfilled placeholders
 # --------------------------------------------------------------------------- #
 
 _FIG_REF_RE = re.compile(r"(?:figure|fig)\.?\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
-_CAPTION_RE = re.compile(
-    r"^\s*(?:figure|fig|table|tbl)\.?\s*([0-9]+(?:\.[0-9]+)?)\s*[:.\-–]\s*(.+?)\s*$",
-    re.IGNORECASE,
-)
+_TBL_REF_RE = re.compile(r"(?:table|tbl)\.?\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+_FIG_CAPTION_RE = re.compile(
+    r"^\s*(?:figure|fig)\.?\s*([0-9]+(?:\.[0-9]+)?)\s*[:.\-–]\s*(.+?)\s*$", re.IGNORECASE)
+_TBL_CAPTION_RE = re.compile(
+    r"^\s*(?:table|tbl)\.?\s*([0-9]+(?:\.[0-9]+)?)\s*[:.\-–]\s*(.+?)\s*$", re.IGNORECASE)
 _MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
 _HTML_IMG_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)", re.IGNORECASE)
 _TEX_IMG_RE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}")
+
+# A RENDERED table: a markdown separator row (|---|---|), an HTML <table>, or a
+# LaTeX tabular/table environment. Used to tell a real table from a placeholder.
+_MD_TABLE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$",
+                              re.MULTILINE)
+_HTML_TABLE_RE = re.compile(r"<table[\s>]", re.IGNORECASE)
+_TEX_TABLE_RE = re.compile(r"\\begin\{(?:tabular|longtable|table)\}", re.IGNORECASE)
+
+# Unfilled placeholders left in a deliverable: bracketed placeholder vocabulary,
+# empty / ellipsis brackets, angle-bracket placeholders, and the classic bare
+# markers (TKTK, XXXX, TBD). Deliberately NOT matching [12]-style citations or
+# [N/A] values.
+_PLACEHOLDER_VOCAB = (
+    r"table|tbl|figure|fig|graph|chart|plot|todo|tbd|fixme|placeholder|insert|"
+    r"fill[\s-]?in|to[\s-]?do|to[\s-]?come|pending|value|values|data|number|"
+    r"result|results|citation|cite|ref|xx+|tk"
+)
+_PLACEHOLDER_RE = re.compile(
+    r"\[\s*\]"                                                 # empty [ ]
+    r"|\[\s*\.\.\.\s*\]"                                       # [ ... ]
+    r"|\[[^\]]*\b(?:" + _PLACEHOLDER_VOCAB + r")\b[^\]]*\]"    # [ ... TABLE ... ]
+    r"|<[^>]*\b(?:placeholder|insert|todo|tbd)\b[^>]*>"        # <placeholder ...>
+    r"|\bTKTK\b|\bXXXX+\b|\bTBD\b",                            # bare classic markers
+    re.IGNORECASE,
+)
 
 
 def find_figure_refs(text: str) -> List[Tuple[str, int]]:
@@ -254,14 +280,50 @@ def find_figure_refs(text: str) -> List[Tuple[str, int]]:
     return [(m.group(1), _line_of(text, m.start())) for m in _FIG_REF_RE.finditer(text)]
 
 
-def find_captions(text: str) -> Dict[str, Tuple[int, str]]:
-    """Map 'Figure/Table N' -> (line, caption text) for lines that look like captions."""
-    captions: Dict[str, Tuple[int, str]] = {}
+def find_table_refs(text: str) -> List[Tuple[str, int]]:
+    """All in-text 'Table N' mentions as (number, line)."""
+    return [(m.group(1), _line_of(text, m.start())) for m in _TBL_REF_RE.finditer(text)]
+
+
+def _captions(text: str, regex) -> Dict[str, Tuple[int, str]]:
+    caps: Dict[str, Tuple[int, str]] = {}
     for lineno, line in enumerate(text.splitlines(), 1):
-        m = _CAPTION_RE.match(line)
+        m = regex.match(line)
         if m:
-            captions.setdefault(m.group(1), (lineno, m.group(2).strip()))
-    return captions
+            caps.setdefault(m.group(1), (lineno, m.group(2).strip()))
+    return caps
+
+
+def find_figure_captions(text: str) -> Dict[str, Tuple[int, str]]:
+    """Map 'Figure N' -> (line, caption text) for figure caption lines."""
+    return _captions(text, _FIG_CAPTION_RE)
+
+
+def find_table_captions(text: str) -> Dict[str, Tuple[int, str]]:
+    """Map 'Table N' -> (line, caption text) for table caption lines."""
+    return _captions(text, _TBL_CAPTION_RE)
+
+
+def count_table_structures(text: str) -> int:
+    """Number of RENDERED tables (markdown/html/latex) present in the text."""
+    return (len(_MD_TABLE_SEP_RE.findall(text))
+            + len(_HTML_TABLE_RE.findall(text))
+            + len(_TEX_TABLE_RE.findall(text)))
+
+
+def find_placeholders(text: str, cap: int = 40) -> List[Tuple[int, str]]:
+    """Unfilled placeholders left in the deliverable as (line, matched text).
+
+    Skips markdown links `[label](url)` - the label is not a placeholder.
+    """
+    out: List[Tuple[int, str]] = []
+    for m in _PLACEHOLDER_RE.finditer(text):
+        if m.group(0).startswith("[") and m.end() < len(text) and text[m.end()] == "(":
+            continue  # [label](url) markdown link, not a placeholder
+        out.append((_line_of(text, m.start()), m.group(0).strip()))
+        if len(out) >= cap:
+            break
+    return out
 
 
 def find_figure_embeds(path: str, text: str) -> List[str]:

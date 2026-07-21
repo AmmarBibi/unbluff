@@ -24,10 +24,12 @@ no longer appears anywhere in the data it was computed from. `show_your_proof` c
   `--selftest`-able; the installer now points the single PostToolUse entry at the dispatcher.
 - **`consistency-audit`** skill - the reasoning half that pairs with `numbers-match`, the way
   `source-coverage` pairs with `plan_defer_guard`. Ships a bundled, format-agnostic extractor
-  (docx/pdf/tex/md) that surfaces four drift classes - numbers with no source match, figures
-  embedded but never referenced, cross-references with no matching caption, and claims whose
-  supporting number is absent - which the model then adjudicates against the data. The installer
-  now copies a skill's whole directory (SKILL.md + any bundled `scripts/`), not just SKILL.md.
+  (docx/pdf/tex/md) that surfaces six drift classes - numbers with no source match, figures
+  embedded but never referenced, cross-references with no matching caption, claims whose
+  supporting number is absent, unfilled bracketed placeholders (`[TABLE]`/`[TODO]`/`[insert ...]`),
+  and tables the prose promises ("Table N") but never renders - which the model then adjudicates
+  against the data. The installer now copies a skill's whole directory (SKILL.md + any bundled
+  `scripts/`), not just SKILL.md.
 - `run_selftests.py` + CI now cover both new hook modules; the integration test fires `numbers-match`
   end to end (H2), confirms `plan_defer_guard` still fires through the new dispatcher (H1), and
   checks the `consistency-audit` skill installs with its scripts (A7).
