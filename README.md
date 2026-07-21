@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all ten pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all twelve pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -84,6 +84,21 @@ Catches the class `meta_audit_on_stop` deliberately ignores. When you edit a pla
 
 ![plan_defer_guard flagging optional-forever language on a plan edit](docs/plan-defer-guard.gif)
 
+### numbers-match · PostToolUse
+The numeric analogue of `show_your_proof`: where that catches a success *claim* made with no tool run, this catches a cited *number* made with no source. When a report/output file is written, it extracts the measurement-shaped numbers in the prose and checks each against the values in a configured source-data folder - warning for any cited number with no matching source value (within tolerance). It is **opt-in**: it does nothing unless the project provides a `.claude/number-sources.txt` naming the source dir(s) (see [Per-project number sources](#per-project-number-sources)). To stay quiet it checks only text deliverables (`.md`/`.txt`/`.tex`) - binary docx/pdf are the reasoning skill's job - and skips cross-references (`Figure 3`, `Table 2`, `[12]`), years, and (by default) bare integers, so only values that actually drift get flagged. Fires once per session; fail-silent, stdlib-only, `--selftest`. Its reasoning half - is an unmatched number drift, a derived quantity, or definitional? - belongs to you, the way `meta-review` pairs with `meta_audit`.
+
+The literal note it feeds back to Claude:
+
+```text
+[numbers-match] 1 cited number(s) in REPORT.md have no match in the source data (results):
+- REPORT.md:12: 512.4 MPa   (peak stress 512.4 MPa is the worst case observed)
+Verify each against the source-of-truth data (recompute/re-export) or correct the prose.
+Numbers that are derived, rounded beyond tolerance, or definitional are fine to keep - this
+is a mechanical check, not a judge.
+```
+
+It shares one **PostToolUse dispatcher** (`post_tooluse_dispatcher`) with `plan_defer_guard`, the same one-process design as `stop_dispatcher`: two PostToolUse hooks run in a single spawn per edit rather than two, and the shared fire-ledger records which fired.
+
 ### memory_hygiene_guard · Stop
 Flags rot in Claude Code's auto-memory (index bloat, stale commit hashes, evolving state). The idea: memory should hold durable pointers and facts, not fast-changing state - next steps, test counts, live commit hashes - which belongs in your plan. Opinionated and optional; if you do not use auto-memory, it stays silent.
 
@@ -107,7 +122,8 @@ Don't take the demos on faith - run it yourself (this is exactly what CI runs on
 $ python run_selftests.py
 rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop: OK
 memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
-all 7 selftests passed
+post_tooluse_dispatcher: OK  numbers_match_on_write: OK
+all 10 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -115,8 +131,9 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] C1 hook_health reports OK
 [PASS] D1 show-your-proof fires (rc 2 + nudge)
 [PASS] E1 fast-test fires on failing tests (rc 2)
+[PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
 [PASS] G2 all unbluff entries removed   [PASS] G3 preexisting hook still there
-==== 19/19 scenarios passed ====
+==== 22/22 scenarios passed ====
 ```
 
 ## Install details
@@ -141,7 +158,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the ten pieces.
+It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the twelve pieces.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 
@@ -176,6 +193,20 @@ timeout=120
 debounce=600
 pytest -x -q tests/unit
 ```
+
+## Per-project number sources
+
+`numbers-match` is opt-in: it stays silent until a project provides `.claude/number-sources.txt` naming the source-of-truth folder(s) its reports must agree with.
+
+```text
+# .claude/number-sources.txt
+sources = results, data              # dirs/files (relative to project root, or absolute) - required
+reports = *REPORT*.md, *results*.md  # optional basename globs; default report/result-ish names
+tol = 0.01                           # optional relative tolerance (default 1%, absorbs rounding)
+check_integers = false               # optional; default off (only decimals/%/sci/units are checked)
+```
+
+With no config it does nothing. When present, a write to a matching report file has its cited numbers checked against every numeric value under `sources`; any with no match within `tol` is surfaced once per session.
 
 ## Design principles
 

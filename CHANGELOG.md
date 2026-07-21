@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-07-21
+
+Extends the anti-bluffing theme from claims to numbers: a report can confidently cite a value that
+no longer appears anywhere in the data it was computed from. `show_your_proof` catches an unverified
+*claim*; this catches an unsourced *number*.
+
+### Added
+- **`numbers-match`** (PostToolUse: Edit|Write|MultiEdit) - when a report/output file is written,
+  extracts the measurement-shaped numbers in the prose and checks each against the numeric values in
+  a configured source-data folder, warning for any cited number with no match within tolerance.
+  Opt-in per project via `.claude/number-sources.txt` (names the `sources` dir(s), optional `reports`
+  globs / `tol` / `check_integers`); silent with no config. Checks only text deliverables
+  (`.md`/`.txt`/`.tex`); skips cross-references, years, and (by default) bare integers to stay
+  low-noise; relative tolerance (default 1%) absorbs normal rounding. Fires once per session;
+  fail-silent, stdlib-only, `--selftest`.
+- **`post_tooluse_dispatcher`** - a PostToolUse sibling of `stop_dispatcher`: runs `plan_defer_guard`
+  and `numbers_match_on_write` in one process per edit (one spawn, not two), with a shared
+  fire-ledger line tagged `event=PostToolUse`. Each sub-hook stays independently runnable and
+  `--selftest`-able; the installer now points the single PostToolUse entry at the dispatcher.
+- `run_selftests.py` + CI now cover both new modules; the integration test fires `numbers-match`
+  end to end (H2) and confirms `plan_defer_guard` still fires through the new dispatcher (H1).
+
+### Design
+- The mechanical/reasoning split holds: this hook surfaces the "number with no source" *state*;
+  deciding whether an unmatched number is drift, a derived quantity, or definitional is a reasoning
+  pass for the model/user (a bundled `consistency-audit` skill adds figure/claim/cross-section
+  checks a hook cannot do). A grep can only confirm a number is missing, never that it is wrong.
+
 ## [1.1.1] - 2026-07-15
 
 ### Fixed
