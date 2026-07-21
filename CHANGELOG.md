@@ -25,6 +25,15 @@ Fixes from a three-lens self-audit (meta-review / completeness / consistency) of
 - **Docs reconciled with the code:** README verification block `22/22 -> 24/24` scenarios (and
   `10 -> 11` selftests); `SKILL.md` + `audit.py` intro "four drift classes" -> "six"; `install.py`
   docstring/help "10 pieces" / "the meta-review skill" (singular) / "four sub-hooks" generalized.
+- **Follow-ups from an adversarial verification of the above:** drift class (F) now detects a
+  table's full rendered extent, so a caption placed *below* a (tall) table is no longer
+  false-flagged as missing; the numbers-match source-index cache keys on nanosecond mtime + size
+  (a sub-second source edit can no longer reuse a stale index).
+- **Dev experience:** committed `.claude/fast-test.cmd` so the `fast_test_on_stop` hook runs
+  `run_selftests.py` for this repo instead of falling back to `pytest` (which collects nothing here
+  and reported a false "no tests ran" at stop).
+- **Refreshed `.github/ISSUE_TEMPLATE/bug_report.yml`** component dropdown (stale since v1.0.0): it
+  now lists every current hook + skill, not just `meta-review`.
 
 ## [1.2.0] - 2026-07-21
 

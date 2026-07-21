@@ -135,7 +135,7 @@ def _table_findings(text: str):
     The complement of the figure checks, plus the placeholder-table case: a report can
     reference or caption 'Table N' while the actual table body was never filled in.
     """
-    structure_lines = extract.table_structure_lines(text)
+    ranges = extract.table_structure_ranges(text)
     captions = extract.find_table_captions(text)
     refs = extract.find_table_refs(text)
     ref_lines = {}
@@ -143,8 +143,9 @@ def _table_findings(text: str):
         ref_lines.setdefault(num, []).append(line)
 
     def _has_table_near(cap_line):
-        # A caption sits right next to its table (header+separator below, or table above).
-        return any(cap_line - 2 <= sl <= cap_line + 4 for sl in structure_lines)
+        # A caption sits just above or just below its table's full extent (handles tall
+        # tables and caption-below layout, not only caption-immediately-above).
+        return any(start - 2 <= cap_line <= end + 2 for start, end in ranges)
 
     dangling = []
     for num, lines in sorted(ref_lines.items()):
@@ -159,7 +160,7 @@ def _table_findings(text: str):
     for num, (cap_line, cap_text) in sorted(captions.items()):
         if not _has_table_near(cap_line):
             missing.append({"table": num, "line": cap_line, "caption": cap_text})
-    return {"structures": len(structure_lines), "dangling": dangling, "missing": missing}
+    return {"structures": len(ranges), "dangling": dangling, "missing": missing}
 
 
 def _claim_candidates(text: str, unmatched_values, cap: int = 15):
@@ -395,6 +396,23 @@ def selftest() -> int:
         if not any(e["embed"] == "chart.png" for e in r["orphan_embeds"]):
             fails.append("chart.png embed with no caption/ref should be an orphan embed: %r"
                          % r["orphan_embeds"])
+
+    # 7) a caption placed BELOW a (tall) rendered table must NOT be false-flagged as missing
+    #    (regression guard for the over-correction found in v1.2.1 verification).
+    with tempfile.TemporaryDirectory() as d:
+        csv = os.path.join(d, "data.csv")
+        with open(csv, "w", encoding="utf-8") as fh:
+            fh.write("v\n1.0\n")
+        rep = os.path.join(d, "report.md")
+        with open(rep, "w", encoding="utf-8") as fh:
+            fh.write("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n"
+                     "Table 1: A real, fully rendered table with its caption below it.\n")
+        r = analyse(rep, [csv], 0.01, 1e-9)
+        if r["table_structures"] != 1:
+            fails.append("caption-below fixture should count 1 table: %r" % r["table_structures"])
+        if r["tables_referenced_not_rendered"]:
+            fails.append("caption below a rendered table must NOT be flagged missing: %r"
+                         % r["tables_referenced_not_rendered"])
 
     for f in fails:
         print("SELFTEST FAIL:", f)
