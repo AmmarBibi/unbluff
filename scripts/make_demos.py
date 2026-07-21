@@ -256,15 +256,42 @@ SOURCE_COVERAGE = [
     ("A grep can't find what the plan never names; scheduled each gap, refreshed the ledger.", DIM),
 ]
 
+NUMBERS_MATCH = [
+    ("u", "> write up the results in REPORT.md from results/*.csv"),
+    ("blank",),
+    ("a", "Wrote REPORT.md - overshoot 94.8%, settling 8.65 s, peak stress 512.4 MPa."),
+    ("blank",),
+    ("nudge", "[numbers-match] 1 cited number(s) in REPORT.md have no match in the"),
+    ("nudge", "source data (results):"),
+    ("red", "  REPORT.md:12: 512.4 MPa   (peak stress 512.4 MPa is the worst case)"),
+    ("nudge", "Verify against the source-of-truth data or correct the prose."),
+    ("blank",),
+    ("a", "Right - 512.4 is in no sweep row; the CSV peak is 487.6 MPa. Fixing."),
+    ("hold", 400),
+]
+
+CONSISTENCY_AUDIT = [
+    ("[consistency-audit] deliverable vs source data - candidate drift:", AMBER),
+    ("  [A] number, no source match   3   e.g. 512.4 MPa (nearest 487.6)", AMBER),
+    ("  [B] figure never referenced   1   Figure 7 embedded, never cited", DEFAULT),
+    ("  [C] dangling cross-reference  1   'Figure 4' has no such caption", DEFAULT),
+    ("  [D] claim to verify           2   'lowest overshoot' vs the sweep", DEFAULT),
+    ("  [E] unfilled placeholder      2   [TABLE], [TODO] left in the prose", AMBER),
+    ("  [F] table promised, none rendered  'Table 3' cited but no table", DEFAULT),
+    ("The hook flags a number with no source; the skill judges drift vs derived vs definitional.", DIM),
+]
+
 if __name__ == "__main__":
     build(DEMO, "demo.gif")
     build(PLAN_DEFER, "plan-defer-guard.gif")
     build(RATE, "rate-prompt.gif")
     build(FASTTEST, "fast-test.gif")
+    build(NUMBERS_MATCH, "numbers-match.gif")
     still(META_AUDIT, "meta-audit.png")
     still(SOURCE_COVERAGE, "source-coverage.png")
     still(MEMORY_HYGIENE, "memory-hygiene.png")
     still(HOOK_HEALTH, "hook-health.png")
     still(STOP_DISPATCHER, "stop-dispatcher.png")
     still(META_REVIEW, "meta-review.png")
+    still(CONSISTENCY_AUDIT, "consistency-audit.png")
     print("done")

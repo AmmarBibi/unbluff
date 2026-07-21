@@ -60,6 +60,10 @@ def main():
                os.path.isfile(os.path.join(home, ".claude", "skills", "meta-review", "SKILL.md")))
         record("A6 source-coverage skill installed",
                os.path.isfile(os.path.join(home, ".claude", "skills", "source-coverage", "SKILL.md")))
+        record("A7 consistency-audit skill installed with bundled scripts",
+               os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit", "SKILL.md"))
+               and os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit",
+                                               "scripts", "audit.py")))
 
         ups = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         ss = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
@@ -132,6 +136,22 @@ def main():
         record("H1 plan-defer-guard fires on '-> park' plan edit (rc 2 + nudge)",
                rc == 2 and "[plan-defer-guard]" in err, f"rc={rc} err={err[:120]!r}")
 
+        # --- H2. numbers-match (PostToolUse) fires on a report number with no source ---
+        nmproj = tempfile.mkdtemp(prefix="unbluff-nm-")
+        os.makedirs(os.path.join(nmproj, ".claude"))
+        os.makedirs(os.path.join(nmproj, "results"))
+        with open(os.path.join(nmproj, "results", "sweep.csv"), "w", encoding="utf-8") as f:
+            f.write("metric,value\novershoot,94.7651\nsettle,8.6542\n")
+        with open(os.path.join(nmproj, ".claude", "number-sources.txt"), "w", encoding="utf-8") as f:
+            f.write("sources = results\nreports = *REPORT*.md\n")
+        nmreport = os.path.join(nmproj, "REPORT.md")
+        with open(nmreport, "w", encoding="utf-8") as f:
+            f.write("Overshoot was 94.8% (matches) but peak stress 512.4 MPa is the worst case.\n")
+        rc, out, err = run(ptu, env, json.dumps({"session_id": "itest-numbers", "cwd": nmproj,
+                           "tool_input": {"file_path": nmreport}}))
+        record("H2 numbers-match fires on unmatched number (rc 2 + nudge)",
+               rc == 2 and "[numbers-match]" in err and "512.4" in err, f"rc={rc} err={err[:160]!r}")
+
         # --- G. UNINSTALL ---
         rc, out, err = run(f'"{PYEXE}" "{os.path.join(REPO, "install.py")}" --uninstall', env)
         s2 = json.load(open(settings_path))
@@ -144,7 +164,7 @@ def main():
         record("G5 skill removed",
                not os.path.exists(os.path.join(home, ".claude", "skills", "meta-review")))
 
-        for d in (proj, repo2, clean):
+        for d in (proj, repo2, clean, nmproj):
             shutil.rmtree(d, ignore_errors=True)
     finally:
         shutil.rmtree(home, ignore_errors=True)

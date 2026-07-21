@@ -32,7 +32,7 @@ import time
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
 SKILLS_DIR = os.path.join(REPO_ROOT, "skills")
-SKILL_NAMES = ("meta-review", "source-coverage")
+SKILL_NAMES = ("meta-review", "source-coverage", "consistency-audit")
 
 CLAUDE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
 SETTINGS_PATH = os.path.join(CLAUDE_DIR, "settings.json")
@@ -45,12 +45,13 @@ PY = f'"{sys.executable}"'
 GROUP_EVENTS = {"rate_prompt": "UserPromptSubmit",
                 "hook_health": "SessionStart",
                 "stop_dispatcher": "Stop",
-                "plan_defer_guard": "PostToolUse"}
+                "posttooluse_dispatcher": "PostToolUse"}
 
-# Every hook file the suite depends on (the dispatcher imports the four Stop sub-hooks).
+# Every hook file the suite depends on (each dispatcher imports its sub-hooks in-process).
 REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py",
                   "show_your_proof.py", "meta_audit_on_stop.py", "memory_hygiene_guard.py",
-                  "fast_test_on_stop.py", "plan_defer_guard.py")
+                  "fast_test_on_stop.py", "post_tooluse_dispatcher.py", "plan_defer_guard.py",
+                  "numbers_match_on_write.py")
 
 
 def _cmd(script: str) -> str:
@@ -79,9 +80,10 @@ def desired_groups() -> dict:
         },
         "PostToolUse": {
             "matcher": "Edit|Write|MultiEdit",
-            "hooks": [{"type": "command", "command": _cmd("plan_defer_guard.py")}],
-            "id": ID_PREFIX + "plan-defer-guard",
-            "description": "On plan/roadmap edits, flag optional-forever language (park/on-demand/...).",
+            "hooks": [{"type": "command", "command": _cmd("post_tooluse_dispatcher.py")}],
+            "id": ID_PREFIX + "posttooluse-dispatcher",
+            "description": "On edits, run plan-defer-guard (optional-forever language) and "
+                           "numbers-match (cited numbers vs source data) in one process.",
         },
     }
 
@@ -164,8 +166,9 @@ def install_skill(dry_run: bool) -> None:
         if dry_run:
             print(f"  would copy skill -> {dest}")
             continue
-        os.makedirs(dest, exist_ok=True)
-        shutil.copy2(os.path.join(src, "SKILL.md"), os.path.join(dest, "SKILL.md"))
+        # Copy the whole skill dir (SKILL.md + any bundled scripts/), not just SKILL.md.
+        shutil.copytree(src, dest, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         print(f"  copied skill -> {dest}")
 
 
