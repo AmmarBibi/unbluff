@@ -3,6 +3,44 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-07-21
+
+Extends the anti-bluffing theme from claims to numbers: a report can confidently cite a value that
+no longer appears anywhere in the data it was computed from. `show_your_proof` catches an unverified
+*claim*; this catches an unsourced *number*.
+
+### Added
+- **`numbers-match`** (PostToolUse: Edit|Write|MultiEdit) - when a report/output file is written,
+  extracts the measurement-shaped numbers in the prose and checks each against the numeric values in
+  a configured source-data folder, warning for any cited number with no match within tolerance.
+  Opt-in per project via `.claude/number-sources.txt` (names the `sources` dir(s), optional `reports`
+  globs / `tol` / `check_integers`); silent with no config. Checks only text deliverables
+  (`.md`/`.txt`/`.tex`); skips cross-references, years, and (by default) bare integers to stay
+  low-noise; relative tolerance (default 1%) absorbs normal rounding. Fires once per session;
+  fail-silent, stdlib-only, `--selftest`.
+- **`post_tooluse_dispatcher`** - a PostToolUse sibling of `stop_dispatcher`: runs `plan_defer_guard`
+  and `numbers_match_on_write` in one process per edit (one spawn, not two), with a shared
+  fire-ledger line tagged `event=PostToolUse`. Each sub-hook stays independently runnable and
+  `--selftest`-able; the installer now points the single PostToolUse entry at the dispatcher.
+- **`consistency-audit`** skill - the reasoning half that pairs with `numbers-match`, the way
+  `source-coverage` pairs with `plan_defer_guard`. Ships a bundled, format-agnostic extractor
+  (docx/pdf/tex/md) that surfaces six drift classes - numbers with no source match, figures
+  embedded but never referenced, cross-references with no matching caption, claims whose
+  supporting number is absent, unfilled bracketed placeholders (`[TABLE]`/`[TODO]`/`[insert ...]`),
+  and tables the prose promises ("Table N") but never renders - which the model then adjudicates
+  against the data. The installer now copies a skill's whole directory (SKILL.md + any bundled
+  `scripts/`), not just SKILL.md.
+- `run_selftests.py` + CI now cover both new hook modules; the integration test fires `numbers-match`
+  end to end (H2), confirms `plan_defer_guard` still fires through the new dispatcher (H1), and
+  checks the `consistency-audit` skill installs with its scripts (A7).
+
+### Design
+- The mechanical/reasoning split holds: the `numbers-match` hook surfaces the "number with no
+  source" *state*; the `consistency-audit` skill carries the judgment a hook cannot - is an
+  unmatched number drift, a derivation, or a definition, is a figure orphaned, is a claim actually
+  supported and consistent across sections. A grep can only confirm a number is missing, never
+  that it is wrong.
+
 ## [1.1.1] - 2026-07-15
 
 ### Fixed
