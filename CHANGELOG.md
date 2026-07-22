@@ -3,6 +3,42 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.2.1] - 2026-07-21
+
+Fixes from a three-lens self-audit (meta-review / completeness / consistency) of the v1.2.0 release.
+
+### Fixed
+- **consistency-audit skill now regression-gated.** Its `scripts/audit.py --selftest` (which covers
+  all six drift classes) lives outside `hooks/`, so `run_selftests.py` and CI never ran it - the
+  flagship script could regress green. `run_selftests.py` now also runs it (11 selftests total).
+- **Drift class (F) is per-table, not all-or-nothing.** It was gated on *total* tables == 0, so a
+  captioned-but-empty "Table N" next to any real table was missed. Now a promised table with no
+  rendered body near its caption is flagged even when other tables exist.
+- **Drift class (B) now detects bare embeds.** `find_figure_embeds` was defined but never called
+  (`uncaptioned_embeds` was hardcoded `[]`), so an embedded image with no caption and no "Figure N"
+  reference was missed. It is now wired in and reported.
+- **numbers-match fire marker is keyed by (session, report path).** Previously one report firing
+  suppressed a *different* report's fabricated number for the rest of the session. The source index
+  is also cached by source mtimes so a clean report is not re-walked on every edit.
+- **Hook/skill `SOURCE_EXTS` drift resolved + guarded.** The hook lacked `.log`; aligned with the
+  skill and added an `H3` integration scenario asserting parity so they cannot silently diverge.
+- **Docs reconciled with the code:** README verification block `22/22 -> 24/24` scenarios (and
+  `10 -> 11` selftests); `SKILL.md` + `audit.py` intro "four drift classes" -> "six"; `install.py`
+  docstring/help "10 pieces" / "the meta-review skill" (singular) / "four sub-hooks" generalized.
+- **Follow-ups from an adversarial verification of the above:** drift class (F) now detects a
+  table's full rendered extent, so a caption placed *below* a (tall) table is no longer
+  false-flagged as missing; the numbers-match source-index cache keys on nanosecond mtime + size
+  (a sub-second source edit can no longer reuse a stale index).
+- **Dev experience:** committed `.claude/fast-test.cmd` so the `fast_test_on_stop` hook runs
+  `run_selftests.py` for this repo instead of falling back to `pytest` (which collects nothing here
+  and reported a false "no tests ran" at stop).
+- **Refreshed `.github/ISSUE_TEMPLATE/bug_report.yml`** component dropdown (stale since v1.0.0): it
+  now lists every current hook + skill, not just `meta-review`.
+- **`examples/settings.json`** was missing the PostToolUse group (stale since v1.1), so a copy-paste
+  install would have omitted `plan_defer_guard` + `numbers-match`; added the dispatcher entry so the
+  example matches the four groups `install.py` wires. Also reworded SKILL.md's drift-class (F) prose
+  to the per-table framing the code now uses.
+
 ## [1.2.0] - 2026-07-21
 
 Extends the anti-bluffing theme from claims to numbers: a report can confidently cite a value that

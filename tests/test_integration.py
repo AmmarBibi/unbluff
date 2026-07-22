@@ -152,6 +152,25 @@ def main():
         record("H2 numbers-match fires on unmatched number (rc 2 + nudge)",
                rc == 2 and "[numbers-match]" in err and "512.4" in err, f"rc={rc} err={err[:160]!r}")
 
+        # --- H3. hook/skill SOURCE_EXTS parity (guard the intentional duplication) ---
+        import importlib.util as _ilu
+        def _load(mod_path, mod_name):
+            spec = _ilu.spec_from_file_location(mod_name, mod_path)
+            mod = _ilu.module_from_spec(spec)
+            sys.modules[mod_name] = mod  # so @dataclass in the module can resolve its module
+            spec.loader.exec_module(mod)
+            return mod
+        hook_exts = skill_exts = None
+        try:
+            _hm = _load(os.path.join(REPO, "hooks", "numbers_match_on_write.py"), "nm_hook_parity")
+            _sm = _load(os.path.join(REPO, "skills", "consistency-audit", "scripts", "sources.py"), "ca_sources_parity")
+            hook_exts, skill_exts = set(_hm.SOURCE_EXTS), set(_sm.SOURCE_EXTS)
+        except Exception as e:
+            record("H3 hook/skill SOURCE_EXTS parity", False, f"load error: {e}")
+        else:
+            record("H3 hook/skill SOURCE_EXTS parity", hook_exts == skill_exts,
+                   f"hook-only={sorted(hook_exts - skill_exts)} skill-only={sorted(skill_exts - hook_exts)}")
+
         # --- G. UNINSTALL ---
         rc, out, err = run(f'"{PYEXE}" "{os.path.join(REPO, "install.py")}" --uninstall', env)
         s2 = json.load(open(settings_path))

@@ -129,8 +129,8 @@ Don't take the demos on faith - run it yourself (this is exactly what CI runs on
 $ python run_selftests.py
 rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop: OK
 memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
-post_tooluse_dispatcher: OK  numbers_match_on_write: OK
-all 10 selftests passed
+post_tooluse_dispatcher: OK  numbers_match_on_write: OK  consistency-audit-skill: OK
+all 11 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -139,8 +139,9 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] D1 show-your-proof fires (rc 2 + nudge)
 [PASS] E1 fast-test fires on failing tests (rc 2)
 [PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
-[PASS] G2 all unbluff entries removed   [PASS] G3 preexisting hook still there
-==== 22/22 scenarios passed ====
+[PASS] A7 consistency-audit skill installed with bundled scripts
+[PASS] H3 hook/skill SOURCE_EXTS parity   [PASS] G2 all unbluff entries removed
+==== 24/24 scenarios passed ====
 ```
 
 ## Install details

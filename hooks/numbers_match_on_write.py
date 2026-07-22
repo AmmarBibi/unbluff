@@ -23,14 +23,17 @@ cross-references ("Figure 3", "Table 2", "[12]"), years, and (by default) bare i
 only measurement-shaped values - the ones that actually drift.
 
 Guards (in order): unparseable stdin -> exit 0; not a text report file -> exit 0; no config /
-no sources -> exit 0 (opt-in); per-session marker under UNBLUFF_STATE_DIR -> fires at most once per
-session; nothing unmatched / unreadable / any exception -> silent exit 0. Mechanical, stdlib-only,
-fail-safe. Run with --selftest to verify the mechanics (tempfile, never the real state dir).
+no sources -> exit 0 (opt-in); per-(session, report) marker under UNBLUFF_STATE_DIR -> fires at most
+once per report file per session; nothing unmatched / unreadable / any exception -> silent exit 0.
+The source index is cached (keyed by source mtimes) so a clean report is not re-indexed every edit.
+Mechanical, stdlib-only, fail-safe. Run with --selftest to verify (tempfile, never the real state dir).
 """
 from __future__ import annotations
 
 import bisect
 import fnmatch
+import glob
+import hashlib
 import json
 import os
 import re
@@ -49,7 +52,11 @@ DEFAULT_TOL = 0.01
 DEFAULT_REPORT_GLOBS = ("*report*.md", "*report*.txt", "*results*.md", "*results*.txt",
                         "*report*.tex", "*findings*.md", "*summary*.md")
 TEXT_EXTS = (".md", ".markdown", ".txt", ".tex", ".rst")
-SOURCE_EXTS = (".csv", ".tsv", ".txt", ".dat", ".json", ".md", ".tab", ".out")
+# This hook is intentionally a self-contained, lighter cousin of the consistency-audit skill's
+# extractor (skills/consistency-audit/scripts/sources.py) - a hook must stay import-free so the
+# dispatcher can load it in-process. Keep SOURCE_EXTS in sync with that module; the H3 parity
+# scenario in tests/test_integration.py guards against silent drift.
+SOURCE_EXTS = (".csv", ".tsv", ".txt", ".dat", ".json", ".md", ".tab", ".out", ".log")
 
 # number: optional sign, thousands-grouped or plain int, optional fraction, optional exponent.
 _NUMBER_RE = re.compile(
@@ -233,9 +240,60 @@ def build_message(name: str, sources: "list[str]", findings: "list[str]") -> str
     return "\n".join(lines) + "\n"
 
 
-def marker_path(state_dir: str, session_id) -> str:
+def marker_path(state_dir: str, session_id, report_path: str = "") -> str:
+    """Once-per-(session, report) marker. Keying by report path too means firing on report A
+    does not suppress a fabricated number later written to report B in the same session."""
     sid = (str(session_id) if session_id else "nosession")[:SESSION_ID_CHARS]
-    return os.path.join(state_dir, "%s-%s.done" % (HOOK_NAME, sid))
+    tag = "all"
+    if report_path:
+        tag = hashlib.sha1(os.path.abspath(report_path).encode("utf-8", "replace")).hexdigest()[:10]
+    return os.path.join(state_dir, "%s-%s-%s.done" % (HOOK_NAME, sid, tag))
+
+
+def _cached_index(sources: "list[str]", root: str, state_dir: str) -> "list[float]":
+    """index_sources with a small on-disk cache keyed by source paths + mtimes (fail-silent).
+
+    A clean report re-runs the hook on every edit; without a cache each edit re-reads and
+    re-parses the whole source tree. The cache is invalidated automatically when any source
+    file's mtime changes, and stale cache files are pruned so state_dir does not grow.
+    """
+    try:
+        parts = []
+        for entry in sources:
+            p = entry if os.path.isabs(entry) else os.path.join(root, entry)
+            for f in ([p] if os.path.isfile(p) else _walk_source_files(p)):
+                try:
+                    st = os.stat(f)
+                    # nanosecond mtime + size: a sub-second content change (same whole
+                    # second) still invalidates the cache, closing a false-negative window.
+                    parts.append("%s:%d:%d" % (f, st.st_mtime_ns, st.st_size))
+                except OSError:
+                    pass
+        key = hashlib.sha1("|".join(sorted(parts)).encode("utf-8", "replace")).hexdigest()[:16]
+        cache = os.path.join(state_dir, "%s-index-%s.json" % (HOOK_NAME, key))
+        try:
+            with open(cache, encoding="utf-8") as fh:
+                cached = json.load(fh)
+            if isinstance(cached, list):
+                return [float(v) for v in cached]
+        except (OSError, ValueError):
+            pass
+        values = index_sources(sources, root)
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+            for old in glob.glob(os.path.join(state_dir, "%s-index-*.json" % HOOK_NAME)):
+                if os.path.abspath(old) != os.path.abspath(cache):
+                    try:
+                        os.remove(old)
+                    except OSError:
+                        pass
+            with open(cache, "w", encoding="utf-8") as fh:
+                json.dump(values, fh)
+        except OSError:
+            pass
+        return values
+    except Exception:
+        return index_sources(sources, root)
 
 
 def run(payload: dict, state_dir: str) -> "tuple[int, str]":
@@ -254,7 +312,7 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
         return 0, ""
     if not cfg["sources"] or not is_report_file(path, cfg["reports"]):
         return 0, ""
-    marker = marker_path(state_dir, payload.get("session_id") or "nosession")
+    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)
     if os.path.exists(marker):
         return 0, ""
     try:
@@ -262,7 +320,7 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
             report_text = fh.read()
     except OSError:
         return 0, ""
-    values = index_sources(cfg["sources"], root)
+    values = _cached_index(cfg["sources"], root, state_dir)
     if not values:
         return 0, ""
     findings = []
@@ -358,9 +416,17 @@ def _selftest_pipeline() -> "list[str]":
             fails.append("should-fire wrong: code=%s msg=%r" % (code, msg))
         if "94.8" in msg or "8.65" in msg:
             fails.append("matched numbers wrongly flagged: %r" % msg)
-        code2, msg2 = run(payload, state)  # once per session
+        code2, msg2 = run(payload, state)  # same report, same session -> once per report
         if (code2, msg2) != (0, ""):
-            fails.append("second fire same session: %s %r" % (code2, msg2))
+            fails.append("second fire same report/session: %s %r" % (code2, msg2))
+        # a DIFFERENT report in the same session must still be checked (marker is per-path)
+        report_b = os.path.join(proj, "SECOND_REPORT.md")
+        with open(report_b, "w", encoding="utf-8") as f:
+            f.write("Another figure: peak 777.7 MPa, unsourced.\n")
+        payload_b = {"session_id": "nm-fire", "cwd": proj, "tool_input": {"file_path": report_b}}
+        code_b, msg_b = run(payload_b, state)
+        if code_b != 2 or "777.7" not in msg_b:
+            fails.append("second distinct report should still be checked: %s %r" % (code_b, msg_b))
     # no config -> silent (opt-in)
     with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as state:
         report = os.path.join(proj, "REPORT.md")

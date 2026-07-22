@@ -27,9 +27,15 @@ body:
         - meta_audit_on_stop
         - memory_hygiene_guard
         - hook_health_check
+        - plan_defer_guard
+        - numbers_match_on_write
         - stop_dispatcher
+        - post_tooluse_dispatcher
         - meta-review skill
+        - source-coverage skill
+        - consistency-audit skill
         - install.py
+        - Other
     validations:
       required: true
   - type: textarea

@@ -5,7 +5,7 @@ Given a deliverable (docx/pdf/tex/md/...) and one or more source-data dirs, it:
   1. normalises the deliverable to text (format-agnostic),
   2. extracts every cited number, figure reference, caption and embed,
   3. cross-checks each number against the source index with tolerance,
-  4. emits CANDIDATE discrepancies grouped into the four drift classes.
+  4. emits CANDIDATE discrepancies grouped into the six drift classes.
 
 It never asserts a finding is a real error - it ranks candidates and hands them
 to Claude, who does the reasoning half (is the claim supported? is the reading
@@ -65,7 +65,7 @@ def analyse(deliverable: str, source_dirs, rel_tol: float, abs_tol: float):
                 "nearest_source": near,
             })
 
-    figures = _figure_findings(text)
+    figures = _figure_findings(text, deliverable)
     tables = _table_findings(text)
     claims = _claim_candidates(text, {u["value"] for u in unmatched})
     placeholders = [{"line": ln, "text": t} for ln, t in extract.find_placeholders(text)]
@@ -79,7 +79,7 @@ def analyse(deliverable: str, source_dirs, rel_tol: float, abs_tol: float):
         "unmatched_numbers": unmatched,
         "orphan_figures": figures["orphans"],
         "dangling_figure_refs": figures["dangling"],
-        "uncaptioned_embeds": figures["uncaptioned_embeds"],
+        "orphan_embeds": figures["orphan_embeds"],
         "placeholders": placeholders,
         "table_structures": tables["structures"],
         "dangling_table_refs": tables["dangling"],
@@ -89,7 +89,7 @@ def analyse(deliverable: str, source_dirs, rel_tol: float, abs_tol: float):
     }
 
 
-def _figure_findings(text: str):
+def _figure_findings(text: str, path: str):
     captions = extract.find_figure_captions(text)
     refs = extract.find_figure_refs(text)
     ref_lines = {}
@@ -104,7 +104,29 @@ def _figure_findings(text: str):
     for num, lines in sorted(ref_lines.items()):
         if num not in captions:
             dangling.append({"figure": num, "lines": sorted(set(lines))})
-    return {"orphans": orphans, "dangling": dangling, "uncaptioned_embeds": []}
+    return {"orphans": orphans, "dangling": dangling,
+            "orphan_embeds": _orphan_embeds(text, path, captions, ref_lines)}
+
+
+def _orphan_embeds(text: str, path: str, captions, ref_lines):
+    """Embedded images (class B) with no figure caption or 'Figure N' reference nearby.
+
+    This is the 'embedded but never referenced' half of class (B) - a bare image with no
+    caption line and no 'Figure N' mention, which the caption-only pass cannot see.
+    """
+    fig_lines = {ln for (ln, _t) in captions.values()}
+    for lns in ref_lines.values():
+        fig_lines.update(lns)
+    embeds = extract.find_figure_embeds(path, text)
+    out = []
+    for ident, line in embeds:
+        if line > 0 and not any(abs(line - fl) <= 3 for fl in fig_lines):
+            out.append({"embed": ident, "line": line})
+    # docx media carry no line; flag them only when the doc has NO figure caption/ref at all.
+    docx_media = [i for (i, ln) in embeds if ln == 0]
+    if docx_media and not fig_lines:
+        out.extend({"embed": i, "line": 0} for i in docx_media)
+    return out
 
 
 def _table_findings(text: str):
@@ -113,27 +135,32 @@ def _table_findings(text: str):
     The complement of the figure checks, plus the placeholder-table case: a report can
     reference or caption 'Table N' while the actual table body was never filled in.
     """
-    structures = extract.count_table_structures(text)
+    ranges = extract.table_structure_ranges(text)
     captions = extract.find_table_captions(text)
     refs = extract.find_table_refs(text)
     ref_lines = {}
     for num, line in refs:
         ref_lines.setdefault(num, []).append(line)
+
+    def _has_table_near(cap_line):
+        # A caption sits just above or just below its table's full extent (handles tall
+        # tables and caption-below layout, not only caption-immediately-above).
+        return any(start - 2 <= cap_line <= end + 2 for start, end in ranges)
+
     dangling = []
     for num, lines in sorted(ref_lines.items()):
         cap_line = captions[num][0] if num in captions else None
         other = [ln for ln in lines if ln != cap_line]
         if num not in captions and other:
             dangling.append({"table": num, "lines": sorted(set(other))})
-    # Tables are referenced or captioned, but the deliverable renders no table at all
-    # -> the bodies are missing/placeholder. (The prose promises a table; none exists.)
-    missing = None
-    if structures == 0 and (captions or ref_lines):
-        promised = sorted(set(list(captions) + list(ref_lines)))
-        missing = {"promised": promised,
-                   "captions": sorted(captions),
-                   "referenced": sorted(ref_lines)}
-    return {"structures": structures, "dangling": dangling, "missing": missing}
+
+    # PER-TABLE: a captioned 'Table N' whose body was never rendered - flagged even when
+    # OTHER real tables exist (the placeholder-table case). Not gated on total tables == 0.
+    missing = []
+    for num, (cap_line, cap_text) in sorted(captions.items()):
+        if not _has_table_near(cap_line):
+            missing.append({"table": num, "line": cap_line, "caption": cap_text})
+    return {"structures": len(ranges), "dangling": dangling, "missing": missing}
 
 
 def _claim_candidates(text: str, unmatched_values, cap: int = 15):
@@ -184,10 +211,14 @@ def render_text(r: dict) -> str:
     lines.append("")
 
     lines.append("[B] FIGURES EMBEDDED/CAPTIONED BUT NEVER REFERENCED  -> %d"
-                 % len(r["orphan_figures"]))
+                 % (len(r["orphan_figures"]) + len(r["orphan_embeds"])))
     for o in r["orphan_figures"]:
         lines.append("  Figure %s (caption L%s): %s" % (o["figure"], o["line"], o["caption"][:80]))
-    if not r["orphan_figures"]:
+    for e in r["orphan_embeds"]:
+        loc = ("L%s" % e["line"]) if e["line"] else "embedded"
+        lines.append("  image %s (%s) - no caption or 'Figure N' reference nearby"
+                     % (e["embed"], loc))
+    if not r["orphan_figures"] and not r["orphan_embeds"]:
         lines.append("  (none)")
     lines.append("")
 
@@ -216,17 +247,15 @@ def render_text(r: dict) -> str:
         lines.append("  (none)")
     lines.append("")
 
-    lines.append("[F] TABLES REFERENCED/CAPTIONED BUT NOT RENDERED  (%d table(s) found)"
+    lines.append("[F] TABLES PROMISED BUT NOT RENDERED  (%d table(s) found)"
                  % r["table_structures"])
-    miss = r["tables_referenced_not_rendered"]
-    if miss:
-        lines.append("  Table(s) %s promised in prose but NO table is rendered in the "
-                     "deliverable - likely placeholder/unfilled."
-                     % ", ".join(miss["promised"]))
+    for m in r["tables_referenced_not_rendered"]:
+        lines.append("  Table %s (caption L%s) has no rendered table body: %s"
+                     % (m["table"], m["line"], m["caption"][:60]))
     for d in r["dangling_table_refs"]:
         lines.append("  'Table %s' referenced at L%s but no such caption"
                      % (d["table"], ",".join(map(str, d["lines"]))))
-    if not miss and not r["dangling_table_refs"]:
+    if not r["tables_referenced_not_rendered"] and not r["dangling_table_refs"]:
         lines.append("  (none)")
     lines.append("")
     lines.append("NOTE: every item above is a CANDIDATE. A number may be legitimately "
@@ -343,6 +372,47 @@ def selftest() -> int:
             fails.append("Table 3 promised but not rendered should be flagged")
         if not any(dd["table"] == "9" for dd in r["dangling_table_refs"]):
             fails.append("Table 9 should be a dangling table ref")
+
+    # 6) per-table missing-body detection even when a real table exists (fix #2), and
+    #    embedded-image-with-no-figure-reference detection (class B embed side, fix #3).
+    with tempfile.TemporaryDirectory() as d:
+        csv = os.path.join(d, "data.csv")
+        with open(csv, "w", encoding="utf-8") as fh:
+            fh.write("v\n1.0\n")
+        rep = os.path.join(d, "report.md")
+        with open(rep, "w", encoding="utf-8") as fh:
+            fh.write("Here is a real table:\n\n"
+                     "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+                     "Narrative text on its own line to open a gap after the table.\n"
+                     "More narrative so the next caption is far from the table above.\n\n"
+                     "Table 2: Summary of the sweep\n\n"
+                     "![](chart.png)\n")
+        r = analyse(rep, [csv], 0.01, 1e-9)
+        if r["table_structures"] != 1:
+            fails.append("should count exactly 1 rendered table: %r" % r["table_structures"])
+        if not any(m["table"] == "2" for m in r["tables_referenced_not_rendered"]):
+            fails.append("Table 2 (captioned, no body, real table present) should be missing: %r"
+                         % r["tables_referenced_not_rendered"])
+        if not any(e["embed"] == "chart.png" for e in r["orphan_embeds"]):
+            fails.append("chart.png embed with no caption/ref should be an orphan embed: %r"
+                         % r["orphan_embeds"])
+
+    # 7) a caption placed BELOW a (tall) rendered table must NOT be false-flagged as missing
+    #    (regression guard for the over-correction found in v1.2.1 verification).
+    with tempfile.TemporaryDirectory() as d:
+        csv = os.path.join(d, "data.csv")
+        with open(csv, "w", encoding="utf-8") as fh:
+            fh.write("v\n1.0\n")
+        rep = os.path.join(d, "report.md")
+        with open(rep, "w", encoding="utf-8") as fh:
+            fh.write("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n"
+                     "Table 1: A real, fully rendered table with its caption below it.\n")
+        r = analyse(rep, [csv], 0.01, 1e-9)
+        if r["table_structures"] != 1:
+            fails.append("caption-below fixture should count 1 table: %r" % r["table_structures"])
+        if r["tables_referenced_not_rendered"]:
+            fails.append("caption below a rendered table must NOT be flagged missing: %r"
+                         % r["tables_referenced_not_rendered"])
 
     for f in fails:
         print("SELFTEST FAIL:", f)
