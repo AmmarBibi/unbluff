@@ -38,6 +38,18 @@
         ],
         "id": "unbluff:stop-dispatcher"
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/post_tooluse_dispatcher.py\""
+          }
+        ],
+        "id": "unbluff:posttooluse-dispatcher"
+      }
     ]
   }
 }

@@ -31,9 +31,9 @@ row. None of these are syntax errors - they are consistency drift.
   supporting number is absent or unmatched. *Only Claude can settle these.*
 - **(E) Unfilled placeholder** - a bracketed placeholder left in the deliverable
   (`[TABLE]`, `[TODO]`, `[insert value]`, `[XX]`, `TKTK`, `TBD`, ...). Should never ship.
-- **(F) Table referenced/captioned but not rendered** - the prose promises "Table N"
-  (a reference or a caption) yet the deliverable contains no actual table - the classic
-  placeholder-table miss.
+- **(F) Table promised but not rendered** - a "Table N" that is referenced or captioned
+  yet whose body is never rendered near it - flagged per table, even when other tables do
+  render (the classic placeholder-table miss).
 
 ## Inputs
 
@@ -70,8 +70,9 @@ The script proposes; **you decide**. For each candidate, do not just repeat it:
   the caption it *should* point to and report the corrected number.
 - **[E] placeholders** - a leftover `[TABLE]`/`[TODO]`/`[insert ...]` is almost always a
   real defect: fill it from the source or remove it. Zero placeholders should ship.
-- **[F] promised-but-missing tables** - if the prose says "Table N" (or captions one) but
-  no table is rendered, build the table from the source data or drop the reference.
+- **[F] promised-but-missing tables** - if the prose captions or references a "Table N"
+  whose body is never rendered near it, build the table from the source data or drop the
+  reference (this fires per table, even when other tables render).
 
 ### STEP 3 - The reasoning pass (the half no hook can do)
 Now do what the script cannot:

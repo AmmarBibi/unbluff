@@ -34,6 +34,10 @@ Fixes from a three-lens self-audit (meta-review / completeness / consistency) of
   and reported a false "no tests ran" at stop).
 - **Refreshed `.github/ISSUE_TEMPLATE/bug_report.yml`** component dropdown (stale since v1.0.0): it
   now lists every current hook + skill, not just `meta-review`.
+- **`examples/settings.json`** was missing the PostToolUse group (stale since v1.1), so a copy-paste
+  install would have omitted `plan_defer_guard` + `numbers-match`; added the dispatcher entry so the
+  example matches the four groups `install.py` wires. Also reworded SKILL.md's drift-class (F) prose
+  to the per-table framing the code now uses.
 
 ## [1.2.0] - 2026-07-21
 
