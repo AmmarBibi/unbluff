@@ -94,6 +94,16 @@ def main():
         if rc != 0:
             failed.append("python-floor")
 
+    # A hook can name a skill the repo does not ship (close_skills_guard shipped requiring
+    # four while only three were installed). Nothing connected those lists until this gate.
+    deps = os.path.join(HERE, "tools", "check_skill_deps.py")
+    if os.path.exists(deps):
+        ran += 1
+        rc = subprocess.run([sys.executable, deps], stdin=subprocess.DEVNULL).returncode
+        print(f"skill-deps: {'OK' if rc == 0 else 'FAIL'}")
+        if rc != 0:
+            failed.append("skill-deps")
+
     record_gate_run(ran, failed)
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")

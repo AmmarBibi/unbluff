@@ -38,6 +38,14 @@ judgment to a script.
 4. **Missing / wrong.** At the product level (a capability that silently refuses, a claimed feature that
    does not work) and the process level (an eval not run, a gate skipped). Prefer a fresh held-out probe
    over re-reading code you wrote.
+   **Read the GATE LEDGER, do not reconstruct it from memory.** A gate that did not run leaves no
+   trace in the plan or the code, so this check is blind without a record - verified failure:
+   eight milestone eval batteries had never executed, and four audit skills invoked live all missed
+   it, because every one of them reads the DELIVERABLE and none had any input about the PROCESS. If
+   the project records gate runs (e.g. `docs/audits/gate_runs.json`, written by its eval suite), open
+   it and report every tier whose last run predates the most recent completed work. If the project
+   records nothing, say so and treat "which gates actually ran this session" as UNVERIFIED rather
+   than assumed.
 
 5. **Improvements for a better outcome.** Not bugs - the "this would be materially better" ideas:
    sharper UX, a stronger default, a missing guardrail, a reusable abstraction. List them; let the user

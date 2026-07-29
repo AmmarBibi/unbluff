@@ -2,7 +2,7 @@
 """Installer for unbluff.
 
 Wires the suite into ~/.claude/settings.json and installs its skills (meta-review, source-coverage,
-consistency-audit). Safe by design: it backs up settings.json before writing, writes atomically
+consistency-audit, completeness-audit). Safe by design: it backs up settings.json before writing, writes atomically
 (temp file + os.replace, so the live file is never left half-written), is idempotent (re-running
 replaces our entries, never duplicates them), refuses to clobber a settings.json it cannot parse,
 and supports --dry-run and --uninstall.
@@ -33,7 +33,9 @@ import time
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
 SKILLS_DIR = os.path.join(REPO_ROOT, "skills")
-SKILL_NAMES = ("meta-review", "source-coverage", "consistency-audit")
+# close_skills_guard requires ALL FOUR by name; shipping three would install a hook that
+# demands a skill the user never receives.
+SKILL_NAMES = ("meta-review", "source-coverage", "consistency-audit", "completeness-audit")
 
 CLAUDE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
 SETTINGS_PATH = os.path.join(CLAUDE_DIR, "settings.json")

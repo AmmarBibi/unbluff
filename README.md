@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all seventeen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all eighteen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -68,6 +68,9 @@ A deliberate reasoning pass that audits for parked work, instance-only fixes, op
 The reasoning half of the completeness story, and the one that catches the *dangerous* gap. A hook can only flag optional-forever language the plan **contains** - it can never find content the plan **never mentions**. This skill reads the authoritative source(s) themselves and reconciles every item - table, equation, method, requirement - to `BUILT` / `SCHEDULED` / `FINALIZED-EXCLUSION`, refreshing a coverage ledger. A plan can confidently assert "everything is covered" while an entire family of the source's requirements was silently never catalogued; only reading the source, not re-reading the plan, surfaces it. (In the field, one pass over a plan that claimed "essentially all built" turned up ~40 uncovered items.) You invoke it on purpose - `/source-coverage`, or on cues like "is this complete? / did we forget anything?".
 
 ![source-coverage reconciling a plan against its source and surfacing missed items](docs/source-coverage.png)
+
+### completeness-audit · skill
+The ledger discipline behind the other two. It catches both ways a plan drifts from 100%: the **soft-defer** items technically present but framed optional-forever (`-> park`, `on demand`, `someday`) - which a grep can find - and the **silent source gaps** the plan never mentions at all, which a grep never can. Every item resolves to `SCHEDULED` or a written `FINALIZED-EXCLUSION`; materiality decides the ORDER something ships, never WHETHER it does. `close_skills_guard` names this skill as one of the four it checks for at session close.
 
 ### fast_test_on_stop · Stop
 When source changed, runs your fast tests at the end of a turn and feeds any failure back to the agent - so a "green" claim is an actually-green claim. It auto-detects pytest or a `package.json` test script (or point it at a subset with `.claude/fast-test.cmd`), and it is debounced so it will not re-run constantly.
@@ -151,8 +154,8 @@ rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop:
 memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
 post_tooluse_dispatcher: OK  numbers_match_on_write: OK  duplicate_registration_check: OK
 close_skills_guard: OK  usage_snip_prompt: OK  pre_push_gate: OK  consistency-audit-skill: OK
-examples-settings-fresh: OK  python-floor: OK
-all 17 selftests passed
+examples-settings-fresh: OK  python-floor: OK  skill-deps: OK
+all 18 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -188,7 +191,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the seventeen pieces.
+It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the eighteen pieces.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 

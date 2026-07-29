@@ -26,6 +26,17 @@ From consolidating two diverged copies of this suite that were both wired into a
   (timestamp, count, failures, verdict). A gate that did not run leaves no trace in the code or
   the docs, so "were the gates green?" was previously unanswerable after the fact and reviewers
   reconstructed it from memory. Best-effort and gitignored: an unwritable ledger never fails a run.
+- **`completeness-audit` skill now ships.** `close_skills_guard` names four skills in
+  REQUIRED_SKILLS; the repo shipped three and `install.py` installed three, so a fresh install
+  produced a hook permanently reporting a skill the user was never given - with nothing anywhere
+  to explain it.
+- **`tools/check_skill_deps.py`.** Asserts every skill a hook requires is both shipped in `skills/`
+  and listed in `install.py`'s SKILL_NAMES. Nothing connected those three lists before. Gated in
+  `run_selftests.py`; mutation-verified against both failure modes.
+- **meta-review: read the gate ledger.** Check 4 now instructs reading a recorded gate-run ledger
+  rather than reconstructing from memory - a gate that never ran leaves no trace in the plan or the
+  code, so the check is blind without a record. Degrades correctly: where a project records nothing,
+  gate status is UNVERIFIED rather than assumed.
 - **`tools/check_python_floor.py`.** Parses every file at the version floor the README
   advertises (3.8). CI runs the suite on 3.8, which covers files CI *executes* - not `tools/`
   scripts or branches CI never takes, so a single modern construct could break the promise
