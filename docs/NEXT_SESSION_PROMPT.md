@@ -36,7 +36,8 @@ traceback before that group is fixed, that is the cause; `--no-verify` bypasses 
 Everything raised on 2026-07-29 is a numbered row in `docs/V131_REVIEW_PLAN.md` - the 34 review
 findings as items 1-34, and the five carried items (encode the review-ledger mechanism, the
 delivery-gate comparison, the ECC dispatcher measurement, removing the superseded `.claude` copies,
-and pruning the GHG memory file) as items 35-39. There is no side list.
+and pruning the GHG memory file) as items 35-39. Item 39 is already DONE - completed in a
+separate GHG session on 2026-07-29. There is no side list.
 
 ## Things a fresh session should know
 

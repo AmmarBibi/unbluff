@@ -341,7 +341,7 @@ chat transcript. Order is materiality; each is SCHEDULED.
 - **Do:** after one clean stretch with no rollback needed, delete them and confirm
   `duplicate_registration_check` and `hook_health_check` stay green.
 
-### 39. Prune `memory/project_ghg_copilot.md`
+### 39. Prune `memory/project_ghg_copilot.md` - DONE 2026-07-29
 
 - **Why:** 150 KB with 71 evolving-state markers, while its own index line states canonical state
   lives in the GHG repo's `docs/MASTER_PLAN.md`. It contradicts its own instruction and is exactly
@@ -349,6 +349,9 @@ chat transcript. Order is materiality; each is SCHEDULED.
 - **Do:** in a session with the GHG repo open, classify every line DURABLE vs STATE, verify each
   durable claim still holds against the repo, and move live state into the plan rather than deleting
   it. Not to be done blind - an ambiguous line is kept and surfaced, not dropped.
+- **Outcome:** completed in a separate GHG session on 2026-07-29. 150 KB -> 6.5 KB, 185 -> 108 lines,
+  71 evolving-state markers -> 8, backup kept at `project_ghg_copilot.md.bak-2026-07-29`. No further
+  action; recorded here so the next session does not redo it.
 
 ## Definition of done
 
