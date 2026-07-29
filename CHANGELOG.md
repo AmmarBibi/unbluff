@@ -71,6 +71,14 @@ From consolidating two diverged copies of this suite that were both wired into a
 - **Python <3.12 portability:** the no-gate message no longer interpolates a backslash inside an
   f-string expression (a `SyntaxError` before PEP 701).
 
+- **`close_skills_guard` was unsatisfiable by construction.** Invoking a Skill makes the harness
+  inject that skill's instructions back into the transcript as a `role="user"` entry whose first
+  block is plain text - structurally identical to a real prompt. It was counted as "the last user
+  message", so every skill invoked BEFORE it fell outside the window; and the LAST skill invoked
+  always injects after its own invocation. The guard therefore reported all four skills missing
+  however many actually ran. Fixed structurally: injected entries carry `isMeta` /
+  `sourceToolUseID`. Pinned with a regression fixture, mutation-verified.
+
 ### Notes
 - Verified empirically: a `SessionStart` hook exiting 2 does **not** block the session (probed with a
   filesystem marker confirming the hook actually executed). Stdout from a SessionStart hook is

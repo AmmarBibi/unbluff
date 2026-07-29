@@ -56,7 +56,21 @@ def _iter_entries(transcript_path: str):
 
 def _is_genuine_user(entry: dict) -> bool:
     """A real user prompt (content is a plain str, or its first block is type 'text') - NOT a
-    tool_result (those are also role 'user' but carry a tool_result content block)."""
+    tool_result (those are also role 'user' but carry a tool_result content block), and NOT a
+    harness-injected entry.
+
+    Invoking a Skill makes the harness inject that skill's instructions back into the
+    transcript as a role='user' entry whose first block is plain text - structurally identical
+    to a real prompt. Counting it as "the last user message" put every skill invoked BEFORE it
+    outside the window, and the LAST skill invoked always injects after its own invocation. The
+    guard therefore reported all four missing however many were actually run - unsatisfiable by
+    construction (observed 2026-07-29 with all four invoked in one turn).
+
+    Injected entries are marked isMeta=True and carry sourceToolUseID; a real prompt has
+    neither. Structural, so it does not depend on the wording of any particular injection.
+    """
+    if entry.get("isMeta") or entry.get("sourceToolUseID"):
+        return False
     msg = entry.get("message") or entry
     if msg.get("role") != "user":
         return False
@@ -149,6 +163,14 @@ def _user(text):
     return {"message": {"role": "user", "content": text}}
 
 
+def _skill_injection(name):
+    """How the harness echoes a Skill's body back: role=user, plain text, but isMeta."""
+    return {"isMeta": True, "sourceToolUseID": "toolu_fixture",
+            "message": {"role": "user",
+                        "content": [{"type": "text",
+                                     "text": "Base directory for this skill: /x/%s" % name}]}}
+
+
 def _tool_result(text):
     return {"message": {"role": "user", "content": [{"type": "tool_result", "content": text}]}}
 
@@ -163,6 +185,17 @@ def selftest() -> int:
     fails: list[str] = []
     all4 = [_skill(s) for s in REQUIRED_SKILLS]
     with tempfile.TemporaryDirectory() as tmp:
+        # (4) REGRESSION: a Skill's injected body must not end the window. The harness echoes
+        # each invoked skill's instructions back as a role=user plain-text entry, so the LAST
+        # skill invoked always injects AFTER its own invocation. Counting that as the user's
+        # message made the guard unsatisfiable - it reported all four missing however many ran
+        # (observed live 2026-07-29). Injected entries carry isMeta / sourceToolUseID.
+        injected = _mk([_user("wrap up"), *all4, _skill_injection("meta-review")], tmp)
+        code, msg = run({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                         "transcript_path": injected})
+        if code != 0:
+            fails.append("skill-injection entry ended the window: all four ran but got %r" % msg)
+
         # (1) THE BUG: 4 skills at a premature close, THEN a user 'continue', THEN a close with none.
         bug = _mk([_user("build stuff"), *all4, _user("continue"), _skill("simplify")], tmp)
         code, msg = run({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
