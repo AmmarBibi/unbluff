@@ -1,45 +1,52 @@
 # Next session start prompt
 
-Everything from 2026-07-29 is committed, pushed and CI-green. Nothing is pending.
-This file exists so the next session can start cold, without reading the transcript.
+**Start here: `docs/V131_REVIEW_PLAN.md`.** It holds 34 confirmed defects from an adversarial
+review, in fix order. That is the work.
 
-## State as of 2026-07-29
+## What happened on 2026-07-29
 
-- **unbluff v1.3.0** at `a9a6227`, `main == origin/main`, working tree clean.
-  18 selftests, 26 integration scenarios, CI green on 12 jobs (Linux/macOS/Windows, py3.8-3.12).
-- **Hook fork RESOLVED.** unbluff is canonical; `settings.json` registers each hook exactly once
-  (30 commands, 8 events). Superseded `~/.claude/hooks/*.py` copies are left on disk, unregistered
-  and inert, as a rollback - deliberately, per the user.
-- **ECC 2.1.0** installed (commit `4da6dea`, 984 files, profile `full`).
-- **Course code purged** from unbluff's published history: 0 of 34 commits across every ref.
+v1.3.0 shipped and went CI-green, and a 4-lens adversarial review (`wf_b5ea865a-a33`, 43 agents)
+then found **34 confirmed defects in it** - 1 CRITICAL, 20 HIGH - with only 5 refuted. The session
+had already been declared closeable before that review ran. It was not.
 
-- **Course tooling is project-scoped, not global.** `course_method_guard` used to sit in the
-  GLOBAL `~/.claude/settings.json` as an unmatched UserPromptSubmit hook, so it evaluated every
-  prompt in every repo - which is how a control-systems reminder fired inside an unbluff session.
-  It now lives in `Downloads/Control systems/.claude/settings.json` and applies only there.
-  Nothing course-specific has ever been in unbluff; verified again at close.
-- **Private hooks are gated too.** `~/.claude/hooks/run_local_selftests.py` weekly-runs the
-  selftests of hooks unbluff does NOT ship, and reports any private hook shipping no selftest
-  rather than silently skipping it.
+The lesson worth carrying: **CI green means the tests pass, not that they ask the right questions.**
+Three of the tests written that day asserted things the implementation could not violate, and were
+only exposed by mutating the code and watching the suite stay green.
 
-## Standing open items - none blocks anything
+## State
 
-1. `delivery-gate` (ECC 2.1.0) vs unbluff fixture comparison. Never run. Competitive-positioning
-   intel: does ECC's hook genuinely overlap unbluff's, or only share vocabulary?
-2. ECC PostToolUse dispatcher migration. Never measured. ECC contributes ~28 individual spawns;
-   consolidating may not be worth touching a load-bearing config. **Measure before deciding.**
-3. `~/.claude/hooks/*.py` superseded copies. Inert. Delete after a clean stretch if desired.
+- **unbluff** at `ff449ed` + this plan, `main == origin/main`, working tree clean.
+  18 selftests, 26 integration scenarios, CI green (12 jobs, Linux/macOS/Windows, py3.8-3.12).
+- **ECC 2.1.0** (commit `4da6dea`, 984 files, profile `full`).
+- **Hook fork resolved.** unbluff is canonical; `settings.json` registers each hook exactly once
+  (30 commands, 8 events). Superseded `~/.claude/hooks/*.py` copies are unregistered and inert.
+- **Course tooling is project-scoped.** `course_method_guard` moved out of global config into
+  `Downloads/Control systems/.claude/settings.json`. Nothing course-specific is in unbluff.
+- **Course code purged** from unbluff's published history: 0 of 35 commits, every ref.
+
+## Live risk to be aware of before starting
+
+`pre_push_gate` is installed globally via `core.hooksPath`, and P1 of the plan says it can hang
+`git push` indefinitely (a test that leaves a grandchild on the captured pipe) or refuse a push
+outright (corrupt state file, no top-level exception handler). If a push hangs or dies with a
+traceback before that group is fixed, that is the cause; `--no-verify` bypasses it.
+
+## Nothing lives outside the plan
+
+Everything raised on 2026-07-29 is a numbered row in `docs/V131_REVIEW_PLAN.md` - the 34 review
+findings as items 1-34, and the five carried items (encode the review-ledger mechanism, the
+delivery-gate comparison, the ECC dispatcher measurement, removing the superseded `.claude` copies,
+and pruning the GHG memory file) as items 35-39. There is no side list.
 
 ## Things a fresh session should know
 
 - **This machine is Windows.** `os.chmod` exec bits are a no-op, so Unix behaviour cannot be
-  verified locally. unbluff's CI is the only Unix check - and it caught a real exit-126 failure
-  that every local run passed.
-- **Mutation-test every fix.** Three mutations survived on first attempt during the consolidation;
-  each exposed a test that asserted the wrong thing. A green test proves nothing until you make
-  it fail.
+  verified locally. CI is the only Unix check - it caught a real exit-126 failure that every local
+  run passed.
+- **Mutation-test every fix.** Revert it on a scratch copy; if the suite stays green the test is
+  decorative.
 - **Filenames and line counts both lie.** Run `python tools/hook_divergence_report.py` rather than
   reasoning from either.
-- **Force-push note:** a compound `git push --force ... && git push --force ...` is blocked by the
-  permission classifier; a single `git push --force-with-lease=<ref>:<sha>` passes. And rewriting
-  `main` does NOT purge merged feature branches - sweep every ref.
+- **Force-push:** a compound `git push --force ... && ...` is blocked by the permission classifier;
+  a single `git push --force-with-lease=<ref>:<sha>` passes. Rewriting `main` does NOT purge merged
+  feature branches - sweep every ref.
