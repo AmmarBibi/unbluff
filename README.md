@@ -151,8 +151,8 @@ rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop:
 memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
 post_tooluse_dispatcher: OK  numbers_match_on_write: OK  duplicate_registration_check: OK
 close_skills_guard: OK  usage_snip_prompt: OK  pre_push_gate: OK  consistency-audit-skill: OK
-examples-settings-fresh: OK
-all 16 selftests passed
+examples-settings-fresh: OK  python-floor: OK
+all 17 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

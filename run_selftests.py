@@ -84,6 +84,16 @@ def main():
         if rc != 0:
             failed.append("examples-settings-fresh")
 
+    # The README advertises a Python floor; CI only exercises files it actually runs.
+    # Parse every file at the floor so a tools/ script cannot silently break the promise.
+    floor = os.path.join(HERE, "tools", "check_python_floor.py")
+    if os.path.exists(floor):
+        ran += 1
+        rc = subprocess.run([sys.executable, floor], stdin=subprocess.DEVNULL).returncode
+        print(f"python-floor: {'OK' if rc == 0 else 'FAIL'}")
+        if rc != 0:
+            failed.append("python-floor")
+
     record_gate_run(ran, failed)
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")

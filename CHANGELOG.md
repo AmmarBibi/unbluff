@@ -26,6 +26,10 @@ From consolidating two diverged copies of this suite that were both wired into a
   (timestamp, count, failures, verdict). A gate that did not run leaves no trace in the code or
   the docs, so "were the gates green?" was previously unanswerable after the fact and reviewers
   reconstructed it from memory. Best-effort and gitignored: an unwritable ledger never fails a run.
+- **`tools/check_python_floor.py`.** Parses every file at the version floor the README
+  advertises (3.8). CI runs the suite on 3.8, which covers files CI *executes* - not `tools/`
+  scripts or branches CI never takes, so a single modern construct could break the promise
+  silently. Gated in `run_selftests.py`.
 - **`tools/regen_example_settings.py`.** Derives `examples/settings.json` from `install.py`'s
   `desired_groups()` instead of hand-maintaining it, with a `--check` mode gated in CI. That file
   is what people copy when wiring by hand, and it had gone stale twice - a copy-paste install then
