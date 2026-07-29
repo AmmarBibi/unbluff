@@ -31,6 +31,10 @@ body:
         - numbers_match_on_write
         - stop_dispatcher
         - post_tooluse_dispatcher
+        - duplicate_registration_check
+        - pre_push_gate
+        - close_skills_guard
+        - usage_snip_prompt
         - meta-review skill
         - source-coverage skill
         - consistency-audit skill

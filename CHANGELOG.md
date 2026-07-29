@@ -3,6 +3,64 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.3.0] - 2026-07-29
+
+From consolidating two diverged copies of this suite that were both wired into a single
+`settings.json` - eight hooks registered twice, none of them the same file.
+
+### Added
+- **`duplicate_registration_check` · SessionStart.** Reports any hook wired from more than one
+  directory. Reads both declaration styles (`command` and `args`), expands dispatcher fan-out, and
+  SHA-256s each target to distinguish a redundant duplicate from two diverged variants sharing a
+  filename. Advisory: prints to stdout, always exits 0.
+- **`pre_push_gate` · git pre-push.** Never push source your tests have not seen. Closes the window
+  `fast_test_on_stop`'s debounce leaves open, enforced by git rather than by a model. Reuses
+  `fast_test_on_stop`'s detection and state file so both gates agree on what is verified.
+  `--install-global` points `core.hooksPath` at your hooks dir to cover every repo.
+- **`close_skills_guard` · PostToolUse.** Verifies the close-audit skills ran at the *real* session
+  end. Catches the temporal failure a Stop hook cannot: audits run at a premature close, the user
+  says "continue", and the genuine ending skips them because they "already ran this session".
+- **`usage_snip_prompt` · SessionStart.** Injects the budget instruction every session rather than
+  relying on the model remembering to ask, and encodes that budget shapes scheduling, never quality.
+- **Gate-run ledger.** `run_selftests.py` now appends each run to `docs/audits/gate_runs.json`
+  (timestamp, count, failures, verdict). A gate that did not run leaves no trace in the code or
+  the docs, so "were the gates green?" was previously unanswerable after the fact and reviewers
+  reconstructed it from memory. Best-effort and gitignored: an unwritable ledger never fails a run.
+- **`tools/regen_example_settings.py`.** Derives `examples/settings.json` from `install.py`'s
+  `desired_groups()` instead of hand-maintaining it, with a `--check` mode gated in CI. That file
+  is what people copy when wiring by hand, and it had gone stale twice - a copy-paste install then
+  silently omits hooks, which nothing errors on.
+- **`tools/make_hook_screenshot.py`.** Renders real hook output to a terminal-style PNG, so README
+  images are regenerable build artifacts rather than screenshots someone must remember to retake.
+- **`tools/hook_divergence_report.py`.** Regenerates AST token deltas, SHA digests, dispatcher
+  fan-out sets and `STATE_DIR` resolution for any two hook directories, so divergence figures in
+  documentation are reproducible rather than asserted.
+- **`plan_defer_guard`: dangling-home detection.** Flags a plan that claims every gap is homed while
+  still promising future items ("-> new item"). Neither half is a defect alone; the pairing is.
+- **`fast_test_on_stop`: no-gate notice.** A repo with no detectable test command was silently
+  skipped, making it indistinguishable from a passing run. It now says so once per project, and only
+  when source actually changed.
+
+### Fixed
+- **`run_selftests.py` silently skipped hooks missing from a hardcoded roster.** A hook shipping a
+  full selftest printed `skip (no selftest)` while CI still reported all-green. Self-testability is
+  now DETECTED via the actual `"--selftest" in sys.argv` dispatch; `SELFTESTABLE` becomes a floor,
+  and a listed hook that loses its dispatch is an error rather than a silent skip.
+- **`skills/consistency-audit/scripts/audit.py` crashed on every real run on Windows.**
+  `UnicodeEncodeError` on cp1252 when printing `->`, at render time *after* the analysis completed,
+  so the mechanical pass had never finished on a Windows machine. `--selftest` did not catch it
+  because that path emits no non-ASCII. Both streams now reconfigure to UTF-8 with `errors="replace"`.
+- **`hook_health_check` never read `args`.** For `{"command": "python", "args": ["x.py"]}` it verified
+  the interpreter and never checked that the script existed. It now also reports duplicate registrations.
+- **`install.py` shipped a hardcoded `REQUIRED_HOOKS` roster** that omitted newly added hooks.
+- **Python <3.12 portability:** the no-gate message no longer interpolates a backslash inside an
+  f-string expression (a `SyntaxError` before PEP 701).
+
+### Notes
+- Verified empirically: a `SessionStart` hook exiting 2 does **not** block the session (probed with a
+  filesystem marker confirming the hook actually executed). Stdout from a SessionStart hook is
+  observably surfaced; stderr was not demonstrable, so advisory hooks should `print()`.
+
 ## [1.2.1] - 2026-07-21
 
 Fixes from a three-lens self-audit (meta-review / completeness / consistency) of the v1.2.0 release.

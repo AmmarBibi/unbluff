@@ -84,6 +84,35 @@ def main():
         record("C1 hook_health reports OK", rc == 0 and "[hook-health] OK" in out,
                f"rc={rc} out={out[:120]!r}")
 
+        # --- C2/C3. duplicate_registration_check (SessionStart, 2nd command in the group) ---
+        # A clean install must be silent. A hook wired from a SECOND directory must be reported on
+        # STDOUT (stderr is not reliably surfaced at SessionStart) with exit 0 - advisory, never blocks.
+        dup = s["hooks"]["SessionStart"][0]["hooks"][1]["command"]
+        rc, out, err = run(dup, env, "{}")
+        record("C2 duplicate-check silent on a clean install",
+               rc == 0 and out.strip() == "", f"rc={rc} out={out[:150]!r}")
+
+        second_root = tempfile.mkdtemp(prefix="unbluff-dup-")
+        spath = os.path.join(home, ".claude", "settings.json")
+        try:
+            shutil.copy2(os.path.join(REPO, "hooks", "rate_prompt.py"),
+                         os.path.join(second_root, "rate_prompt.py"))
+            with open(spath, encoding="utf-8") as f:
+                s2 = json.load(f)
+            s2["hooks"]["UserPromptSubmit"].append({"hooks": [
+                {"type": "command",
+                 "command": f'"{PYEXE}" "{os.path.join(second_root, "rate_prompt.py")}"'}]})
+            with open(spath, "w", encoding="utf-8") as f:
+                json.dump(s2, f, indent=2)
+            rc, out, err = run(dup, env, "{}")
+            record("C3 duplicate-check reports a second registration on stdout",
+                   rc == 0 and "rate_prompt.py" in out and "registered 2 times" in out,
+                   f"rc={rc} out={out[:200]!r}")
+        finally:
+            with open(spath, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=2)  # restore before the uninstall scenarios
+            shutil.rmtree(second_root, ignore_errors=True)
+
         # --- D. show-your-proof via the Stop dispatcher (end to end) ---
         proj = tempfile.mkdtemp(prefix="unbluff-proj-")  # plain dir: only show_your_proof should fire
         tpath = os.path.join(proj, "transcript.jsonl")

@@ -22,6 +22,17 @@ import json
 import os
 import sys
 
+# Windows consoles default to cp1252, which cannot encode the arrows used in the report.
+# Without this the audit dies with UnicodeEncodeError at PRINT time - after doing all its
+# work - so the mechanical pass had never once completed on a Windows machine (verified
+# 2026-07-29). --selftest did not catch it because that path emits no non-ASCII. Degrade
+# an unrenderable glyph to '?' rather than losing the entire report.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # non-reconfigurable stream: keep going
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import extract  # noqa: E402
 import sources as src  # noqa: E402

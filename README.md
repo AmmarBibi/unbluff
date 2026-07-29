@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all thirteen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all seventeen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -112,9 +112,29 @@ Flags rot in Claude Code's auto-memory (index bloat, stale commit hashes, evolvi
 ![memory_hygiene_guard output](docs/memory-hygiene.png)
 
 ### hook_health_check · SessionStart
-At session start, verifies your configured hooks resolve, and weekly-runs each hook's self-test. It never judges or modifies your other hooks - it only checks that the commands you have configured point at things that actually exist, and once a week it runs this suite's own self-tests to catch a silently-broken hook before it matters.
+At session start, verifies your configured hooks resolve, and weekly-runs each hook's self-test. It never judges or modifies your other hooks - it only checks that the commands you have configured point at things that actually exist, and once a week it runs this suite's own self-tests to catch a silently-broken hook before it matters. It reads the script from both declaration styles (inlined in `command`, or passed via `args`), and reports any script registered from more than one directory.
 
 ![hook_health_check output](docs/hook-health.png)
+
+### duplicate_registration_check · SessionStart
+Reports any hook wired from more than one directory. A hook registered twice runs twice - and when the two copies are *not the same file*, whichever runs first can consume the other's once-per-session marker, so **which program's logic actually applies becomes nondeterministic and invisible in the output**. It reads both declaration styles, expands dispatcher fan-out so a sub-hook registered directly *and* dispatched from elsewhere is still caught, and SHA-256s each target to tell a redundant duplicate apart from two diverged variants sharing a filename. Advisory only: it prints to stdout and always exits 0.
+
+![duplicate_registration_check reporting a hook wired from two directories](docs/duplicate-registration.png)
+
+### pre_push_gate · git pre-push
+Never push source your tests have not seen. `fast_test_on_stop` debounces, so a passing run followed by another half hour of edits can end the turn silently and reach the remote unverified - silence and success look identical from outside. This makes them different at the one moment it matters. Installed as a real git hook (`--install-global` points `core.hooksPath` at your hooks dir so every repo is covered), so **git** enforces it, not a model that might forget. It reuses `fast_test_on_stop`'s command detection and state file, so the two gates agree on what has actually been verified.
+
+![pre_push_gate blocking a push because tests fail](docs/pre-push-gate.png)
+
+### close_skills_guard · PostToolUse
+Verifies the close-audit skills actually ran at the *real* session end. The failure it fixes is temporal, not conceptual: an agent declares a premature close, runs its audits there, you say "continue", it builds more, reaches the genuine end - and skips the audits because they "already ran this session". A plain Stop hook cannot catch this; it fires every turn and cannot tell a pause from an ending. This watches for the one unambiguous close signal (writing the next-session prompt) and checks the transcript for each required skill invoked *since the last real user message*. An earlier run does not count.
+
+![close_skills_guard listing the close-audit skills that were never invoked](docs/close-skills-guard.png)
+
+### usage_snip_prompt · SessionStart
+Makes the budget question mechanical. An agent has no tool that can read your subscription quota - the only source is a snip you paste. That makes the ask depend on the model *remembering* to ask, which is exactly the thing that gets forgotten in the session where it matters. This injects the instruction every session instead, along with the rule that budget may shape scheduling but never quality: if work needs a tier that is exhausted, the answer is "wait for the reset", not a quieter model.
+
+![usage_snip_prompt injecting the budget instruction at session start](docs/usage-snip.png)
 
 ### stop_dispatcher · Stop
 Runs the turn-end hooks in a single process and logs a fire-ledger of what fired. Instead of spawning a separate process for each Stop hook every turn, it runs them in one - a broken sub-hook cannot take down the others, and the ledger gives you a record of which hooks fired and when.
@@ -129,8 +149,10 @@ Don't take the demos on faith - run it yourself (this is exactly what CI runs on
 $ python run_selftests.py
 rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop: OK
 memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
-post_tooluse_dispatcher: OK  numbers_match_on_write: OK  consistency-audit-skill: OK
-all 11 selftests passed
+post_tooluse_dispatcher: OK  numbers_match_on_write: OK  duplicate_registration_check: OK
+close_skills_guard: OK  usage_snip_prompt: OK  pre_push_gate: OK  consistency-audit-skill: OK
+examples-settings-fresh: OK
+all 16 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -141,7 +163,7 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
 [PASS] A7 consistency-audit skill installed with bundled scripts
 [PASS] H3 hook/skill SOURCE_EXTS parity   [PASS] G2 all unbluff entries removed
-==== 24/24 scenarios passed ====
+==== 26/26 scenarios passed ====
 ```
 
 ## Install details
@@ -166,7 +188,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the thirteen pieces.
+It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the seventeen pieces.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 

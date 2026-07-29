@@ -88,6 +88,41 @@ def is_plan_file(path: str) -> bool:
     return any(fnmatch.fnmatch(base, g) for g in _PLAN_GLOBS)
 
 
+# --- dangling-home detection --------------------------------------------------------------------
+# A second, distinct defect class: a row PROMISES a future item ("-> new item", "-> its own row")
+# while the SAME file ASSERTS every gap already has a home. A promise is not a home; only a row is.
+# Neither half is a defect alone - the pairing is, because the confident claim is what a reader
+# trusts and the promise is what silently never happens. The soft-defer grep above cannot see this:
+# the wording is confident, not deferring.
+#
+# Verified failure (ghg-copilot, 2026-07-28): a row read "each gap now has a HOME" while two of its
+# "-> new item" pointers had never been opened. The flaring no-composition fallback - the only
+# Scope 1 source with no degraded-data route - sat unbuilt and untracked behind that sentence.
+_PROMISE_RE = re.compile(
+    r"->\s*(?:a\s+)?new\s+(?:small\s+)?item\b|->\s*its own (?:row|item)\b|"
+    r"->\s*new row\b|->\s*separate (?:row|item)\b", re.IGNORECASE)
+_HOMED_CLAIM_RE = re.compile(
+    r"each gap now has a home|every gap (?:now )?(?:has|maps to) a (?:real )?(?:scheduled )?"
+    r"(?:build )?home|each item has a home|all gaps are homed", re.IGNORECASE)
+# A HISTORICAL quote of the claim ("used to assert ...", "CLAIM CORRECTED") records a defect that
+# was already fixed - exempt it, exactly as the soft-defer markers exempt their own references.
+# Otherwise the guard punishes writing the correction down.
+_CLAIM_EXEMPT = re.compile(
+    r"used to (?:assert|say|read)|CLAIM CORRECTED|no longer (?:asserts|claims)|"
+    r"DEFER-AND-FORGET VIOLATION|was never|formerly (?:asserted|claimed)", re.IGNORECASE)
+
+
+def dangling_homes(name: str, text: str) -> tuple:
+    """(claims, promises) - all-homed assertions and future-item promises in one file. Pure."""
+    claims, promises = [], []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if _HOMED_CLAIM_RE.search(line) and not _CLAIM_EXEMPT.search(line):
+            claims.append(f"{name}:{lineno}: {line.strip()[:SNIPPET_LEN]}")
+        if _PROMISE_RE.search(line):
+            promises.append(f"{name}:{lineno}: {line.strip()[:SNIPPET_LEN]}")
+    return claims, promises
+
+
 def scan_plan_text(name: str, text: str) -> list:
     findings = []
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -98,13 +133,24 @@ def scan_plan_text(name: str, text: str) -> list:
     return findings
 
 
-def build_message(name: str, findings: list) -> str:
-    lines = [f"[plan-defer-guard] optional-forever language in {name}:"]
-    lines.extend(f"- {item}" for item in findings)
-    lines.append("Reclassify each into a SCHEDULED build item (materiality order) OR an explicit "
-                 "FINALIZED justified exclusion - the plan must have zero optional-forever items. "
-                 "(A grep only catches what the plan names; run the source-coverage skill for gaps "
-                 "the plan does not mention.)")
+def build_message(name: str, findings: list, claims: list = (), promises: list = ()) -> str:
+    lines = []
+    if claims and promises:
+        lines.append(f"[plan-defer-guard] DANGLING HOME in {name} - the file claims every gap is "
+                     "homed, yet still promises future items:")
+        lines.extend(f"- claim   {item}" for item in claims[:2])
+        lines.extend(f"- promise {item}" for item in promises[:5])
+        if len(promises) > 5:
+            lines.append(f"- ... +{len(promises) - 5} more promises")
+        lines.append("A '-> new item' pointer is NOT a home; only a real row is. OPEN the row in "
+                     "this same edit, or drop the all-homed claim.")
+    if findings:
+        lines.append(f"[plan-defer-guard] optional-forever language in {name}:")
+        lines.extend(f"- {item}" for item in findings)
+        lines.append("Reclassify each into a SCHEDULED build item (materiality order) OR an "
+                     "explicit FINALIZED justified exclusion - the plan must have zero "
+                     "optional-forever items. (A grep only catches what the plan names; run the "
+                     "source-coverage skill for gaps the plan does not mention.)")
     return "\n".join(lines) + "\n"
 
 
@@ -133,13 +179,16 @@ def run(payload: dict, state_dir: str) -> tuple:
             text = f.read()
     except OSError:
         return 0, ""
-    findings = scan_plan_text(os.path.basename(path), text)
-    if not findings:
+    name = os.path.basename(path)
+    findings = scan_plan_text(name, text)
+    claims, promises = dangling_homes(name, text)
+    dangling = bool(claims and promises)  # neither half is a defect on its own
+    if not findings and not dangling:
         return 0, ""
     os.makedirs(state_dir, exist_ok=True)
     with open(marker, "w", encoding="utf-8") as f:
         f.write(f"fired {time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
-    return 2, build_message(os.path.basename(path), findings)
+    return 2, build_message(name, findings, claims, promises)
 
 
 def main() -> int:
@@ -213,8 +262,50 @@ def _selftest_pipeline() -> list:
     return fails
 
 
+def _selftest_dangling() -> list:
+    """The pairing is the defect: a claim alone or a promise alone must stay silent."""
+    import tempfile
+    fails = []
+    CLAIM = "| 1 | each gap now has a home\n"
+    PROMISE = "| 2 | flaring fallback -> new item\n"
+    EXEMPT_CLAIM = "| 1 | this used to assert each gap now has a home; CLAIM CORRECTED\n"
+
+    cases = [  # (body, should_fire, label)
+        (CLAIM + PROMISE, True, "claim+promise must fire"),
+        (CLAIM, False, "claim alone must not fire"),
+        (PROMISE, False, "promise alone must not fire"),
+        (EXEMPT_CLAIM + PROMISE, False, "historical claim is exempt"),
+    ]
+    for body, should_fire, label in cases:
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as state:
+            plan = os.path.join(d, "MASTER_PLAN.md")
+            with open(plan, "w", encoding="utf-8") as f:
+                f.write(body)
+            code, msg = run({"session_id": "sd", "tool_input": {"file_path": plan}}, state)
+            if should_fire:
+                if code != 2 or "DANGLING HOME" not in msg:
+                    fails.append(f"{label}: code={code} msg={msg!r}")
+            else:
+                # Assert the EXIT CODE, not just the absence of the banner. Checking only the
+                # message lets a hook exit 2 with empty stderr - it fires and says nothing.
+                # (Caught by mutation test 2026-07-29: `claims and promises` -> `or` survived
+                # a message-only assertion because build_message has its own pairing guard.)
+                if code != 0 or msg.strip():
+                    fails.append(f"{label}: expected silent exit 0, got code={code} msg={msg!r}")
+
+    # both defect classes in one file -> the message must carry both sections
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as state:
+        plan = os.path.join(d, "MASTER_PLAN.md")
+        with open(plan, "w", encoding="utf-8") as f:
+            f.write(CLAIM + PROMISE + "| 3 | build it -> park\n")
+        code, msg = run({"session_id": "sb", "tool_input": {"file_path": plan}}, state)
+        if code != 2 or "DANGLING HOME" not in msg or "optional-forever language" not in msg:
+            fails.append(f"combined case missing a section: {msg!r}")
+    return fails
+
+
 def selftest() -> int:
-    fails = _selftest_line_cases() + _selftest_pipeline()
+    fails = _selftest_line_cases() + _selftest_pipeline() + _selftest_dangling()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

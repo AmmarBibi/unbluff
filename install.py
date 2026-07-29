@@ -45,6 +45,7 @@ PY = f'"{sys.executable}"'
 # Short group names used by --only / --without, mapped to the event they wire.
 GROUP_EVENTS = {"rate_prompt": "UserPromptSubmit",
                 "hook_health": "SessionStart",
+                "duplicate_check": "SessionStart",
                 "stop_dispatcher": "Stop",
                 "posttooluse_dispatcher": "PostToolUse"}
 
@@ -52,7 +53,8 @@ GROUP_EVENTS = {"rate_prompt": "UserPromptSubmit",
 REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py",
                   "show_your_proof.py", "meta_audit_on_stop.py", "memory_hygiene_guard.py",
                   "fast_test_on_stop.py", "post_tooluse_dispatcher.py", "plan_defer_guard.py",
-                  "numbers_match_on_write.py")
+                  "numbers_match_on_write.py", "duplicate_registration_check.py",
+                  "close_skills_guard.py", "usage_snip_prompt.py", "pre_push_gate.py")
 
 
 def _cmd(script: str) -> str:
@@ -69,9 +71,13 @@ def desired_groups() -> dict:
         },
         "SessionStart": {
             "matcher": "*",
-            "hooks": [{"type": "command", "command": _cmd("hook_health_check.py")}],
+            "hooks": [{"type": "command", "command": _cmd("hook_health_check.py")},
+                      {"type": "command", "command": _cmd("duplicate_registration_check.py")},
+                      {"type": "command", "command": _cmd("usage_snip_prompt.py")}],
             "id": ID_PREFIX + "hook-health",
-            "description": "Validate configured hooks resolve; weekly-run each hook's selftest.",
+            "description": "Validate configured hooks resolve; weekly-run each hook's selftest; "
+                           "report any hook wired from more than one directory; ask for a usage "
+                           "snip before budget-shaped work.",
         },
         "Stop": {
             "matcher": "*",
@@ -81,10 +87,12 @@ def desired_groups() -> dict:
         },
         "PostToolUse": {
             "matcher": "Edit|Write|MultiEdit",
-            "hooks": [{"type": "command", "command": _cmd("post_tooluse_dispatcher.py")}],
+            "hooks": [{"type": "command", "command": _cmd("post_tooluse_dispatcher.py")},
+                      {"type": "command", "command": _cmd("close_skills_guard.py")}],
             "id": ID_PREFIX + "posttooluse-dispatcher",
             "description": "On edits, run plan-defer-guard (optional-forever language) and "
-                           "numbers-match (cited numbers vs source data) in one process.",
+                           "numbers-match (cited numbers vs source data) in one process; and "
+                           "verify the close-audit skills actually ran at the real session end.",
         },
     }
 

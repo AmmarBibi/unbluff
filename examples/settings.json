@@ -1,6 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Example wiring only. Replace /ABSOLUTE/PATH/TO with where you cloned this repo (or just run install.py, which writes the resolved absolute paths for you). On Windows use the full python.exe path or 'py'.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -11,7 +9,8 @@
             "timeout": 10
           }
         ],
-        "id": "unbluff:rate-prompt"
+        "id": "unbluff:rate-prompt",
+        "description": "Rate each prompt X/10 and act on a sharpened rewrite (no extra model call)."
       }
     ],
     "SessionStart": [
@@ -21,9 +20,18 @@
           {
             "type": "command",
             "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/hook_health_check.py\""
+          },
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/duplicate_registration_check.py\""
+          },
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/usage_snip_prompt.py\""
           }
         ],
-        "id": "unbluff:hook-health"
+        "id": "unbluff:hook-health",
+        "description": "Validate configured hooks resolve; weekly-run each hook's selftest; report any hook wired from more than one directory; ask for a usage snip before budget-shaped work."
       }
     ],
     "Stop": [
@@ -36,7 +44,8 @@
             "timeout": 300
           }
         ],
-        "id": "unbluff:stop-dispatcher"
+        "id": "unbluff:stop-dispatcher",
+        "description": "Run show-your-proof / meta-audit / memory-hygiene / fast-test in one process."
       }
     ],
     "PostToolUse": [
@@ -46,9 +55,14 @@
           {
             "type": "command",
             "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/post_tooluse_dispatcher.py\""
+          },
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/close_skills_guard.py\""
           }
         ],
-        "id": "unbluff:posttooluse-dispatcher"
+        "id": "unbluff:posttooluse-dispatcher",
+        "description": "On edits, run plan-defer-guard (optional-forever language) and numbers-match (cited numbers vs source data) in one process; and verify the close-audit skills actually ran at the real session end."
       }
     ]
   }

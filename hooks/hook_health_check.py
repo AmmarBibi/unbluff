@@ -99,16 +99,31 @@ def _tokens(command: str) -> list[str]:
     return [t.strip('"').strip("'") for t in raw if t.strip()]
 
 
+def _script_args(h: dict) -> list[str]:
+    """Script paths from a hook entry's `args` array.
+
+    Claude Code accepts the script either inlined in `command` ("python x.py") or passed
+    separately as {"command": "python", "args": ["x.py"]}. Reading only `command` validates
+    the interpreter and silently skips the script - a missing script in an `args` array was
+    invisible to this checker (found 2026-07-29 on a config using both styles).
+    """
+    return [a for a in (h.get("args") or []) if isinstance(a, str) and a.strip()]
+
+
 def check_config(cfg: dict) -> tuple[int, list[str]]:
     """(n_commands, problems) for a parsed settings dict.
 
     Defensive against hand-edited / third-party settings.json: any group or hook entry that is
     not the expected shape is reported as a problem, never allowed to raise. Checks each hook
-    command's executable resolves and that any ABSOLUTE script path it references exists.
-    Relative script paths are left alone (resolved at runtime against an unknown cwd).
+    command's executable resolves and that any ABSOLUTE script path it references exists
+    (from `command` AND `args`). Relative script paths are left alone (resolved at runtime
+    against an unknown cwd). Also reports any script registered from more than one directory:
+    it will run more than once per event, and if the two copies differ, which one takes effect
+    is nondeterministic.
     """
     problems: list[str] = []
     n_cmd = 0
+    registrations: dict[str, set[str]] = {}
     hooks_cfg = cfg.get("hooks") if isinstance(cfg, dict) else None
     if hooks_cfg is None:
         return 0, problems
@@ -145,9 +160,20 @@ def check_config(cfg: dict) -> tuple[int, list[str]]:
                         problems.append(f"{event}: missing executable {exe}")
                 elif shutil.which(exe) is None:
                     problems.append(f"{event}: executable not on PATH: {exe}")
-                for tok in tokens[1:]:
-                    if tok.lower().endswith(_SCRIPT_EXTS) and os.path.isabs(tok) and not os.path.exists(tok):
-                        problems.append(f"{event}: missing script {tok}")
+                for tok in tokens[1:] + _script_args(h):
+                    if not tok.lower().endswith(_SCRIPT_EXTS):
+                        continue
+                    if os.path.isabs(tok):
+                        if not os.path.exists(tok):
+                            problems.append(f"{event}: missing script {tok}")
+                        head, _, tail = tok.replace("\\", "/").rpartition("/")
+                        registrations.setdefault(tail, set()).add(head)
+    for name in sorted(registrations):
+        roots = sorted(registrations[name])
+        if len(roots) > 1:
+            problems.append(
+                f"{name} registered from {len(roots)} directories - it runs once per "
+                f"registration: " + " | ".join(roots))
     # de-duplicate, keep order
     seen: set[str] = set()
     problems = [p for p in problems if not (p in seen or seen.add(p))]
@@ -217,8 +243,34 @@ def selftest() -> int:
                 fails.append(f"malformed config '{label}' produced no problem")
         except Exception as e:  # must never raise
             fails.append(f"malformed config '{label}' RAISED {e!r}")
-    # 5. weekly selftest runner: catches a failing hook, marker written only on all-pass, counts pass/run
+    # 5. args-style declaration: the script must be validated, not just the interpreter
     import tempfile
+    missing = os.path.join(os.sep, "nope", "args_style_missing.py")
+    args_cfg = {"hooks": {"Stop": [{"hooks": [
+        {"type": "command", "command": sys.executable, "args": [missing]}]}]}}
+    _, probs = check_config(args_cfg)
+    if not any("missing script" in p for p in probs):
+        fails.append("args-style missing script NOT caught (only `command` was read)")
+
+    # 6. duplicate registration: same script name from two directories must be reported
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+        for d in (d1, d2):
+            with open(os.path.join(d, "dupe.py"), "w", encoding="utf-8") as f:
+                f.write("x = 1\n")
+        with open(os.path.join(d1, "solo.py"), "w", encoding="utf-8") as f:
+            f.write("y = 1\n")
+        dup_cfg = {"hooks": {"Stop": [{"hooks": [
+            {"type": "command", "command": f'"{sys.executable}" "{os.path.join(d1, "dupe.py")}"'},
+            {"type": "command", "command": sys.executable, "args": [os.path.join(d2, "dupe.py")]},
+            {"type": "command", "command": f'"{sys.executable}" "{os.path.join(d1, "solo.py")}"'},
+        ]}]}}
+        _, probs = check_config(dup_cfg)
+        if not any("dupe.py registered from 2 directories" in p for p in probs):
+            fails.append(f"duplicate registration NOT caught: {probs}")
+        if any("solo.py registered" in p for p in probs):
+            fails.append("false positive: singly-registered hook flagged as duplicate")
+
+    # 7. weekly selftest runner: catches a failing hook, marker written only on all-pass, counts pass/run
     with tempfile.TemporaryDirectory() as td:
         ok_hook = os.path.join(td, "ok_hook.py")
         bad_hook = os.path.join(td, "bad_hook.py")

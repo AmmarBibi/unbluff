@@ -9,8 +9,12 @@ Mechanical by design (no reasoning): command resolution is
   3. pytest markers (pytest.ini / tests/ / pyproject [tool.pytest]) -> "<python> -m pytest -x -q"
 Guards: never re-fires while Claude is already continuing from this hook (stop_hook_active);
 per-project debounce (default 10 min); 90s default cap (override per project); not-a-git-repo,
-no-changed-source, no-detectable-command, and timeout all exit 0 quietly. State lives under
-~/.claude/hooks/state/. Run with --selftest to verify the mechanics.
+no-changed-source and timeout all exit 0 quietly. State lives under ~/.claude/hooks/state/.
+Run with --selftest to verify the mechanics.
+
+no-detectable-command is the ONE skip that does not stay quiet: a repo with no test gate would
+otherwise be silently unverified forever, indistinguishable from a passing run. It says so once
+per project (only when source actually changed), then never again. See _notice_no_gate.
 """
 
 from __future__ import annotations
@@ -95,6 +99,44 @@ def _state_path(cwd: str) -> str:
     return os.path.join(STATE_DIR, "fasttest-" + hashlib.sha1(cwd.lower().encode()).hexdigest()[:16] + ".json")
 
 
+def _nogate_state_path(cwd: str) -> str:
+    return os.path.join(STATE_DIR, "nogate-" + hashlib.sha1(cwd.lower().encode()).hexdigest()[:16] + ".json")
+
+
+def _notice_no_gate(cwd: str) -> int:
+    """Say ONCE per project that no test gate exists here, so a skip cannot pass for a green run.
+
+    Only speaks when source files actually changed - i.e. you are writing code in an ungated repo.
+    Always exits 0: this is information, never a block. Adding a test command retires it naturally;
+    deleting the state file re-arms it.
+    """
+    np = _nogate_state_path(cwd)
+    if os.path.exists(np):
+        return 0
+    try:
+        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1"],
+                                   capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not _changed_source_files(porcelain):
+        return 0
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(np, "w", encoding="utf-8") as f:
+            json.dump({"ts": time.time(), "cwd": cwd}, f)
+    except OSError:
+        return 0  # cannot record it -> stay silent rather than repeat every turn
+    # Computed outside the f-string: a backslash inside an f-string expression is a SyntaxError
+    # before Python 3.12 (PEP 701), and this hook must import on older interpreters.
+    name = os.path.basename(cwd.rstrip("/\\")) or cwd
+    sys.stderr.write(
+        f"[fast-test] NO TEST GATE in '{name}': source changed, nothing was verified.\n"
+        f"[fast-test] Add one to activate the gate: .claude/fast-test.cmd, package.json "
+        f"scripts.test, or a tests/ dir.\n"
+        f"[fast-test] Said once per project. Delete {np} to hear it again.\n")
+    return 0
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -108,7 +150,7 @@ def main() -> int:
 
     cmd, timeout_s, debounce_s = detect(cwd)
     if not cmd:
-        return 0
+        return _notice_no_gate(cwd)
 
     sp = _state_path(cwd)
     try:
@@ -176,6 +218,83 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as td:
         if detect(td)[0] is not None:
             fails.append("empty dir should detect no command")
+    # 5. the two state files never collide for the same project
+    if _state_path("/x/y") == _nogate_state_path("/x/y"):
+        fails.append("fasttest and nogate state paths collide")
+    # 6. no-gate notice: speaks once on changed source, then never; silent on non-source changes
+    global STATE_DIR
+    real_state, io_mod = STATE_DIR, __import__("io")
+    with tempfile.TemporaryDirectory() as sd:
+        STATE_DIR = sd
+
+        def _say(repo: str, path: str) -> str:
+            """Write `path` into `repo`, run the notice, return whatever it printed to stderr."""
+            with open(os.path.join(repo, path), "w", encoding="utf-8") as f:
+                f.write("x = 1\n")
+            real_err, sys.stderr = sys.stderr, io_mod.StringIO()
+            try:
+                _notice_no_gate(repo)
+                return sys.stderr.getvalue()
+            finally:
+                sys.stderr = real_err
+
+        def _new_repo(stack):
+            d = stack.enter_context(tempfile.TemporaryDirectory())
+            try:
+                if subprocess.run(["git", "-C", d, "init", "-q"], capture_output=True).returncode:
+                    return None
+            except (OSError, subprocess.SubprocessError):
+                return None
+            return d
+
+        with __import__("contextlib").ExitStack() as stack:
+            code_repo, docs_repo = _new_repo(stack), _new_repo(stack)
+            if code_repo and docs_repo:
+                if "NO TEST GATE" not in _say(code_repo, "a.py"):
+                    fails.append("no-gate notice did not fire on changed source")
+                if _say(code_repo, "b.py") != "":
+                    fails.append("no-gate notice fired twice - it must speak once per project")
+                # separate clean repo: only a non-source file ever changes here
+                if _say(docs_repo, "notes.md") != "":
+                    fails.append("no-gate notice fired on a non-source change")
+            else:
+                print("SELFTEST SKIP: git unavailable, no-gate notice untested")
+        STATE_DIR = real_state
+    if STATE_DIR != real_state:  # paranoia: never leave the global patched
+        STATE_DIR = real_state
+        fails.append("STATE_DIR was left patched after selftest")
+    # 7. main() INTEGRATION: the no-gate notice must actually be reachable through main().
+    #    Testing _notice_no_gate() alone leaves the one line that calls it uncovered - a mutation
+    #    reverting `return _notice_no_gate(cwd)` to `return 0` passed checks 1-6 untouched
+    #    (verified 2026-07-29). Drive the real entry point, not just the helper.
+    real_state2 = STATE_DIR
+    with tempfile.TemporaryDirectory() as sd:
+        STATE_DIR = sd
+        with __import__("contextlib").ExitStack() as stack:
+            repo = stack.enter_context(tempfile.TemporaryDirectory())
+            try:
+                ok = subprocess.run(["git", "-C", repo, "init", "-q"],
+                                    capture_output=True).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                ok = False
+            if ok:
+                with open(os.path.join(repo, "app.py"), "w", encoding="utf-8") as f:
+                    f.write("x = 1\n")
+                real_in, real_err = sys.stdin, sys.stderr
+                sys.stdin = io_mod.StringIO(json.dumps({"cwd": repo}))
+                sys.stderr = io_mod.StringIO()
+                try:
+                    rc = main()
+                    emitted = sys.stderr.getvalue()
+                finally:
+                    sys.stdin, sys.stderr = real_in, real_err
+                if rc != 0:
+                    fails.append(f"main() on ungated repo should exit 0, got {rc}")
+                if "NO TEST GATE" not in emitted:
+                    fails.append("main() did not reach the no-gate notice (wiring untested)")
+            else:
+                print("SELFTEST SKIP: git unavailable, main() integration untested")
+        STATE_DIR = real_state2
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")
