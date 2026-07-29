@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -329,8 +330,19 @@ def selftest() -> int:
         marker = os.path.join(r, "LOCAL_HOOK_RAN").replace("\\", "/")
         localdir = os.path.join(r, ".git", "hooks")
         os.makedirs(localdir, exist_ok=True)
-        with open(os.path.join(localdir, "post-commit"), "w", encoding="utf-8", newline="\n") as f:
+        local_hook = os.path.join(localdir, "post-commit")
+        with open(local_hook, "w", encoding="utf-8", newline="\n") as f:
             f.write(f'#!/bin/sh\necho ran > "{marker}"\n')
+        # The dispatcher invokes a repo-local hook as an executable, so it needs the execute
+        # bit. Windows ignores mode bits entirely, which is why this passed on the authoring
+        # machine and failed on EVERY Unix CI runner with exit 126 ("found but not
+        # executable"), 2026-07-29. Fail-soft: a filesystem without mode bits still runs the
+        # assertions below.
+        try:
+            mode = os.stat(local_hook).st_mode
+            os.chmod(local_hook, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except OSError:
+            pass
 
         def _dispatch() -> int:
             try:
