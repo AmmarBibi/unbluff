@@ -129,8 +129,21 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
     They differ when the defect lives in one file and the test that catches it lives in
     another - which is exactly the shape of a TWIN defect, so the harness has to express it.
     """
+    # Validate the ANCHOR even when the mutation will be skipped. The early return used to
+    # precede this, so a #30 anchor that had drifted was never checked on the authoring
+    # machine and the harness still printed "all mutations caught".
+    live = os.path.join(REPO, "hooks", hook + ".py")
+    try:
+        with open(live, encoding="utf-8") as f:
+            live_text = f.read()
+    except OSError as e:
+        return "HARNESS ERROR: cannot read %s (%s)" % (hook, e)
+    for find, _replace in edits:
+        if find not in live_text:
+            return "HARNESS ERROR: mutation anchor not found: %r" % (find[:70],)
+
     if posix_only and os.name == "nt":
-        return "SKIP (posix only - CI is the only place this can fail)"
+        return "SKIPPED (posix only - this machine cannot run it; CI must)"
     scratch = tempfile.mkdtemp(prefix="unbluff-mut-")
     try:
         shutil.copytree(os.path.join(REPO, "hooks"), os.path.join(scratch, "hooks"),
@@ -165,6 +178,7 @@ def main() -> int:
     args = ap.parse_args()
     survivors = []
     errors = []
+    skipped = []
     for entry in MUTATIONS:
         hook, finding, desc, edits, posix_only = entry[:5]
         verify = entry[5] if len(entry) > 5 else ""
@@ -176,7 +190,15 @@ def main() -> int:
             survivors.append((hook, finding))
         elif verdict.startswith("HARNESS ERROR"):
             errors.append((hook, finding, verdict))
+        elif verdict.startswith("SKIPPED"):
+            skipped.append((hook, finding))
     print()
+    # ALWAYS print the denominator. "all mutations caught" was printed unqualified while a
+    # posix-only mutation had never executed on this machine - so deleting the os.chmod it
+    # guards left the harness certifying every fix as pinned. This file's output is the
+    # evidence base for the whole fix round; it must not overstate what it ran.
+    executed = len(MUTATIONS) - len(skipped)
+    print("%d of %d mutations executed, %d skipped" % (executed, len(MUTATIONS), len(skipped)))
     if errors:
         print("HARNESS ERRORS (%d) - a mutation could not be applied, so nothing was proven:"
               % len(errors))
@@ -185,8 +207,17 @@ def main() -> int:
     if survivors:
         print("MUTATIONS SURVIVED (%d): %s" % (len(survivors), survivors))
         print("Each one names a fix whose regression test does not actually bite.")
+    if skipped:
+        print("SKIPPED (%d): %s" % (len(skipped), skipped))
+        print("  A skip is NOT a pass - these fixes are unproven on this machine.")
+        if os.environ.get("CI"):
+            print("  CI must not skip: failing.")
+            return 1
     if not survivors and not errors:
-        print("all mutations caught - every fix above is pinned by a test that fails without it")
+        if skipped:
+            print("every EXECUTED mutation was caught; %d remain unproven here" % len(skipped))
+        else:
+            print("all mutations caught - every fix is pinned by a test that fails without it")
     return 1 if (survivors or errors) else 0
 
 

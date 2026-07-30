@@ -519,3 +519,81 @@ produced most of these; every one was live in v1.3.0 with CI green.
 - `run_selftests.py`, `tests/test_integration.py`, `tools/check_python_floor.py`, `tools/check_skill_deps.py` and `tools/regen_example_settings.py --check` all green.
 - CI green on ubuntu/macos/windows x py3.8/3.9/3.11/3.12.
 - A fresh `adversarial-review` run over the same unit returns no confirmed finding of a class already listed here.
+
+## P8 - second adversarial review (run `wf_c2218ef3-6d2`, 2026-07-30)
+
+Fresh 4-lens review over the units this pass changed. 21 agents, 16 raw findings, 13 survived a
+refuter defaulting to `refuted=true`, deduped to **11 unique defects**.
+
+**Definition-of-done result: HOLDS.** Zero confirmed findings of a class already listed in P1-P7.
+The three refuted findings were exactly the known-class re-reports (sh-absent selftest skips,
+git-unanswerable in pre_push_gate, image-only prompt), which is the check working as intended.
+
+**But 7 of the 11 were introduced BY the fixes**, concentrated in the newly-written verification
+tooling - the tools whose green output is the evidence for everything else. That is the single
+most important result of this pass and it is why the plan does not end at P7.
+
+### FIXED in this pass
+
+- **D1 [CRITICAL] `pre_push_gate` GLOBAL_SHIM + `reference-transaction`.** Finding 27's fix added
+  `reference-transaction` to CLIENT_HOOKS; git fires it once per ref per transaction phase, and
+  the shim forked `basename` + `git rev-parse` + `grep` every invocation. Measured: 100-tag
+  `git fetch` 0.58s -> 106s (182x, 312 invocations); commit 0.26s -> 4.5s. `install_global()` sets
+  core.hooksPath GLOBALLY, so this would have been machine-wide and permanent.
+  **Was latent, not live** - `~/.claude/githooks` still held the 16 pre-fix dispatchers, so it
+  would have landed on the next `--install-global`. Fixed on both axes, because the refuter showed
+  the name alone was only ~54% of the cost: `HIGH_FREQUENCY_HOOKS` excludes it INSIDE
+  `git_client_hook_names()` (removing it from the tuple would not work - the function unions git's
+  own `*.sample` list), and the shim's common path now forks NOTHING.
+  Removing the fork immediately exposed a second bug the selftest caught: `${0##*/}` strips only
+  at `/`, so a dispatcher invoked with a Windows path kept the whole path as the hook name and
+  every hook silently no-opped. Now stripped for both separators.
+- **D2 [HIGH] `tools/mutation_check.py`.** A SKIP was invisible: `main()` bucketed only SURVIVED
+  and HARNESS ERROR, so on Windows mutation #30 never ran and the last line still read
+  "all mutations caught". Deleting the `os.chmod` it guards left the harness certifying every fix
+  as pinned. Now prints the denominator ("25 of 26 executed, 1 skipped"), never claims all-green
+  while anything is skipped, fails hard under `CI`, and validates the anchor BEFORE the skip so a
+  drifted anchor cannot hide behind it.
+- **D3 [HIGH] `tools/check_review_freshness.py`.** "git cannot answer" was bucketed as FRESH.
+  Reproduced without stubbing via `git archive HEAD` into a scratch dir: all 8 correctly-STALE
+  units flipped to FRESH. The release gate built to enforce "CI green is not enough" would itself
+  have exited 0 having asked git nothing - the same contract this pass wrote into
+  `newest_source_mtime`, broken in the tool written to encode the lesson. Now a fourth `unknown`
+  bucket, excluded from the fresh numerator and blocking under `--release`.
+- **D4 [HIGH] `tools/check_review_freshness.py`.** Freshness compared against the last COMMIT
+  while `--record` stamps the WORKING TREE it just reviewed, and `run_selftests` invokes it mid
+  development with a dirty tree. Appending `def backdoor(): return 42` to a reviewed hook left it
+  reporting all-clear. Now `git status --porcelain -z` marks dirty units STALE. Deliberately not
+  solved with mtimes: the prescribed review -> record -> commit order would flip just-reviewed
+  units to STALE.
+
+### OPEN - scheduled, not deferred
+
+- **D5 [HIGH] `fast_test_on_stop.py`:270** - `os.path.isdir(cwd/.git)` is False in a linked
+  worktree or submodule (`.git` is a FILE there), so the Stop gate AND its `_notice_no_gate`
+  safety net are both dead in every worktree. Reproduced: host rc=2, worktree rc=0 with identical
+  config. Pre-existing, not introduced. Fix: `git rev-parse --is-inside-work-tree`.
+  `meta_audit_on_stop.py:78` shares the probe - check the twin.
+- **D6 [HIGH] `fast_test_on_stop.py`:86-94** - one malformed `timeout=`/`debounce=` line makes
+  `_read_override` discard the COMMAND too, so `timeout=5m` yields "no test command - nothing to
+  verify, allowing push". With a `tests/` dir present it silently downgrades to the weaker
+  auto-detected command with no message at all. Pre-existing. Fix: parse per-line, keep the
+  command, warn naming the file and line.
+- **D7 [HIGH] `pre_push_gate.py`:264-268** - `install()` writes to `<git-common-dir>/hooks` without
+  reading `core.hooksPath`, which git honours INSTEAD of `$GIT_DIR/hooks` with no fallback. So in
+  a husky/lefthook repo `--install` prints "installed" and the repo is not gated - precisely the
+  case `install_global()`'s own message prescribes per-repo install for. Fix: read
+  `core.hooksPath` and write there, or refuse with a clear message.
+- **D8-D11** - the remaining survivors (weekly-sweep aggregate time budget with no deadline and a
+  marker written only after the whole loop; `duplicate_registration_check`'s selftest reading the
+  invoking cwd's real `.claude/settings.json` so it is not hermetic; and two lower-severity items).
+  Full detail in the run transcript: `subagents/workflows/wf_c2218ef3-6d2/journal.jsonl`.
+
+### The lesson this round actually taught
+
+The first review found 34 defects in code written normally. This review found 11 in code written
+*specifically to fix those 34*, with regression tests and mutation testing applied throughout - and
+7 were newly introduced, most of them in the verification tooling itself. Writing a tool to check
+a property does not make the tool have that property. `check_review_freshness.py` shipped with the
+exact "unanswerable collapses to pass" defect it exists to prevent, in the same commit that fixed
+that defect elsewhere.

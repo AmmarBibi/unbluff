@@ -307,6 +307,17 @@ CLIENT_HOOKS = ("applypatch-msg", "pre-applypatch", "post-applypatch", "pre-comm
 # installing dispatchers for them in a client-side hooks dir would be noise.
 SERVER_HOOKS = frozenset({"pre-receive", "update", "proc-receive", "post-receive", "post-update"})
 
+# Hooks git fires MANY TIMES per command - reference-transaction runs once per ref per
+# transaction phase, so a 100-tag fetch invokes it 300+ times. Even a fork-free dispatcher
+# multiplies by that count, and install_global() sets core.hooksPath GLOBALLY, so the cost is
+# machine-wide and permanent. Measured on this machine before exclusion: git fetch 0.58s ->
+# 106s. Excluded from the global install; a repo that genuinely needs one can wire it locally.
+#
+# Subtracted INSIDE git_client_hook_names(), NOT by removing it from CLIENT_HOOKS: that
+# function UNIONS git's own *.sample list, so a name dropped from the tuple would come
+# straight back. This is the same detect-don't-list trap as the twin rosters, one layer up.
+HIGH_FREQUENCY_HOOKS = frozenset({"reference-transaction"})
+
 
 def git_client_hook_names() -> tuple:
     """Client-side hook names git ITSELF knows about (its template dir's *.sample files).
@@ -321,10 +332,10 @@ def git_client_hook_names() -> tuple:
         r = subprocess.run(["git", "--exec-path"], capture_output=True, text=True, timeout=10,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError, ValueError):
-        return tuple(sorted(names - SERVER_HOOKS))
+        return tuple(sorted(names - SERVER_HOOKS - HIGH_FREQUENCY_HOOKS))
     exec_path = (r.stdout or "").strip()
     if r.returncode != 0 or not exec_path:
-        return tuple(sorted(names - SERVER_HOOKS))
+        return tuple(sorted(names - SERVER_HOOKS - HIGH_FREQUENCY_HOOKS))
     for rel in ("../../share/git-core/templates/hooks", "templates/hooks",
                 "../../templates/hooks", "../../../share/git-core/templates/hooks"):
         d = os.path.normpath(os.path.join(exec_path, rel))
@@ -337,7 +348,7 @@ def git_client_hook_names() -> tuple:
         except OSError:
             pass
         break
-    return tuple(sorted(names - SERVER_HOOKS))
+    return tuple(sorted(names - SERVER_HOOKS - HIGH_FREQUENCY_HOOKS))
 
 # Runs the universal gate (pre-push only), then ALWAYS delegates to the repo's own hook of the
 # same name, so project-specific hooks keep working. The gate reads no stdin (</dev/null), leaving
@@ -354,22 +365,39 @@ def git_client_hook_names() -> tuple:
 #     always, since that is what makes this dispatcher run at all. Measured 2026-07-29: it
 #     returned ~/.claude/githooks in both a plain repo and a worktree, so it would have
 #     disabled delegation EVERYWHERE. --git-common-dir is immune to hooksPath.
+# PERFORMANCE IS CORRECTNESS HERE. This runs for EVERY client hook in EVERY repo on the
+# machine, and git fires some hooks once per ref. The first version forked `basename`, `git
+# rev-parse` and `grep` on every single invocation: measured 0.58s -> 106s on a 100-tag fetch
+# (312 invocations). The common case now forks NOTHING:
+#   * ${0##*/} is a shell builtin, not `basename` - stripped for BOTH separators, because a
+#     dispatcher invoked with a Windows path leaves backslashes in $0 and a /-only strip then
+#     returns the whole path, so the hook name never matches and every hook silently no-ops
+#     (caught by the selftest the moment the fork was removed)
+#   * git exports GIT_DIR, so the usual repo needs no `rev-parse` at all
+#   * the `-f` test short-circuits before `grep` when the repo has no hook of this name,
+#     which is the overwhelmingly common case
+# The rev-parse fallback survives ONLY for the linked-worktree case (finding 5): a worktree's
+# GIT_DIR is .git/worktrees/<name>, which has no hooks dir, so we re-resolve to the common dir
+# there and nowhere else.
 GLOBAL_SHIM = """#!/bin/sh
 # Universal git hook dispatcher - managed by ~/.claude/hooks/pre_push_gate.py
 # 1. universal pre-push gate  2. this repo's own hook, if it has one (never overridden)
 # Bypass once with: git push --no-verify
-hook=`basename "$0"`
+hook=${{0##*/}}
+hook=${{hook##*\\\\}}
 if [ "$hook" = "pre-push" ]; then
     "{py}" "{script}" < /dev/null || exit $?
 fi
-gitdir=`git rev-parse --git-common-dir 2>/dev/null` || exit 0
+gitdir="$GIT_DIR"
+if [ -z "$gitdir" ] || [ ! -d "$gitdir/hooks" ]; then
+    gitdir=`git rev-parse --git-common-dir 2>/dev/null` || exit 0
+fi
 [ -n "$gitdir" ] || exit 0
 local_hook="$gitdir/hooks/$hook"
+[ -f "$local_hook" ] || exit 0
 # Delegate to the repo's own hook - unless it is one of ours, which would run the gate twice.
-if [ -f "$local_hook" ] && ! grep -q pre_push_gate.py "$local_hook" 2>/dev/null; then
-    exec "$local_hook" "$@"
-fi
-exit 0
+grep -q pre_push_gate.py "$local_hook" 2>/dev/null && exit 0
+exec "$local_hook" "$@"
 """
 
 

@@ -70,8 +70,49 @@ def _parse(ts: str):
         return None
 
 
-def evaluate() -> tuple[list, list, list]:
-    """(stale, unreviewed, fresh) - each a list of (unit, detail) tuples."""
+def dirty_units(unit_list: list) -> set:
+    """Units with UNCOMMITTED changes in the working tree.
+
+    last_change() reads commit history only, but --record stamps now() against the WORKING
+    TREE the reviewer just read, and run_selftests invokes this on every gate run - i.e. mid
+    development, with a dirty tree. Without this, appending `def backdoor(): return 42` to a
+    reviewed hook leaves the gate printing "all units have an adversarial review newer than
+    their last change" and exiting 0. Not solved by swapping in mtimes: the prescribed
+    review -> record -> commit order would then flip every just-reviewed unit to STALE.
+    """
+    try:
+        r = subprocess.run(["git", "-C", REPO, "status", "--porcelain", "-z", "--"] + unit_list,
+                           capture_output=True, text=True, timeout=30,
+                           encoding="utf-8", errors="surrogateescape")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return set()
+    if r.returncode != 0:
+        return set()
+    out = set()
+    fields = (r.stdout or "").split("\0")
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        xy, path = entry[:2], entry[3:]
+        if "R" in xy or "C" in xy:
+            i += 1
+        out.add(path.replace("\\", "/"))
+    return out
+
+
+def evaluate() -> tuple[list, list, list, list]:
+    """(stale, unreviewed, unknown, fresh) - each a list of (unit, detail) tuples.
+
+    `unknown` is its own bucket because an unanswerable freshness question is not a passing
+    one. Folding it into `fresh` made the release gate exit 0 having asked git nothing -
+    reproduced with `git archive HEAD` into a scratch dir (the sdist / exported-release-tree
+    case), where all 8 correctly-STALE units flipped to FRESH. That is the very contract this
+    same fix round wrote into pre_push_gate.newest_source_mtime, broken in the tool built to
+    enforce the lesson.
+    """
     ledger = load_ledger()
     newest: dict = {}
     for entry in ledger:
@@ -83,21 +124,30 @@ def evaluate() -> tuple[list, list, list]:
         if unit not in newest or when > newest[unit][0]:
             newest[unit] = (when, entry)
 
-    stale, unreviewed, fresh = [], [], []
-    for unit in units():
+    all_units = units()
+    dirty = dirty_units(all_units)
+    stale, unreviewed, unknown, fresh = [], [], [], []
+    for unit in all_units:
         if unit not in newest:
             unreviewed.append((unit, "never adversarially reviewed"))
             continue
         reviewed_at, entry = newest[unit]
-        changed = _parse(last_change(unit) or "")
-        if changed is None:
-            fresh.append((unit, f"reviewed {reviewed_at.date()} (change date unknown)"))
+        raw = last_change(unit)
+        changed = _parse(raw or "")
+        if raw is None:
+            unknown.append((unit, "git could not answer when this last changed "
+                                  "(not a checkout, or git unavailable)"))
+        elif changed is None:
+            unknown.append((unit, f"git returned an unparseable date: {raw!r}"))
+        elif unit in dirty:
+            stale.append((unit, f"UNCOMMITTED changes in the working tree since the "
+                                f"{reviewed_at.date()} review (run {entry.get('run_id', '?')})"))
         elif changed > reviewed_at:
             stale.append((unit, f"changed {changed.date()} but last reviewed "
                                 f"{reviewed_at.date()} (run {entry.get('run_id', '?')})"))
         else:
             fresh.append((unit, f"reviewed {reviewed_at.date()}, unchanged since"))
-    return stale, unreviewed, fresh
+    return stale, unreviewed, unknown, fresh
 
 
 def record(args) -> int:
@@ -141,18 +191,22 @@ def main() -> int:
             sys.exit("ERROR: --record needs --unit and --run-id")
         return record(args)
 
-    stale, unreviewed, fresh = evaluate()
-    total = len(stale) + len(unreviewed) + len(fresh)
+    stale, unreviewed, unknown, fresh = evaluate()
+    total = len(stale) + len(unreviewed) + len(unknown) + len(fresh)
     # Always print the DENOMINATOR: "0 stale" is meaningless without knowing how many were asked.
     print(f"[review-freshness] {len(fresh)}/{total} units reviewed since their last change")
     for unit, why in stale:
         print(f"  STALE:      {unit} - {why}")
     for unit, why in unreviewed:
         print(f"  UNREVIEWED: {unit} - {why}")
-    if not stale and not unreviewed:
+    for unit, why in unknown:
+        print(f"  UNKNOWN:    {unit} - {why}")
+    if not stale and not unreviewed and not unknown:
         print("  all units have an adversarial review newer than their last change")
-    if args.release and (stale or unreviewed):
-        print(f"\nRELEASE BLOCKED: {len(stale)} stale, {len(unreviewed)} unreviewed.")
+    if args.release and (stale or unreviewed or unknown):
+        print(f"\nRELEASE BLOCKED: {len(stale)} stale, {len(unreviewed)} unreviewed, "
+              f"{len(unknown)} unknown.")
+        print("An unanswerable freshness question is not a passing one.")
         print("Run the adversarial-review skill over them, then record it with --record.")
         return 1
     return 0
