@@ -95,12 +95,107 @@ def detect(cwd: str) -> tuple[str | None, int, int]:
     return None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
 
 
+def _kill_tree(proc) -> None:
+    """Kill the child AND everything it spawned. Killing only the child leaves grandchildren
+    holding the captured pipe, which is what hung the caller indefinitely."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=20)
+        else:
+            import signal
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
+def run_tests(cmd: str, cwd: str, timeout_s: int) -> tuple[int | None, str]:
+    """(returncode, combined output); returncode None means the timeout fired.
+
+    Lives here, not in pre_push_gate, because BOTH gates run a project's test command and both
+    had the same defect - pre_push_gate imports this module, so this is the only direction the
+    shared code can go. Fixing it in one caller would have left the other hanging.
+
+    subprocess.run(timeout=) bounds NOTHING: it kills the DIRECT child, then calls communicate()
+    again with no timeout, blocking until every writer closes the pipe. A vitest/jest watcher, a
+    pytest-xdist worker, a gradle daemon or a dev server started by an integration test all
+    outlive their parent. At push time that hung `git push` with no output; here it hung the end
+    of the turn just as silently.
+
+    Two distinct hazards, both bounded:
+      * the command itself overruns -> kill the TREE, report the timeout
+      * the command exits but something it spawned still holds stdout -> the verdict is already
+        known, so return it at once and kill the survivor rather than waiting on the pipe
+    The reader is a daemon thread and never calls communicate(): a second concurrent
+    communicate() from the timeout path races Popen's own wait lock.
+    """
+    import threading
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kw["start_new_session"] = True  # own process group, so killpg reaches the whole tree
+    proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            universal_newlines=True, encoding="utf-8", errors="replace", **kw)
+    box = {"out": ""}
+
+    def reader():
+        try:
+            box["out"] = proc.stdout.read() or ""
+        except Exception:
+            pass
+        finally:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=reader)
+    t.daemon = True   # can never keep this process alive, whatever the pipe does
+    t.start()
+
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    t.join(0.5 if timed_out else 2.0)
+    if timed_out or t.is_alive():
+        _kill_tree(proc)   # release the pipe; never leave what we spawned running
+        t.join(5)
+    return (None if timed_out else proc.returncode), box["out"]
+
+
+def _state_key(cwd: str) -> str:
+    """One canonical spelling of a project root, so every caller lands on the same state file.
+
+    pre_push_gate and fast_test_on_stop share this state and are the "one source of truth" the
+    docstring promises - but on Windows one of them hashed `C:\\a\\b` and the other `C:/a/b`, so
+    a pass recorded by either was invisible to the other and the advertised fast path could
+    never fire (findings 28, 34). normcase folds separators and case on Windows and is a no-op
+    on POSIX, where two differently-cased paths really are two directories; realpath collapses
+    symlinked and 8.3-short-name spellings of the same root.
+    """
+    try:
+        p = os.path.realpath(cwd)
+    except OSError:
+        p = cwd
+    return os.path.normcase(os.path.abspath(p)).replace("\\", "/")
+
+
 def _state_path(cwd: str) -> str:
-    return os.path.join(STATE_DIR, "fasttest-" + hashlib.sha1(cwd.lower().encode()).hexdigest()[:16] + ".json")
+    return os.path.join(STATE_DIR, "fasttest-" + hashlib.sha1(
+        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
 
 
 def _nogate_state_path(cwd: str) -> str:
-    return os.path.join(STATE_DIR, "nogate-" + hashlib.sha1(cwd.lower().encode()).hexdigest()[:16] + ".json")
+    return os.path.join(STATE_DIR, "nogate-" + hashlib.sha1(
+        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
 
 
 def _notice_no_gate(cwd: str) -> int:
@@ -171,12 +266,8 @@ def main() -> int:
     os.makedirs(STATE_DIR, exist_ok=True)
     started = time.time()
     try:
-        run = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True,
-                             timeout=timeout_s, encoding="utf-8", errors="replace")
-        rc, tail_src = run.returncode, (run.stdout or "") + "\n" + (run.stderr or "")
-    except subprocess.TimeoutExpired:
-        rc, tail_src = None, ""
-    except (OSError, subprocess.SubprocessError):
+        rc, tail_src = run_tests(cmd, cwd, timeout_s)
+    except (OSError, ValueError, subprocess.SubprocessError):
         return 0
 
     with open(sp, "w", encoding="utf-8") as f:
@@ -221,6 +312,47 @@ def selftest() -> int:
     # 5. the two state files never collide for the same project
     if _state_path("/x/y") == _nogate_state_path("/x/y"):
         fails.append("fasttest and nogate state paths collide")
+    # 5b. [findings 28, 34] pre_push_gate SHARES this state file - "same command, same meaning,
+    # one source of truth". On Windows one hashed `C:\a\b` and the other `C:/a/b`, so every
+    # _record_pass was orphaned and the advertised fast path could never fire.
+    if os.name == "nt":
+        if _state_path("C:/a/b") != _state_path("C:\\a\\b"):
+            fails.append("state key differs by separator - the two gates cannot share a pass")
+        if _state_path("C:/A/B") != _state_path("c:/a/b"):
+            fails.append("state key is case-sensitive on Windows - one repo, two state files")
+    else:
+        # The old key lowercased unconditionally, so on a case-SENSITIVE filesystem two
+        # genuinely different repos silently shared one state file - each suppressing the
+        # other's run. Case must be preserved here.
+        if _state_path("/x/Y") == _state_path("/x/y"):
+            fails.append("state key folds case on POSIX - two different repos share a file")
+    # 5c. a non-ASCII project root must produce a key at all, not a UnicodeEncodeError
+    try:
+        _state_path("/tmp/José/café")
+    except Exception as e:
+        fails.append("non-ASCII project root broke the state key: %r" % (e,))
+    # 5d. [finding 10] run_tests must be BOUNDED. Two separate hazards, and this hook has to
+    # survive both on its own - the identical defect at push time hung `git push`, and here it
+    # hung the end of every turn just as silently. Tested at this level as well as in
+    # pre_push_gate so that neither gate depends on the other's suite to stay honest.
+    _py = sys.executable.replace("\\", "/")
+    t0 = time.time()
+    rc_b, _ = run_tests('"%s" -c "import subprocess,sys; '
+                        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])\""
+                        % _py, os.getcwd(), 5)
+    took = time.time() - t0
+    if took > 30:
+        fails.append("run_tests did not bound a grandchild holding the pipe (%.0fs)" % took)
+    if rc_b not in (0, 1):
+        fails.append("command exited but run_tests reported %r instead of its real code" % rc_b)
+    # a command that genuinely overruns must report the timeout, not a verdict
+    t1 = time.time()
+    rc_t, _ = run_tests('"%s" -c "import time; time.sleep(60)"' % _py, os.getcwd(), 3)
+    if rc_t is not None:
+        fails.append("run_tests returned %r for a command that overran its timeout" % rc_t)
+    if time.time() - t1 > 30:
+        fails.append("run_tests timeout is not bounded (%.0fs)" % (time.time() - t1))
+
     # 6. no-gate notice: speaks once on changed source, then never; silent on non-source changes
     global STATE_DIR
     real_state, io_mod = STATE_DIR, __import__("io")

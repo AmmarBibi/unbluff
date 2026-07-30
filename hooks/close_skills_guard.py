@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 
 HOOK_NAME = "close_skills_guard"
@@ -37,7 +38,14 @@ def _target_file(tool_input: dict) -> bool:
 
 
 def _iter_entries(transcript_path: str):
-    """Yield parsed JSONL entries from the transcript, skipping unparseable lines."""
+    """Yield parsed JSONL OBJECTS from the transcript, skipping unparseable and non-object lines.
+
+    The isinstance filter is load-bearing. A single malformed-but-parseable line - an
+    interleaved write, a future harness record type that is not an object, a hand-repaired
+    truncation - used to reach _is_genuine_user as a list, raise AttributeError, and get
+    swallowed by main()'s catch-all. From that point every close-signal write passed in
+    silence: the guard was decoration and nothing said so.
+    """
     if not transcript_path or not os.path.isfile(transcript_path):
         return
     try:
@@ -47,51 +55,97 @@ def _iter_entries(transcript_path: str):
                 if not line:
                     continue
                 try:
-                    yield json.loads(line)
+                    obj = json.loads(line)
                 except ValueError:
                     continue
+                if isinstance(obj, dict):
+                    yield obj
     except OSError:
         return
 
 
-def _is_genuine_user(entry: dict) -> bool:
-    """A real user prompt (content is a plain str, or its first block is type 'text') - NOT a
-    tool_result (those are also role 'user' but carry a tool_result content block), and NOT a
-    harness-injected entry.
+# Text the HARNESS writes into a role=user entry. None of it is the user speaking, and each one
+# wrongly reset the detection window - telling Claude to re-run four expensive audit skills
+# after a correct close, and looping if another injection arrived during that stretch.
+_SYNTHETIC_PREFIXES = (
+    "[Request interrupted",
+    "<command-name>", "<command-message>", "<command-args>", "<local-command-",
+    "<system-reminder>", "<task-notification>", "<bash-input>", "<bash-stdout>",
+    "<bash-stderr>", "Caveat:", "This session is being continued",
+)
 
-    Invoking a Skill makes the harness inject that skill's instructions back into the
-    transcript as a role='user' entry whose first block is plain text - structurally identical
-    to a real prompt. Counting it as "the last user message" put every skill invoked BEFORE it
-    outside the window, and the LAST skill invoked always injects after its own invocation. The
-    guard therefore reported all four missing however many were actually run - unsatisfiable by
-    construction (observed 2026-07-29 with all four invoked in one turn).
 
-    Injected entries are marked isMeta=True and carry sourceToolUseID; a real prompt has
-    neither. Structural, so it does not depend on the wording of any particular injection.
+def _first_text(content) -> str | None:
+    """The first text in this content, or None if it carries none.
+
+    Scans ANY text block rather than content[0]. A prompt that leads with a pasted IMAGE has
+    content [{image}, {text}], so the content[0] test read it as "not a user message" - the
+    window never reset and the guard passed silently. usage_snip_prompt.py asks the user for a
+    screenshot, so the two v1.3.0 hooks interlocked: the guard went blind on exactly the turn
+    the other one requests. Verified against real transcripts.
     """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if isinstance(text, str):
+                    return text
+    return None
+
+
+def _is_synthetic(content) -> bool:
+    text = _first_text(content)
+    return text is not None and text.lstrip().startswith(_SYNTHETIC_PREFIXES)
+
+
+def _is_genuine_user(entry) -> bool:
+    """True iff this entry is the USER speaking - not a tool_result, not a harness injection.
+
+    Two-tier by measurement, not by taste. Across 138 real transcripts the harness marks
+    genuine prompts with `origin: {"kind": "human"}` (396 of them) and background injections
+    with other kinds (150 task-notification) or isMeta (72). Where `origin` is present it is
+    authoritative. But 49 entries carried NO origin at all, and 12 of those were genuine
+    prompts ("continue", "yes go ahead") - so keying ONLY on origin would reject real user
+    turns and fire the guard after a correct close. Hence origin first, shape second.
+    """
+    if not isinstance(entry, dict):
+        return False
     if entry.get("isMeta") or entry.get("sourceToolUseID"):
         return False
-    msg = entry.get("message") or entry
+    msg = entry.get("message")
+    if not isinstance(msg, dict):
+        msg = entry
     if msg.get("role") != "user":
         return False
     content = msg.get("content")
-    if isinstance(content, str):
-        return True
-    if isinstance(content, list) and content and isinstance(content[0], dict):
-        return content[0].get("type") == "text"
-    return False
+
+    origin = entry.get("origin")
+    if isinstance(origin, dict) and origin.get("kind"):
+        # Authoritative when written: 'human' is the user, every other kind is the harness.
+        # A future kind is therefore excluded by default, which is the safe direction.
+        return origin.get("kind") == "human"
+
+    if _is_synthetic(content):
+        return False
+    # A tool_result or an image-only entry has no text at all and is not a prompt.
+    return _first_text(content) is not None
 
 
 def _skills_invoked(entry: dict) -> set[str]:
     """The set of skill names invoked via the Skill tool in this entry's tool_use blocks."""
-    msg = entry.get("message") or entry
+    msg = entry.get("message")
+    if not isinstance(msg, dict):
+        msg = entry
     content = msg.get("content")
     out: set[str] = set()
     if isinstance(content, list):
         for block in content:
             if (isinstance(block, dict) and block.get("type") == "tool_use"
                     and block.get("name") == "Skill"):
-                skill = (block.get("input") or {}).get("skill")
+                inp = block.get("input")
+                skill = inp.get("skill") if isinstance(inp, dict) else None
                 if isinstance(skill, str):
                     out.add(skill.strip().lower())
     return out
@@ -151,8 +205,16 @@ def main() -> int:
 
 # ------------------------------------------------------------------ selftest
 
+_MK_SEQ = [0]
+
+
 def _mk(transcript_lines: list[dict], tmp) -> str:
-    p = os.path.join(tmp, "t.jsonl")
+    # One file PER fixture. Writing them all to "t.jsonl" meant a later fixture silently
+    # rewrote an earlier one still referenced by a pending assertion, so the subprocess case
+    # was reading a transcript belonging to a different scenario and passing for the wrong
+    # reason (found 2026-07-29 while adding the main() coverage).
+    _MK_SEQ[0] += 1
+    p = os.path.join(tmp, "t%d.jsonl" % _MK_SEQ[0])
     with open(p, "w", encoding="utf-8") as f:
         for e in transcript_lines:
             f.write(json.dumps(e) + "\n")
@@ -178,6 +240,51 @@ def _tool_result(text):
 def _skill(name):
     return {"message": {"role": "assistant",
                         "content": [{"type": "tool_use", "name": "Skill", "input": {"skill": name}}]}}
+
+
+# --- fixtures taken from REAL transcripts (138 scanned, 2026-07-29) -------------------------
+# Measured distribution of non-tool_result user entries: 396 origin=human, 150
+# origin=task-notification, 72 isMeta injections, and 49 with NO origin at all - of which 12
+# were genuine prompts ("continue", "yes go ahead") and the rest interrupt markers, slash
+# command wrappers and compact caveats. That 12 is why `origin` cannot be the ONLY test.
+
+def _human(text):
+    """A real prompt as the harness records it."""
+    return {"origin": {"kind": "human"}, "promptSource": "sdk",
+            "message": {"role": "user", "content": text}}
+
+
+def _image_then_text(text, origin=True):
+    """A pasted screenshot followed by text - exactly the flow usage_snip_prompt.py asks for."""
+    e = {"message": {"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "x"}},
+        {"type": "text", "text": text}]}}
+    if origin:
+        e["origin"] = {"kind": "human"}
+    return e
+
+
+def _task_notification():
+    return {"origin": {"kind": "task-notification"},
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "<task-notification>agent finished</task-notification>"}]}}
+
+
+def _interrupt():
+    return {"message": {"role": "user",
+                        "content": [{"type": "text", "text": "[Request interrupted by user]"}]}}
+
+
+def _slash_command():
+    return {"message": {"role": "user",
+                        "content": "<command-name>/model</command-name>\n"
+                                   "<command-message>model</command-message>"}}
+
+
+def _compact_caveat():
+    return {"message": {"role": "user",
+                        "content": "This session is being continued from a previous "
+                                   "conversation that ran out of context."}}
 
 
 def selftest() -> int:
@@ -234,6 +341,132 @@ def selftest() -> int:
         code, _ = run({"tool_input": {"file_path": "NEXT_SESSION_PROMPT.md"}, "transcript_path": tr})
         if code != 0:
             fails.append("tool_result after skills wrongly reset the window (should PASS)")
+
+        # ------------------------------------------------------------ v1.3.1 regressions
+        def _verdict(entries, label):
+            path = _mk(entries, tmp)
+            try:
+                return run({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                            "transcript_path": path})
+            except Exception as e:
+                fails.append("%s RAISED %r - the guard is disabled for that session" % (label, e))
+                return -1, ""
+
+        # (7) [finding 13] THE BUG: a prompt whose first content block is an IMAGE is a
+        # genuine user message. Not counting it left the detection window open across the
+        # user's turn, so four skills run at a PREMATURE close still satisfied the real one -
+        # the exact temporal gap this hook exists to close. usage_snip_prompt.py asks for a
+        # screenshot, so the guard went blind on precisely the turn that flow produces.
+        code, msg = _verdict([_human("wrap up"), *all4, _image_then_text("continue")],
+                             "image-first prompt")
+        if code != 2 or not all(s in msg for s in REQUIRED_SKILLS):
+            fails.append("an image-first prompt did not end the detection window - the guard "
+                         "passed silently (code=%s msg=%r)" % (code, msg[:120]))
+
+        # (8) the same shape with NO origin field: 12 genuine prompts in the real transcripts
+        # carry none, so the shape fallback has to reach the same verdict.
+        code, _ = _verdict([_human("wrap up"), *all4, _image_then_text("continue", origin=False)],
+                           "image-first prompt without origin")
+        if code != 2:
+            fails.append("image-first prompt with no origin field was not counted as the user")
+
+        # (9-12) [finding 17] harness-injected role=user entries must NOT end the window.
+        # Each of these wrongly BLOCKED a correct close, telling Claude to re-run four
+        # expensive audit skills - and another injection during that stretch loops it.
+        for entries, label in (
+            ([_human("continue"), *all4, _interrupt()], "interrupt marker"),
+            ([_human("continue"), *all4, _task_notification()], "task-notification"),
+            ([_human("continue"), *all4, _slash_command()], "slash-command wrapper"),
+            ([_human("continue"), *all4, _compact_caveat()], "compact caveat"),
+        ):
+            code, msg = _verdict(entries, label)
+            if code != 0:
+                fails.append("%s was counted as the user and wrongly BLOCKED a correct close "
+                             "(code=%s msg=%r)" % (label, code, msg[:100]))
+
+        # (13) [finding 33] ONE malformed-but-parseable line must not disable the guard.
+        # A non-dict entry raised out of _is_genuine_user, main()'s catch-all swallowed it,
+        # and every close-signal write passed silently from then on.
+        nd = os.path.join(tmp, "nondict.jsonl")
+        with open(nd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(_human("build stuff")) + "\n")
+            f.write("[]\n")                     # a JSON array, not an object
+            f.write("12345\n")                  # a bare number
+            for e in all4:
+                f.write(json.dumps(e) + "\n")
+            f.write(json.dumps(_human("continue")) + "\n")
+            # ALSO after the last user message: entries before it are only ever read by the
+            # genuine-user scan, entries after it are additionally fed to the skill scan. A
+            # fixture with malformed lines on one side of that boundary leaves the other
+            # unproven - which is how this test first passed with the filter deleted.
+            f.write('"a bare string"\n')
+            f.write("null\n")
+            f.write(json.dumps(_skill("simplify")) + "\n")
+        try:
+            code, msg = run({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                             "transcript_path": nd})
+        except Exception as e:
+            code, msg = -1, repr(e)
+        if code != 2:
+            fails.append("one non-dict JSONL line disabled the guard entirely (code=%s %r)"
+                         % (code, msg[:120]))
+
+        # (14) [findings 14, 15, 16] main() itself - exercised by NO test until now. The guard
+        # could be fully disarmed (message dropped, return code swallowed) with every gate
+        # green. Assert the (exit code, message) PAIR, never one without the other.
+        import contextlib
+        import io as _io
+
+        def _main_with(payload):
+            real_in, real_err = sys.stdin, sys.stderr
+            sys.stdin = _io.StringIO(payload if isinstance(payload, str) else json.dumps(payload))
+            err = _io.StringIO()
+            try:
+                with contextlib.redirect_stderr(err):
+                    rc = main()
+            finally:
+                sys.stdin, sys.stderr = real_in, real_err
+            return rc, err.getvalue()
+
+        fire = _mk([_human("build"), *all4, _human("continue"), _skill("simplify")], tmp)
+        rc, err = _main_with({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                              "transcript_path": fire})
+        if rc != 2:
+            fails.append(f"main() fire case should exit 2, got {rc}")
+        if not err.strip() or not all(s in err for s in REQUIRED_SKILLS):
+            fails.append("main() fired with a message that does not name every missing skill: "
+                         "%r" % (err[:160],))
+        if HOOK_NAME not in err:
+            fails.append("main()'s message is unattributable - no hook name in it")
+
+        passing = _mk([_human("continue"), *all4], tmp)
+        rc, err = _main_with({"tool_input": {"file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                              "transcript_path": passing})
+        if (rc, err) != (0, ""):
+            fails.append(f"main() pass case should be silent 0, got {(rc, err[:100])}")
+
+        rc, err = _main_with({"tool_input": {"file_path": "src/module.py"},
+                              "transcript_path": fire})
+        if (rc, err) != (0, ""):
+            fails.append(f"main() on a non-target file should be silent 0, got {(rc, err[:80])}")
+
+        for bad in ("not json at all", "[]", "null", '"a string"'):
+            rc, err = _main_with(bad)
+            if (rc, err) != (0, ""):
+                fails.append(f"main() on malformed stdin {bad!r} should be silent 0, "
+                             f"got {(rc, err[:80])}")
+
+        # (15) and the same through a REAL process, so the __main__ dispatch is covered too:
+        # an in-process call cannot catch a broken `if __name__` block.
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__)],
+                              input=json.dumps({"tool_input": {
+                                  "file_path": "docs/NEXT_SESSION_PROMPT.md"},
+                                  "transcript_path": fire}),
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode != 2 or not all(s in (proc.stderr or "") for s in REQUIRED_SKILLS):
+            fails.append("subprocess fire case wrong: rc=%s stderr=%r"
+                         % (proc.returncode, (proc.stderr or "")[:160]))
 
     for f in fails:
         print("SELFTEST FAIL:", f)

@@ -21,48 +21,55 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Floor, not roster: these must always be self-testable. New hooks are picked up by detection.
-SELFTESTABLE = {
-    "rate_prompt", "fast_test_on_stop", "show_your_proof", "meta_audit_on_stop",
-    "memory_hygiene_guard", "stop_dispatcher", "hook_health_check", "plan_defer_guard",
-    "post_tooluse_dispatcher", "numbers_match_on_write",
-}
-# Matches the dispatch in ANY of the forms used here:
-#   "--selftest" in sys.argv        (most hooks)
-#   "--selftest" in argv            (pre_push_gate, which takes argv as a parameter)
-# Requires a real membership test, not a prose mention, so a docstring cannot false-positive.
-# Widened 2026-07-29: the sys.argv-only form silently skipped pre_push_gate, which has a full
-# selftest - the same under-reach this detector exists to prevent.
-_DISPATCH_RE = re.compile(r"""["']--selftest["']\s+in\s+(?:sys\.)?argv\b""")
+sys.path.insert(0, os.path.join(HERE, "hooks"))
 
-
-def has_selftest(path):
-    """True iff the file actually dispatches on --selftest (not merely mentions it)."""
-    try:
-        return bool(_DISPATCH_RE.search(open(path, encoding="utf-8", errors="replace").read()))
-    except OSError:
-        return False
+# ONE detector, imported - not a second copy. This file and hook_health_check.py each carried
+# the SAME hardcoded roster; run_selftests was converted to detection on 2026-07-29 and the
+# twin in hook_health_check was left behind, so the SessionStart line kept reporting
+# "weekly selftests 10/10 OK" while four hooks went unswept. Two implementations of one rule
+# is the defect, so there is now one implementation and one import.
+from hook_health_check import (  # noqa: E402  (path set above)
+    KNOWN_NO_SELFTEST, SKIP_RC, all_hook_files, floor_violations, has_selftest,
+    selftestable_hooks,
+)
 
 
 def main():
     failed = []
+    skipped = []
     ran = 0
-    for path in sorted(glob.glob(os.path.join(HERE, "hooks", "*.py"))):
+    hooks_dir = os.path.join(HERE, "hooks")
+
+    # The floor turns "a hook with no selftest" into a RED build rather than a silent skip.
+    # KNOWN_NO_SELFTEST is empty, so ADDING an untested hook is what breaks the gate.
+    violations = floor_violations(hooks_dir)
+    for v in violations:
+        print(f"FAIL: {v}")
+        failed.append(v.split(":")[1].strip().split()[0] if ":" in v else v)
+
+    detected = selftestable_hooks(hooks_dir)
+    total = len(all_hook_files(hooks_dir))
+    print(f"-- sweeping {len(detected)} of {total} hook files "
+          f"({len(KNOWN_NO_SELFTEST)} explicitly exempt)")
+    for path in detected:
         name = os.path.splitext(os.path.basename(path))[0]
-        detected = has_selftest(path)
-        if name in SELFTESTABLE and not detected:
-            print(f"{name}: FAIL (listed in SELFTESTABLE but no --selftest dispatch found)")
-            failed.append(name)
-            continue
-        if not detected:
-            print(f"skip {name} (no selftest)")
-            continue
         ran += 1
         rc = subprocess.run([sys.executable, path, "--selftest"],
                             stdin=subprocess.DEVNULL).returncode
-        print(f"{name}: {'OK' if rc == 0 else 'FAIL'}")
-        if rc != 0:
-            failed.append(name)
+        if rc == SKIP_RC:
+            # A skip is NOT a pass. Under CI it is a failure: the whole point of running on
+            # four Pythons x three OSes is that the assertions actually execute there.
+            label = "SKIPPED"
+            if os.environ.get("CI"):
+                print(f"{name}: FAIL (selftest could not run, and CI must not skip)")
+                failed.append(name)
+                continue
+            skipped.append(name)
+        else:
+            label = "OK" if rc == 0 else "FAIL"
+            if rc != 0:
+                failed.append(name)
+        print(f"{name}: {label}")
     # Also gate the consistency-audit skill's mechanical extractor: its scripts ship in the
     # repo and expose a --selftest, but they live outside hooks/ so the glob above misses them.
     skill_audit = os.path.join(HERE, "skills", "consistency-audit", "scripts", "audit.py")
@@ -104,15 +111,18 @@ def main():
         if rc != 0:
             failed.append("skill-deps")
 
-    record_gate_run(ran, failed)
+    record_gate_run(ran, failed, skipped)
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
         return 1
-    print(f"\nall {ran} selftests passed")
+    # Always print the DENOMINATOR. "all 18 selftests passed" was true of whatever happened to
+    # be listed, so a shrinking sample never looked wrong.
+    note = f" ({len(skipped)} SKIPPED: {skipped})" if skipped else ""
+    print(f"\nall {ran} selftests passed{note}")
     return 0
 
 
-def record_gate_run(ran, failed):
+def record_gate_run(ran, failed, skipped=()):
     """Append this run to docs/audits/gate_runs.json.
 
     A gate that did not run leaves no trace in the code or the docs, so "were the gates
@@ -139,6 +149,7 @@ def record_gate_run(ran, failed):
                 microsecond=0).isoformat(),
             "ran": ran,
             "failed": sorted(failed),
+            "skipped": sorted(skipped),
             "result": "PASS" if not failed else "FAIL",
         })
         with open(path, "w", encoding="utf-8") as f:

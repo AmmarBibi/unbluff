@@ -58,14 +58,17 @@ Installed globally via `core.hooksPath`, so every one of these is live in every 
 - **Where:** `hooks/pre_push_gate.py`:202
 - **Lens:** cross-platform
 - **What breaks:** Repo uses a .git/hooks/pre-commit that runs a secret scanner. Developer creates a linked worktree (`git worktree add ../feat`) to run a second agent session. Inside it, `git rev-parse --git-dir` resolves to .git/worktrees/feat, the dispatcher finds no hook at .git/worktrees/feat/hooks/pre-commit, and exits 0 without delegating. Every commit made from that worktree bypasses the secret scanner, silently, for as long as the worktree exists.
-- **Fix:** Ask git where the hooks are instead of deriving it: `hooksdir=`git rev-parse --git-path hooks 2>/dev/null`` and use `local_hook="$hooksdir/$hook"`. `--git-path hooks` is worktree-aware and submodule-aware and resolves to the common dir. Guard against the recursive case that path introduces: when core.hooksPath is set, `--git-path hooks` returns the dispatcher directory itself, so keep the existing `grep -q pre_push_gate.py` self-check (it already covers this - verified: with core.hooksPath live, --git-path hooks returned ~/.claude/githooks) and additionally skip delegation when the resolved dir is GLOBAL_HOOKS_DIR. Extend the selftest's 8b case to cover a linked worktree, since the current fixture passes while the bug is live.
+- **Fix (as planned - SUPERSEDED, do not use):** ~~`hooksdir=`git rev-parse --git-path hooks`` and `local_hook="$hooksdir/$hook"`, keeping the `grep -q pre_push_gate.py` self-check for the recursive case.~~
+- **CORRECTION 2026-07-30 (measured, not reasoned):** `--git-path hooks` is the WRONG primitive here and adopting it would have been a regression far worse than the bug. When `core.hooksPath` is set - which is precisely the condition under which this dispatcher runs at all - git answers `--git-path hooks` with the hooksPath itself. Measured on this machine in both a plain repo and a linked worktree: it returned `C:/Users/ammar/.claude/githooks` in **both** cases, never the repo's own hooks dir. So the planned fix would have made `grep -q pre_push_gate.py` match every time and disabled repo-local delegation in **every repo on the machine**, not just worktrees. The plan noted that hooksPath behaviour and drew the wrong conclusion from it - it treated the self-check as sufficient rather than seeing that the lookup itself never reaches the target.
+- **Fix (applied):** `gitdir=`git rev-parse --git-common-dir`` and `local_hook="$gitdir/hooks/$hook"`. `--git-common-dir` is unaffected by `core.hooksPath`, returns `.git` in a normal repo and the HOST repo's `.git` from inside a linked worktree, and is submodule-correct. `install()` uses the same primitive via `_common_git_dir()`. Pinned by selftest case 17 (a real `git worktree add`, asserting the repo-local hook actually executed) and mutation `#5`, which reverts the shim to `--git-dir` and must go red.
+- **Lesson:** the plan prescribed a fix it had not executed. Two of the three review lenses would have approved it on reading. Only running `git rev-parse --git-path hooks` under the live config exposed it - the same class of error as the tests that "asserted things the implementation could not violate".
 
 ### 6. [HIGH] pre_push_gate --install crashes in a linked worktree or submodule, and would install where git never looks
 
 - **Where:** `hooks/pre_push_gate.py`:157
 - **Lens:** cross-platform
 - **What breaks:** A developer running parallel agent sessions in linked worktrees follows the README's per-repo instruction and runs `pre_push_gate.py --install .` from inside one. They get a Python traceback (FileNotFoundError on Windows, NotADirectoryError on Linux) instead of an actionable message, and the worktree stays ungated. In the variant where the write succeeds, they get "installed .../.git/hooks/pre-push" for a file git will never run.
-- **Fix:** Resolve the hooks directory through git rather than assuming the layout: `subprocess.run(["git", "-C", target, "rev-parse", "--git-path", "hooks"])` and join the returned path (it is relative to the repo root when short). That is correct for plain repos, linked worktrees, and submodules alike. Wrap the makedirs/open in try/except OSError so a layout install() cannot handle produces a clear refusal - "cannot resolve a hooks directory for <target>; use --install-global" - instead of a traceback or a false success. Add a worktree case to the selftest alongside the existing round-trip check at line 366.
+- **Fix (applied):** Resolve the hooks directory through git rather than assuming the layout - but via `--git-common-dir`, **not** `--git-path hooks`; see the correction under finding 5, which applies identically here (under a live `core.hooksPath`, `--git-path hooks` would have made `--install` write into the global dispatcher directory and clobber the dispatchers themselves). `_common_git_dir()` joins the returned path against the repo root when it is relative. Correct for plain repos, linked worktrees and submodules alike. A layout that cannot be resolved produces the refusal "cannot resolve a git directory for &lt;target&gt;; use --install-global" instead of a traceback or a false success. Pinned by selftest case 18 (installs into a real linked worktree, then asserts the file landed where git actually looks) and mutation `#6`.
 
 ### 7. [HIGH] pre_push_gate's GLOBAL_SHIM pre-push branch is untested - deleting the only line that runs the gate leaves every test green and silently ungates every repo on the machine
 
@@ -353,9 +356,64 @@ chat transcript. Order is materiality; each is SCHEDULED.
   71 evolving-state markers -> 8, backup kept at `project_ghg_copilot.md.bak-2026-07-29`. No further
   action; recorded here so the next session does not redo it.
 
+## P7 - found DURING the v1.3.1 fix pass
+
+Scheduled here rather than left in prose. The working rule "after each fix, grep for the twin"
+produced most of these; every one was live in v1.3.0 with CI green.
+
+### 40. [HIGH] `fast_test_on_stop` had finding 10's unbounded-pipe bug identically - DONE
+
+- **Where:** `hooks/fast_test_on_stop.py`:174 (pre-fix)
+- **Found by:** the twin-grep rule, immediately after fixing finding 10 in `pre_push_gate`.
+- **What breaks:** the same `subprocess.run(capture_output=True, timeout=)` that hung `git push`
+  also ran the project's test command at every turn end. A vitest/jest watcher, a pytest-xdist
+  worker or a dev server started by an integration test outlives its parent and holds the pipe,
+  so the Stop hook hung the end of the turn - with no output and nothing naming the hook.
+- **Fix:** the bounded runner now lives in `fast_test_on_stop` (`run_tests` + `_kill_tree`) and
+  `pre_push_gate` imports it - the import only goes one way, so that is the only shared home.
+  ONE implementation, both gates. Fixing only the instance would have left the Stop hook hanging.
+- **Pinned by:** `fast_test_on_stop` selftest 5d (both hazards, at its own level so neither gate
+  depends on the other's suite) and `pre_push_gate` case 14; mutation `fast_test_on_stop #10`.
+
+### 41. [MEDIUM] `fast_test_on_stop` reads `git status --porcelain` with the locale codec and does not handle C-quoting - OPEN
+
+- **Where:** `hooks/fast_test_on_stop.py`:118,165
+- **Found by:** the twin-grep for finding 1 (the CRITICAL non-ASCII decode).
+- **What breaks:** identical class to finding 1, in the turn-end gate rather than the push-time
+  one. `text=True` with no `encoding` decodes git's UTF-8 with cp1252 on Windows, and porcelain
+  C-quotes non-ASCII paths, so a changed `données.py` is invisible to `_changed_source_files`.
+  The hook then finds "no source changed" and stays silent - success and silence identical again.
+- **Fix:** `encoding="utf-8", errors="surrogateescape"` on both calls, and `--porcelain=v1 -z`
+  with a NUL-field parser (rename entries emit `XY NEW\0ORIG\0`, so the original name must be
+  consumed as a separate field). Deliberately NOT bundled into the finding-1 fix: it changes the
+  porcelain parser and its fixtures, which is a behavioural change to a shipped hook and deserves
+  its own regression test rather than riding along.
+- **Status:** OPEN. Scheduled after P6, before the closing adversarial-review run.
+
+### 42. [MEDIUM] `close_skills_guard`'s selftest wrote every fixture to one filename - DONE
+
+- **Where:** `hooks/close_skills_guard.py` `_mk()`
+- **What breaks:** every fixture was written to `t.jsonl`, so a later scenario silently rewrote
+  the transcript an earlier assertion still referenced. The new subprocess case read a transcript
+  belonging to a different scenario and passed for the wrong reason. A test-harness defect of
+  exactly the kind this plan exists to catch: green for a reason unrelated to the behaviour.
+- **Fix:** one file per fixture (`t1.jsonl`, `t2.jsonl`, ...). Found only because the new case
+  failed loudly first.
+
+### 43. Mutation testing became a mechanism rather than a discipline - DONE
+
+- **Where:** `tools/mutation_check.py` (new)
+- **Why:** "mutation-test every fix" was a working rule a human had to remember. It is now a
+  runnable harness: 21 mutations, each naming the finding it reverts, each required to turn the
+  suite RED. A mutation that SURVIVES is reported as a failure naming the decorative test.
+- **It already paid for itself three times** in this pass, catching decorative tests for
+  findings 1b, 10 and 33 that had been written, run, and observed green.
+- **Related:** item 35 (encode the durability lesson as a mechanism, not a sentence).
+
 ## Definition of done
 
 - Every numbered item above is either fixed with a regression test that fails without the fix, or carries a written justification in this file for why it is not a defect.
+- `python tools/mutation_check.py` reports every mutation CAUGHT (a survivor names a fix whose test does not bite).
 - `run_selftests.py`, `tests/test_integration.py`, `tools/check_python_floor.py`, `tools/check_skill_deps.py` and `tools/regen_example_settings.py --check` all green.
 - CI green on ubuntu/macos/windows x py3.8/3.9/3.11/3.12.
 - A fresh `adversarial-review` run over the same unit returns no confirmed finding of a class already listed here.
