@@ -26,6 +26,16 @@ import subprocess
 import sys
 import time
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+# ONE repo probe for the whole suite. This hook used os.path.exists(cwd/.git) and
+# fast_test_on_stop used os.path.isdir(cwd/.git): two spellings of one question, each wrong in
+# a different way (D5). stop_dispatcher already imports both modules in-process, so the import
+# costs nothing new.
+import fast_test_on_stop as fast_test  # noqa: E402  (path set above)
+
 HOOK_NAME = "meta_audit_on_stop"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
 MAX_FINDINGS_PER_FILE = 8
@@ -74,8 +84,14 @@ def find_plan_files(cwd: str) -> list[str]:
 
 
 def count_unpushed(cwd: str) -> int:
-    """Commits ahead of upstream, or 0 on any problem (no repo/no upstream/no git/timeout)."""
-    if not cwd or not os.path.exists(os.path.join(cwd, ".git")):
+    """Commits ahead of upstream, or 0 on any problem (no repo/no upstream/no git/timeout).
+
+    The repo probe is SHARED with fast_test_on_stop (D5's twin). `os.path.exists(cwd/.git)`
+    happened to handle a linked worktree - `.git` is a file there - but still returned False
+    for any SUBDIRECTORY of a repo, the normal cwd in a monorepo package, so the unpushed
+    count silently read 0 exactly where it mattered. Two probes for one question is the defect.
+    """
+    if not cwd or not fast_test.is_git_worktree(cwd):
         return 0
     try:
         proc = subprocess.run(["git", "-C", cwd, "rev-list", "--count", "@{u}..HEAD"],
@@ -229,8 +245,38 @@ def _selftest_pipeline() -> list[str]:
     return fails
 
 
+def _selftest_repo_probe() -> list:
+    """[D5 twin] The repo probe must be the SHARED one.
+
+    This module used os.path.exists(cwd/.git) while fast_test_on_stop used os.path.isdir - two
+    spellings of one question, each wrong in a different way, and only one of them was ever
+    fixed. The durable property is not "this file's probe is correct" but "this file has no
+    probe of its own", so that is what gets asserted. Structural, so it holds however the
+    surrounding code is refactored.
+    """
+    fails = []
+    try:
+        with open(os.path.abspath(__file__), encoding="utf-8") as f:
+            src = f.read()
+    except OSError as e:
+        return [f"could not read own source for the twin check: {e}"]
+    private_probe = re.search(
+        r"os\.path\.(?:exists|isdir|isfile)\(\s*os\.path\.join\(\s*cwd\s*,\s*[\"']\.git[\"']",
+        src)
+    if private_probe:
+        fails.append("meta_audit has its own .git probe again (%r) - call "
+                     "fast_test.is_git_worktree instead; two probes for one question is the "
+                     "defect" % (private_probe.group(0)[:60],))
+    if "fast_test.is_git_worktree" not in src:
+        fails.append("meta_audit no longer calls the shared repo probe")
+    # and it must actually work for the cases the private probes got wrong
+    if not fast_test.is_git_worktree(os.path.dirname(os.path.abspath(__file__))):
+        fails.append("shared probe says a SUBDIRECTORY of this repo is not a work tree")
+    return fails
+
+
 def selftest() -> int:
-    fails = _selftest_line_cases() + _selftest_pipeline()
+    fails = _selftest_line_cases() + _selftest_pipeline() + _selftest_repo_probe()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

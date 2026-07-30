@@ -65,7 +65,7 @@ MUTATIONS = [
     ("pre_push_gate", "5", "dispatcher back to --git-dir (breaks linked worktrees)",
      [("git rev-parse --git-common-dir", "git rev-parse --git-dir")], False),
     ("pre_push_gate", "6", "install() assumes <root>/.git/hooks again",
-     [('    dest = os.path.join(gitdir, "hooks", "pre-push")',
+     [('    dest = os.path.join(hooks_dir, "pre-push")',
        '    dest = os.path.join(root, ".git", "hooks", "pre-push")')], False),
     ("pre_push_gate", "27", "CLIENT_HOOKS floor loses the seven missing names",
      [('                "pre-merge-commit", "reference-transaction", "fsmonitor-watchman",\n'
@@ -106,6 +106,32 @@ MUTATIONS = [
     ("duplicate_registration_check", "24/26", "only ~/.claude/settings.json is audited again",
      [("    for layer in settings_layers(settings_path, cwd):",
        "    for layer in [settings_path or SETTINGS]:")], False),
+    # --- second-review defects (D5/D6/D7) ---
+    ("fast_test_on_stop", "D5", "repo probe back to isdir(.git) (dead in every worktree)",
+     [('    if not is_git_worktree(cwd):\n        return 0',
+       '    if not os.path.isdir(os.path.join(cwd, ".git")):\n        return 0')], False),
+    ("fast_test_on_stop", "D5b", "is_git_worktree back to a filesystem probe",
+     [('    try:\n        r = subprocess.run(["git", "-C", cwd, "rev-parse", '
+       '"--is-inside-work-tree"],',
+       '    if True:\n        return os.path.isdir(os.path.join(cwd, ".git"))\n'
+       '    try:\n        r = subprocess.run(["git", "-C", cwd, "rev-parse", '
+       '"--is-inside-work-tree"],')], False),
+    ("meta_audit_on_stop", "D5-twin", "meta_audit keeps its own .git probe again",
+     [("    if not cwd or not fast_test.is_git_worktree(cwd):",
+       '    if not cwd or not os.path.exists(os.path.join(cwd, ".git")):')], False),
+    ("fast_test_on_stop", "D6", "a bad optional line discards the command again",
+     [("            except ValueError:\n                sys.stderr.write(",
+       "            except ValueError:\n                return None, DEFAULT_TIMEOUT_S, "
+       "DEFAULT_DEBOUNCE_S\n            if False:\n                sys.stderr.write(")], False),
+    ("fast_test_on_stop", "D6b", "the malformed-option warning goes silent",
+     [('                sys.stderr.write(\n                    f"[fast-test] {name} line {num}: '
+       'ignoring malformed {key}="',
+       '                _ = (\n                    f"[fast-test] {name} line {num}: '
+       'ignoring malformed {key}="')], False),
+    ("pre_push_gate", "D7", "install() ignores core.hooksPath again",
+     [("    hooks_dir, via_hooks_path = _hooks_dir_for(target)",
+       "    hooks_dir, via_hooks_path = (os.path.join(_common_git_dir(target) or '', 'hooks'), "
+       "False)")], False),
     ("hook_health_check", "18", "the weekly sweep goes back to a hardcoded roster",
      [('    d = hooks_dir or _HOOKS_DIR\n    return [p for p in sorted(glob.glob(os.path.join('
        'd, "*.py"))) if has_selftest(p)]',

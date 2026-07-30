@@ -567,23 +567,43 @@ most important result of this pass and it is why the plan does not end at P7.
   solved with mtimes: the prescribed review -> record -> commit order would flip just-reviewed
   units to STALE.
 
-### OPEN - scheduled, not deferred
+### D5-D7 - FIXED 2026-07-30 (second batch)
 
-- **D5 [HIGH] `fast_test_on_stop.py`:270** - `os.path.isdir(cwd/.git)` is False in a linked
-  worktree or submodule (`.git` is a FILE there), so the Stop gate AND its `_notice_no_gate`
-  safety net are both dead in every worktree. Reproduced: host rc=2, worktree rc=0 with identical
-  config. Pre-existing, not introduced. Fix: `git rev-parse --is-inside-work-tree`.
-  `meta_audit_on_stop.py:78` shares the probe - check the twin.
-- **D6 [HIGH] `fast_test_on_stop.py`:86-94** - one malformed `timeout=`/`debounce=` line makes
-  `_read_override` discard the COMMAND too, so `timeout=5m` yields "no test command - nothing to
-  verify, allowing push". With a `tests/` dir present it silently downgrades to the weaker
-  auto-detected command with no message at all. Pre-existing. Fix: parse per-line, keep the
-  command, warn naming the file and line.
-- **D7 [HIGH] `pre_push_gate.py`:264-268** - `install()` writes to `<git-common-dir>/hooks` without
-  reading `core.hooksPath`, which git honours INSTEAD of `$GIT_DIR/hooks` with no fallback. So in
-  a husky/lefthook repo `--install` prints "installed" and the repo is not gated - precisely the
-  case `install_global()`'s own message prescribes per-repo install for. Fix: read
-  `core.hooksPath` and write there, or refuse with a clear message.
+- **D5 [HIGH] `fast_test_on_stop.py`:270 - DONE.** `os.path.isdir(cwd/.git)` is False in a
+  linked worktree or submodule (`.git` is a FILE there), so the Stop gate AND its
+  `_notice_no_gate` safety net were both dead in every worktree - rc 0, empty stderr,
+  indistinguishable from a clean passing turn. Reproduced: host rc=2, worktree rc=0 on identical
+  config. Fixed with `is_git_worktree()` (`git rev-parse --is-inside-work-tree`, falling back to
+  a filesystem probe only when git cannot run, so a missing git does not silently disable the
+  gate everywhere).
+  **The twin was real and was fixed generally, not copied.** `meta_audit_on_stop.py:78` used
+  `os.path.exists` - which handles a worktree by accident but returns False for any
+  SUBDIRECTORY of a repo, the normal cwd in a monorepo package. Both hooks now call the ONE
+  function. Pinned by three mutations (`D5`, `D5b`, `D5-twin`), and the twin assertion is
+  structural - it fails if this module ever grows a private `.git` probe again, rather than
+  checking that a particular spelling is correct.
+- **D6 [HIGH] `fast_test_on_stop.py`:86-94 - DONE.** One malformed `timeout=`/`debounce=` line
+  made `_read_override` discard the COMMAND too, so `timeout=5m` yielded "no test command -
+  nothing to verify, allowing push" for a repo that had deliberately configured a stricter
+  gate. Now parsed per line: a bad value falls back to that field's default, the command
+  survives, and stderr names the file and line number. Only an unreadable FILE may yield
+  `cmd=None`, and that is said out loud too, because the file existing at all proves the repo
+  intends to be gated.
+  **Found while fixing it:** a typo'd option line with spaces (`timeout = 30`) did not match
+  the `startswith("timeout=")` test, fell through to the `elif`, and became the COMMAND - i.e.
+  it was handed to a shell and executed. Now recognised via `partition("=")` on the known keys.
+- **D7 [HIGH] `pre_push_gate.py`:264-268 - DONE.** `install()` wrote to `<git-common-dir>/hooks`
+  without reading `core.hooksPath`, which git honours INSTEAD with no fallback - so in a husky
+  or lefthook repo it printed "installed ... gate command: npm test" and the repo was not gated,
+  precisely the case `install_global()`'s own message prescribes `--install` for. `_hooks_dir_for()`
+  now resolves where git will actually look and the success message names it.
+  **Only the LOCAL setting is honoured, deliberately.** A global `core.hooksPath` is what
+  `--install-global` sets; following it here would make `--install` write its shim into
+  `~/.claude/githooks` and clobber the dispatchers themselves. That case is asserted directly,
+  using this machine's live global setting. A foreign hook already present is still REFUSED
+  rather than overwritten - asserted against a husky-shaped fixture.
+
+### Still OPEN
 - **D8-D11** - the remaining survivors (weekly-sweep aggregate time budget with no deadline and a
   marker written only after the whole loop; `duplicate_registration_check`'s selftest reading the
   invoking cwd's real `.claude/settings.json` so it is not hermetic; and two lower-severity items).

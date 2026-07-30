@@ -252,6 +252,29 @@ def gate(root: str) -> int:
     return 0
 
 
+def _hooks_dir_for(target: str) -> tuple:
+    """(directory git will ACTUALLY read hooks from, came_from_hooksPath).
+
+    git honours `core.hooksPath` INSTEAD of `$GIT_DIR/hooks`, with no fallback: if it is set,
+    nothing in .git/hooks ever runs again. install() wrote to <common-dir>/hooks regardless, so
+    in a husky or lefthook repo it printed "installed ... gate command: npm test" and the repo
+    was NOT gated - precisely the case install_global()'s own message prescribes --install for.
+
+    Only the LOCAL setting is honoured. A GLOBAL core.hooksPath is what --install-global sets,
+    and following it here would make --install write its shim into ~/.claude/githooks and
+    clobber the dispatchers themselves.
+    """
+    r = _git(["-C", target, "config", "--local", "--get", "core.hooksPath"], timeout=10)
+    if r is not None and r.returncode == 0:
+        hp = (r.stdout or "").strip()
+        if hp:
+            if not os.path.isabs(hp):
+                hp = os.path.join(_repo_root(target) or target, hp)
+            return os.path.normpath(hp), True
+    gitdir = _common_git_dir(target)
+    return (os.path.join(gitdir, "hooks") if gitdir else None), False
+
+
 def install(target: str, remove: bool = False) -> int:
     root = _repo_root(target)
     if not root:
@@ -260,12 +283,12 @@ def install(target: str, remove: bool = False) -> int:
     # Ask git where its hooks live rather than assuming <root>/.git/hooks. In a linked worktree
     # .git is a FILE, so the old join crashed with FileNotFoundError/NotADirectoryError; in the
     # variant where the write succeeded it reported success for a path git never reads
-    # (finding 6). --git-common-dir is correct for plain repos, linked worktrees and submodules.
-    gitdir = _common_git_dir(target)
-    if not gitdir:
+    # (finding 6). A LOCAL core.hooksPath overrides that entirely and must win (D7).
+    hooks_dir, via_hooks_path = _hooks_dir_for(target)
+    if not hooks_dir:
         print(f"cannot resolve a git directory for {target}; use --install-global")
         return 1
-    dest = os.path.join(gitdir, "hooks", "pre-push")
+    dest = os.path.join(hooks_dir, "pre-push")
     if remove:
         if os.path.exists(dest):
             os.remove(dest)
@@ -284,7 +307,9 @@ def install(target: str, remove: bool = False) -> int:
                             script=os.path.abspath(__file__).replace("\\", "/")))
     os.chmod(dest, 0o755)
     cmd, _ = resolve_command(root)
-    print(f"installed {dest}\n  gate command: {cmd or '(none detected - will allow pushes and say so)'}")
+    where = " (this repo sets core.hooksPath, so .git/hooks is never read)" if via_hooks_path else ""
+    print(f"installed {dest}{where}\n"
+          f"  gate command: {cmd or '(none detected - will allow pushes and say so)'}")
     return 0
 
 
@@ -898,6 +923,54 @@ def selftest() -> int:
                         fails.append("install() in a worktree wrote where git never looks "
                                      "(git-path hooks=%r)" % (hd,))
                     install(wt_path, remove=True)
+
+        # 19c. [D7] git honours core.hooksPath INSTEAD of $GIT_DIR/hooks, with no fallback.
+        # install() wrote to <common-dir>/hooks regardless, so in a husky/lefthook repo it
+        # printed "installed ... gate command: npm test" and the repo was NOT gated - exactly
+        # the case install_global()'s own message tells you to use --install for.
+        hp_repo = _repo(stack)
+        if hp_repo:
+            # (a) a repo with NO local hooksPath must still use .git/hooks - even though a
+            # GLOBAL core.hooksPath is set on this machine. Writing into the global dispatcher
+            # directory would clobber the dispatchers themselves.
+            d_plain, via_hp = _hooks_dir_for(hp_repo)
+            expected_plain = os.path.join(_common_git_dir(hp_repo) or "", "hooks")
+            if via_hp or os.path.normcase(d_plain or "") != os.path.normcase(expected_plain):
+                fails.append("a repo with no LOCAL core.hooksPath resolved to %r instead of "
+                             "%r - a global hooksPath must not redirect --install"
+                             % (d_plain, expected_plain))
+
+            # (b) a repo WITH a local hooksPath must install where git actually looks
+            custom = os.path.join(hp_repo, "myhooks")
+            os.makedirs(custom, exist_ok=True)
+            subprocess.run(["git", "-C", hp_repo, "config", "core.hooksPath",
+                            custom.replace("\\", "/")], capture_output=True)
+            d_hp, via_hp2 = _hooks_dir_for(hp_repo)
+            if not via_hp2 or os.path.normcase(d_hp or "") != os.path.normcase(custom):
+                fails.append("local core.hooksPath ignored: resolved %r, expected %r"
+                             % (d_hp, custom))
+            with open(os.path.join(hp_repo, "app.py"), "w", encoding="utf-8") as f:
+                f.write("x = 1\n")
+            if install(hp_repo) != 0:
+                fails.append("install() failed in a repo with a local core.hooksPath")
+            if not os.path.exists(os.path.join(custom, "pre-push")):
+                fails.append("install() wrote where git will NOT look - the repo is not "
+                             "gated but install reported success")
+            if os.path.exists(os.path.join(hp_repo, ".git", "hooks", "pre-push")):
+                fails.append("install() wrote to .git/hooks, which core.hooksPath overrides")
+            install(hp_repo, remove=True)
+            if os.path.exists(os.path.join(custom, "pre-push")):
+                fails.append("uninstall did not remove the hook from core.hooksPath")
+
+            # (c) a FOREIGN hook already there must be refused, never clobbered
+            foreign = os.path.join(custom, "pre-push")
+            with open(foreign, "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\n# husky\nnpx husky run pre-push\n")
+            if install(hp_repo) == 0:
+                fails.append("install() overwrote a foreign pre-push hook instead of refusing")
+            with open(foreign, encoding="utf-8") as f:
+                if "husky" not in f.read():
+                    fails.append("install() CLOBBERED an existing husky hook")
 
         # 19b. [finding 34] CROSS-HOOK: a pass recorded by fast_test_on_stop's OWN entry point
         # must be visible to the gate. They advertise "one source of truth"; keyed differently

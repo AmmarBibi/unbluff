@@ -74,23 +74,77 @@ def _changed_source_files(porcelain: str) -> list[str]:
     return out
 
 
+def is_git_worktree(cwd: str) -> bool:
+    """True iff `cwd` is inside a git working tree - plain repo, LINKED WORKTREE, or submodule.
+
+    `os.path.isdir(cwd/.git)` is FALSE in a linked worktree and in a submodule, where `.git` is
+    a FILE pointing at the real gitdir. The Stop gate therefore returned 0 before detect() ever
+    ran, and `_notice_no_gate` (which sits after the guard) never fired either - rc 0, empty
+    stderr, indistinguishable from a clean passing turn, for the entire life of the worktree.
+    Reproduced: identical repo, override and dirty file, host rc=2, worktree rc=0.
+
+    `os.path.exists` - the variant meta_audit_on_stop used - fixes the worktree case but still
+    returns False when cwd is a SUBDIRECTORY of the repo, which is the normal case for a
+    monorepo package. Both hooks now call this one function rather than each keeping a probe.
+    """
+    try:
+        r = subprocess.run(["git", "-C", cwd, "rev-parse", "--is-inside-work-tree"],
+                           capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # git unrunnable: fall back to the cheap probe rather than claiming "not a repo",
+        # which would silently disable the gate everywhere.
+        p = os.path.join(cwd, ".git")
+        return os.path.isdir(p) or os.path.isfile(p)
+    return r.returncode == 0 and (r.stdout or "").strip() == "true"
+
+
+_OPTION_KEYS = {"timeout": (5, 600), "debounce": (0, 86400)}
+
+
 def _read_override(path: str) -> tuple[str | None, int, int]:
-    """(command, timeout_s, debounce_s) from a .claude/fast-test.cmd file."""
+    """(command, timeout_s, debounce_s) from a .claude/fast-test.cmd file.
+
+    A malformed OPTIONAL line must never discard the COMMAND. `timeout=5m` used to raise
+    ValueError out of the whole loop and return `(None, DEFAULT, DEFAULT)`, so a repo that had
+    deliberately configured a stricter push-time gate got "no test command - nothing to verify,
+    allowing push" - wording indistinguishable from a repo that has no tests at all. With a
+    `tests/` dir present it was worse: resolve_command fell through to the weaker auto-detected
+    command with NO message. Only an unreadable FILE may yield cmd=None, and even that is said
+    out loud, because the file existing at all proves the repo intends to be gated.
+
+    `key = value` with spaces is recognised too. Unrecognised, it fell through to the `elif`
+    and became the COMMAND - so a typo'd option line was handed to a shell and executed.
+    """
     cmd, timeout_s, debounce_s = None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
+    name = os.path.basename(path)
     try:
         with open(path, encoding="utf-8-sig") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.lower().startswith("timeout="):
-                    timeout_s = max(5, min(600, int(line.split("=", 1)[1])))
-                elif line.lower().startswith("debounce="):
-                    debounce_s = max(0, min(86400, int(line.split("=", 1)[1])))
-                elif cmd is None:
-                    cmd = line
-    except (OSError, ValueError):
+            lines = f.readlines()
+    except OSError as e:
+        sys.stderr.write(f"[fast-test] cannot read {name} ({e}); this project is NOT gated.\n")
         return None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
+    for num, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, sep, val = line.partition("=")
+        key = head.strip().lower()
+        if sep and key in _OPTION_KEYS:
+            lo, hi = _OPTION_KEYS[key]
+            try:
+                parsed = int(val.strip())
+            except ValueError:
+                sys.stderr.write(
+                    f"[fast-test] {name} line {num}: ignoring malformed {key}="
+                    f"{val.strip()!r}, using the default. The test command is unaffected.\n")
+                continue
+            if key == "timeout":
+                timeout_s = max(lo, min(hi, parsed))
+            else:
+                debounce_s = max(lo, min(hi, parsed))
+        elif cmd is None:
+            cmd = line
     return cmd, timeout_s, debounce_s
 
 
@@ -267,7 +321,7 @@ def main() -> int:
     if payload.get("stop_hook_active"):  # already continuing from a stop hook - never loop
         return 0
     cwd = payload.get("cwd") or os.getcwd()
-    if not os.path.isdir(os.path.join(cwd, ".git")):
+    if not is_git_worktree(cwd):
         return 0
 
     cmd, timeout_s, debounce_s = detect(cwd)
@@ -473,6 +527,135 @@ def selftest() -> int:
             else:
                 print("SELFTEST SKIP: git unavailable, main() integration untested")
         STATE_DIR = real_state2
+
+    # ---------------------------------------------------------------- D5 / D6 regressions
+    import shutil as _shutil
+    import tempfile as _tf
+
+    def _tmp(stack_list):
+        d = _tf.mkdtemp()
+        stack_list.append(d)
+        return d
+
+    _trash = []
+    real_state3 = STATE_DIR
+    try:
+        STATE_DIR = _tmp(_trash)
+        genv = dict(os.environ)
+        genv.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+        def _git(cwd, *a):
+            try:
+                return subprocess.run(["git", "-C", cwd] + list(a), capture_output=True,
+                                      env=genv, timeout=60).returncode
+            except (OSError, subprocess.SubprocessError):
+                return 1
+
+        host = _tmp(_trash)
+        wt_ok = _git(host, "init", "-q") == 0
+        if wt_ok:
+            with open(os.path.join(host, "seed.txt"), "w", encoding="utf-8") as f:
+                f.write("s\n")
+            wt_ok = _git(host, "add", "-A") == 0 and _git(host, "commit", "-qm", "seed") == 0
+        wt = os.path.join(_tmp(_trash), "feat")
+        if wt_ok:
+            wt_ok = _git(host, "worktree", "add", "-q", wt) == 0
+        if not wt_ok:
+            print("SELFTEST SKIP: git worktree unavailable, D5 untested")
+        else:
+            # [D5] In a linked worktree `.git` is a FILE, so the old
+            # `os.path.isdir(cwd/.git)` guard returned 0 before detect() ever ran: the Stop
+            # gate AND its no-gate safety net were both dead for the whole life of the
+            # worktree, with rc 0 and empty stderr - indistinguishable from a passing turn.
+            if os.path.isdir(os.path.join(wt, ".git")):
+                fails.append("fixture wrong: a linked worktree's .git should be a FILE")
+            if not is_git_worktree(wt):
+                fails.append("is_git_worktree() says a linked worktree is not a repo - the "
+                             "Stop gate stays dead there")
+            if not is_git_worktree(host):
+                fails.append("is_git_worktree() says a plain repo is not a repo")
+            # a SUBDIRECTORY of a repo is still in the repo (meta_audit's probe missed this)
+            sub = os.path.join(host, "pkg", "deep")
+            os.makedirs(sub, exist_ok=True)
+            if not is_git_worktree(sub):
+                fails.append("is_git_worktree() fails for a subdirectory of a repo")
+            if is_git_worktree(_tmp(_trash)):
+                fails.append("is_git_worktree() returns True for a non-repo directory")
+
+            # end-to-end: a failing test in a WORKTREE must reach rc 2
+            os.makedirs(os.path.join(wt, ".claude"), exist_ok=True)
+            with open(os.path.join(wt, ".claude", "fast-test.cmd"), "w", encoding="utf-8") as f:
+                f.write('debounce=0\npython -c "import sys; sys.exit(1)"\n')
+            with open(os.path.join(wt, "broken.py"), "w", encoding="utf-8") as f:
+                f.write("x = 1\n")
+            real_in, real_err = sys.stdin, sys.stderr
+            sys.stdin = io_mod.StringIO(json.dumps({"cwd": wt}))
+            sys.stderr = io_mod.StringIO()
+            try:
+                rc_wt = main()
+                err_wt = sys.stderr.getvalue()
+            finally:
+                sys.stdin, sys.stderr = real_in, real_err
+            if rc_wt != 2:
+                fails.append(f"failing tests in a linked worktree did not fire: rc={rc_wt} "
+                             f"err={err_wt[:120]!r}")
+
+        # [D6] One malformed OPTIONAL line must not discard the COMMAND. `timeout=5m` made
+        # _read_override return cmd=None, so the push gate announced "no test command -
+        # nothing to verify, allowing push" for a repo that had explicitly configured one.
+        ovdir = _tmp(_trash)
+        for bad, label in ((("timeout=5m", 'python -c "pass"'), "timeout=5m"),
+                           (("debounce=abc", 'python -c "pass"'), "debounce=abc"),
+                           ((" timeout = 30s ", 'python -c "pass"'), "spaced timeout"),
+                           (("timeout=", 'python -c "pass"'), "empty timeout")):
+            ovp = os.path.join(ovdir, "fast-test.cmd")
+            with open(ovp, "w", encoding="utf-8") as f:
+                f.write(bad[0] + "\n" + bad[1] + "\n")
+            real_err = sys.stderr
+            sys.stderr = io_mod.StringIO()
+            try:
+                cmd_o, t_o, d_o = _read_override(ovp)
+                warn = sys.stderr.getvalue()
+            finally:
+                sys.stderr = real_err
+            if cmd_o != 'python -c "pass"':
+                fails.append(f"{label}: a bad optional line discarded the COMMAND "
+                             f"(got {cmd_o!r}) - the gate would report 'nothing to verify'")
+            if t_o != DEFAULT_TIMEOUT_S or d_o != DEFAULT_DEBOUNCE_S:
+                if label not in ("spaced timeout",):
+                    fails.append(f"{label}: bad value not replaced by the default "
+                                 f"(timeout={t_o} debounce={d_o})")
+            if "fast-test.cmd" not in warn:
+                fails.append(f"{label}: parse failure was SILENT - no stderr naming the file")
+        # a good file must still parse, and stay silent
+        with open(os.path.join(ovdir, "fast-test.cmd"), "w", encoding="utf-8") as f:
+            f.write('timeout=222\ndebounce=333\nnpm test\n')
+        real_err = sys.stderr
+        sys.stderr = io_mod.StringIO()
+        try:
+            g_cmd, g_t, g_d = _read_override(os.path.join(ovdir, "fast-test.cmd"))
+            g_warn = sys.stderr.getvalue()
+        finally:
+            sys.stderr = real_err
+        if (g_cmd, g_t, g_d) != ("npm test", 222, 333):
+            fails.append(f"well-formed override regressed: {(g_cmd, g_t, g_d)}")
+        if g_warn.strip():
+            fails.append(f"well-formed override warned anyway: {g_warn[:100]!r}")
+        # an UNREADABLE file is the one case that may yield cmd=None - and must say so
+        real_err = sys.stderr
+        sys.stderr = io_mod.StringIO()
+        try:
+            miss = _read_override(os.path.join(ovdir, "nope.cmd"))
+        finally:
+            sys.stderr = real_err
+        if miss[0] is not None:
+            fails.append(f"missing override should yield cmd=None, got {miss[0]!r}")
+    finally:
+        STATE_DIR = real_state3
+        for d in _trash:
+            _shutil.rmtree(d, ignore_errors=True)
+
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")
