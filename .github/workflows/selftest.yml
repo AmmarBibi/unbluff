@@ -15,8 +15,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.9', '3.11', '3.12']
         include:
+          # The README advertises a 3.8 floor for EVERY platform, but 3.8 ran on Linux only,
+          # so a construct that parses everywhere and misbehaves on 3.8 + Windows would ship
+          # green. Windows is where path, encoding and process semantics differ most, which is
+          # exactly where a floor claim is worth actually checking.
           - os: ubuntu-latest
             python-version: '3.8'   # verify the documented floor
+          - os: windows-latest
+            python-version: '3.8'
+          # macOS is deliberately absent: setup-python ships no 3.8 build for the arm64
+          # macos-latest runners. Recorded so its absence reads as a decision, not a gap.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

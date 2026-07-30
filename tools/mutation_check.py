@@ -92,12 +92,17 @@ MUTATIONS = [
      [("        if code == 2 and message:\n            sys.stderr.write(message)", "        pass")],
      False),
     ("duplicate_registration_check", "20/23", "registrations collapse into a set of roots again",
-     [("        registered[tail].append(entry)", "        registered[tail] = [entry]")], False),
-    ("duplicate_registration_check", "21/22", "paths scraped with the regex again (spaces break it)",
-     [("    for part in _path_tokens(hook):", "    for part in _regex_tokens(hook):")], False),
+     [('            registered[tail].append("%s|%s|" % (head, scope))',
+       '            entry_ = "%s|%s|" % (head, scope)\n'
+       "            if entry_ not in registered[tail]:\n"
+       "                registered[tail].append(entry_)")], False),
+    ("duplicate_registration_check", "21/22", "paths scraped by regex again (spaces break it)",
+     [('        toks = shlex.split(text, posix=False)   # posix=False: Windows backslashes '
+       "survive",
+       '        toks = __import__("re").findall('
+       "r'[^\"\\s]*[/\\\\\\\\][A-Za-z0-9_.-]+\\.py', text)")], False),
     ("duplicate_registration_check", "25", "an unknown digest votes SAME FILE again",
-     [("        if None in digests.values():\n            kind = _UNKNOWN_KIND\n        elif ",
-       "        if False:\n            kind = _UNKNOWN_KIND\n        elif ")], False),
+     [("        if any(v is None for v in values):", "        if False:")], False),
     ("duplicate_registration_check", "24/26", "only ~/.claude/settings.json is audited again",
      [("    for layer in settings_layers(settings_path, cwd):",
        "    for layer in [settings_path or SETTINGS]:")], False),

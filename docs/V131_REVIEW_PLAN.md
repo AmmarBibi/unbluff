@@ -321,6 +321,17 @@ chat transcript. Order is materiality; each is SCHEDULED.
 - **Do:** record adversarial-review runs the way `gate_runs.json` records selftests - unit reviewed,
   run id, lens set, confirmed count, date - and make the release checklist read that ledger. A unit
   whose last review predates its most recent change is a release blocker.
+- **DONE 2026-07-30.** `docs/audits/review_runs.json` is the ledger; `tools/check_review_freshness.py`
+  reads it back. Units are DERIVED from the repo (`hooks/*.py` plus the top-level entry points),
+  never from the ledger - a ledger-driven list would silently stop asking about any file nobody
+  added, which is the exact failure that put two hardcoded rosters in this release. It prints every
+  `run_selftests.py` run and BLOCKS only with `--release`.
+- **It paid for itself on the first run.** Seeding it with the v1.3.0 review (`wf_b5ea865a-a33`)
+  showed that review covered **6 of 14 hooks**. The other eight - `rate_prompt`, `show_your_proof`,
+  `meta_audit_on_stop`, `memory_hygiene_guard`, `stop_dispatcher`, `plan_defer_guard`,
+  `post_tooluse_dispatcher`, `numbers_match_on_write` - have NEVER been adversarially reviewed.
+  Nothing recorded that before, because the review's scope was never written down next to the
+  denominator. See item 45.
 
 ### 36. `delivery-gate` (ECC 2.1.0) vs unbluff behavioural comparison
 
@@ -329,6 +340,26 @@ chat transcript. Order is materiality; each is SCHEDULED.
 - **Do:** build a shared fixture set (rationalised shortcut, unproven claim, clean turn, stale
   learning log) and run both hooks over each, comparing block/warn/pass verdicts. The harness
   doubles as unbluff's first cross-tool eval.
+- **DONE 2026-07-30** - `tools/compare_delivery_gate.py`. Measured verdicts:
+
+  | fixture | ECC delivery-gate | unbluff show_your_proof |
+  |---|---|---|
+  | rationalised shortcut | PASS | PASS |
+  | unproven success claim | PASS | **BLOCK** |
+  | same claim, WITH proof | PASS | PASS |
+  | plain question, no claim | PASS | PASS |
+
+- **VERDICT: no functional overlap - shared vocabulary, different territory.** They acted on the
+  same fixture 0/4 times. ECC's gate tests ENVIRONMENT facts (learning-log mtime, disk space, a
+  rationalisation regex); unbluff tests CLAIM-vs-EVIDENCE inside the turn. unbluff also
+  discriminates rather than blanket-blocking: it blocks the unproven claim and passes the same
+  claim once proof is present. Position unbluff as complementary, not competing.
+- **The harness lied twice before it told the truth, and both are recorded in it.** (1) Scoring
+  "any output" as WARN made ECC's unconditional `INFO:` line score WARN on all four fixtures -
+  a 0/4 disagreement that was pure artefact. (2) The fixtures omitted the transcript's top-level
+  `type` field, so show_your_proof skipped every entry and PASSed everything - a clean 4/4
+  agreement that measured nothing. A comparison harness can be green and worthless in exactly the
+  way a test suite can.
 
 ### 37. Measure the ECC PostToolUse dispatcher migration before deciding
 
@@ -336,6 +367,15 @@ chat transcript. Order is materiality; each is SCHEDULED.
   touching a load-bearing `settings.json`. The decision needs a number, not an intuition.
 - **Do:** time one tool call under the current wiring, then invoke `posttooluse-dispatcher.js`
   directly with the same synthetic payload. Decide from the delta.
+- **DONE 2026-07-30** - `tools/measure_dispatcher_cost.py`, median of 5 reps on this machine:
+  10 PostToolUse commands registered, 8 of them ECC `node -e` spawns.
+  - ECC node spawns: **14.9 s serial / 6.1 s parallel** (both bounds measured; matchers gate which
+    actually fire for a given tool, so the real figure sits at or below these)
+  - single `posttooluse-dispatcher.js` invocation: **0.63 s**
+  - saving under the CONSERVATIVE (fully-parallel) assumption: **5.4 s per tool call**
+- **VERDICT: MIGRATE.** The saving clears the 250 ms bar by more than an order of magnitude even
+  on the conservative bound, so the decision does not rest on a guess about how the harness
+  schedules hooks. Deliberately reported as two bounds rather than the single scary 14.9 s figure.
 
 ### 38. Remove the superseded `~/.claude/hooks/*.py` copies
 
@@ -343,6 +383,27 @@ chat transcript. Order is materiality; each is SCHEDULED.
   Leaving them indefinitely re-creates the two-root ambiguity this release existed to end.
 - **Do:** after one clean stretch with no rollback needed, delete them and confirm
   `duplicate_registration_check` and `hook_health_check` stay green.
+- **PREMISE WRONG - measured 2026-07-30.** They were NOT "unregistered and inert". Two were LIVE:
+  `usage_snip_prompt.py` (SessionStart) and `close_skills_guard.py` (PostToolUse), both wired to
+  the `~/.claude/hooks` copies. `tools/hook_divergence_report.py` scores those copies 89 and 471
+  AST tokens from the repo - DIFFERENT PROGRAMS. **Every v1.3.1 fix to close_skills_guard was
+  sitting in git while the old, buggy copy was the one actually running on this machine.**
+  Deleting the files, as written, would have broken the live wiring instead of cleaning it up.
+- **Why nothing caught it:** it is neither a duplicate nor a missing file.
+  `duplicate_registration_check` saw exactly one registration for each (correct);
+  `hook_health_check` saw a command resolving to a real script (also correct). "Registered once,
+  but from the WRONG ROOT" was a state no check had a name for.
+- **DONE 2026-07-30:** (a) both registrations re-pointed at the repo copies, settings.json backed
+  up first, `hook-health` re-verified at 30 commands with no duplicates. Deliberately NOT via
+  `install.py`: it strips entries whose id starts `unbluff:`, and these were hand-wired with
+  `id=""`, so it would have ADDED a second registration rather than replacing them - manufacturing
+  the very duplicate this suite exists to catch. (b) `hook_health_check.stale_root_registrations()`
+  now names the state and fails on it, including when the stale copy is byte-identical (it will
+  not stay identical) and when the path contains a space. The instance is fixed AND the class is
+  now detectable.
+- **Still open:** the `~/.claude/hooks/*.py` copies remain on disk as rollback, which the plan
+  itself asks for ("after one clean stretch"). They are now genuinely unregistered, and the new
+  gate makes a silent re-wiring impossible. Delete after one clean stretch.
 
 ### 39. Prune `memory/project_ghg_copilot.md` - DONE 2026-07-29
 
@@ -375,20 +436,29 @@ produced most of these; every one was live in v1.3.0 with CI green.
 - **Pinned by:** `fast_test_on_stop` selftest 5d (both hazards, at its own level so neither gate
   depends on the other's suite) and `pre_push_gate` case 14; mutation `fast_test_on_stop #10`.
 
-### 41. [MEDIUM] `fast_test_on_stop` reads `git status --porcelain` with the locale codec and does not handle C-quoting - OPEN
+### 41. [LOW - downgraded from MEDIUM after checking] `fast_test_on_stop`'s porcelain read: wrong paths and a crash risk, but detection was never lost - DONE
 
-- **Where:** `hooks/fast_test_on_stop.py`:118,165
+- **Where:** `hooks/fast_test_on_stop.py`:238,286 and `_changed_source_files`
 - **Found by:** the twin-grep for finding 1 (the CRITICAL non-ASCII decode).
-- **What breaks:** identical class to finding 1, in the turn-end gate rather than the push-time
-  one. `text=True` with no `encoding` decodes git's UTF-8 with cp1252 on Windows, and porcelain
-  C-quotes non-ASCII paths, so a changed `données.py` is invisible to `_changed_source_files`.
-  The hook then finds "no source changed" and stays silent - success and silence identical again.
-- **Fix:** `encoding="utf-8", errors="surrogateescape"` on both calls, and `--porcelain=v1 -z`
-  with a NUL-field parser (rename entries emit `XY NEW\0ORIG\0`, so the original name must be
-  consumed as a separate field). Deliberately NOT bundled into the finding-1 fix: it changes the
-  porcelain parser and its fixtures, which is a behavioural change to a shipped hook and deserves
-  its own regression test rather than riding along.
-- **Status:** OPEN. Scheduled after P6, before the closing adversarial-review run.
+- **CORRECTION to my own first write-up of this item.** I initially recorded it as "a changed
+  `données.py` is invisible, so the hook stays silent" - the same shape as finding 1. That is
+  **wrong**, and worth recording rather than quietly fixing. Both call sites use the result as a
+  BOOLEAN (`if not _changed_source_files(porcelain): return 0`), and a C-quoted
+  `"donn\303\251es.py"` still ends in `.py`, so it still matched `SRC_EXT` and still counted as
+  a change. Detection was intact. Overstating a finding is the same failure as missing one - it
+  spends attention in the wrong place - so the severity is corrected here, not silently.
+- **What was actually wrong:** (a) the returned PATHS were mangled strings no `os.path` call
+  could open, so the function's stated contract was false and the first caller to use the paths
+  for anything would inherit a silent bug; (b) `text=True` with no `encoding` decodes with cp1252
+  on Windows, and cp1252 has undefined byte positions (0x81, 0x8D, 0x8F, 0x90, 0x9D), so a
+  filename whose UTF-8 contains one raises `UnicodeDecodeError` - a `ValueError`, which the
+  `except (OSError, subprocess.SubprocessError)` around the call does NOT catch. That crashes the
+  Stop hook. Only reachable with `core.quotePath=false`, which is why it is LOW, not MEDIUM.
+- **Fix (applied):** `encoding="utf-8", errors="surrogateescape"` on both calls, plus
+  `--porcelain=v1 -z` and a NUL-field parser. `_changed_source_files` accepts both forms, so the
+  newline fixtures still hold. A rename emits `XY NEW\0ORIG\0`, so the original name is consumed
+  as its own field rather than parsed out of a `" -> "` substring a filename may legitimately
+  contain. Pinned by selftest case 1b, including a rename and a non-ASCII path.
 
 ### 42. [MEDIUM] `close_skills_guard`'s selftest wrote every fixture to one filename - DONE
 
@@ -409,6 +479,38 @@ produced most of these; every one was live in v1.3.0 with CI green.
 - **It already paid for itself three times** in this pass, catching decorative tests for
   findings 1b, 10 and 33 that had been written, run, and observed green.
 - **Related:** item 35 (encode the durability lesson as a mechanism, not a sentence).
+
+### 44. [MEDIUM] CI claimed a Python 3.8 floor on every platform but only ran 3.8 on Linux - DONE
+
+- **Where:** `.github/workflows/selftest.yml`
+- **Found by:** counting the jobs. The handoff and the plan both said "12 jobs: Linux/macOS/Windows
+  x py3.8/3.9/3.11/3.12". The matrix is actually 3 OS x 3 versions plus a single ubuntu 3.8 entry,
+  plus integration - **11 jobs**, with 3.8 verified on Linux only. A claim about coverage that
+  nobody had counted, which is the same species as every other finding in this file.
+- **What breaks:** the README advertises a 3.8 floor. `tools/check_python_floor.py` AST-parses at
+  the floor, which catches syntax but not runtime behaviour, so a 3.8-only construct that
+  misbehaves on Windows would ship green.
+- **Fix (applied):** added `windows-latest / py3.8`. macOS 3.8 is deliberately absent -
+  `setup-python` ships no 3.8 build for the arm64 `macos-latest` runners - and that absence is now
+  a comment in the workflow so it reads as a decision rather than a gap.
+
+### 45. [HIGH] Eight of fourteen hooks have NEVER been adversarially reviewed - OPEN
+
+- **Found by:** item 35's ledger, on its first run.
+- **What breaks:** the v1.3.0 adversarial review (`wf_b5ea865a-a33`) covered six units:
+  `pre_push_gate`, `close_skills_guard`, `duplicate_registration_check`, `hook_health_check`,
+  `fast_test_on_stop`, `usage_snip_prompt` (plus `run_selftests` and `install`). It found 34
+  confirmed defects in those. The other eight hooks - `rate_prompt`, `show_your_proof`,
+  `meta_audit_on_stop`, `memory_hygiene_guard`, `stop_dispatcher`, `plan_defer_guard`,
+  `post_tooluse_dispatcher`, `numbers_match_on_write` - were never in scope and have never been
+  reviewed at all. Given a 34-defect yield on the six that were, assuming the eight are clean is
+  not a position anyone has evidence for.
+- **Why it was invisible:** the review's SCOPE was never recorded next to the DENOMINATOR. "34
+  confirmed findings" reads like a thorough audit until you ask "of how many units?".
+- **Do:** run the same 4-lens adversarial review over the eight unreviewed hooks and record each
+  in `docs/audits/review_runs.json`. Not folded into this release: it is a fresh review of
+  different code, not a fix for a known defect, and `check_review_freshness.py --release` now
+  reports it every run so it cannot be forgotten.
 
 ## Definition of done
 

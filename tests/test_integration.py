@@ -12,6 +12,30 @@ PYEXE = sys.executable
 results = []
 
 
+def _install_skill_names():
+    """The skills install.py actually ships - read from install.py, never re-listed here.
+
+    A second copy of this list is a twin waiting to drift: the point of asserting it is that
+    the installer and the test cannot disagree.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_ub_install",
+                                                  os.path.join(REPO, "install.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod.SKILL_NAMES)
+
+
+def _close_guard_required_skills():
+    """The skills close_skills_guard demands, read from the hook itself."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_ub_guard", os.path.join(REPO, "hooks", "close_skills_guard.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod.REQUIRED_SKILLS)
+
+
 def record(name, ok, detail=""):
     results.append((name, ok, detail))
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  -> {detail}" if detail and not ok else ""))
@@ -56,14 +80,25 @@ def main():
                sum(1 for i in ids if str(i).startswith("unbluff:")) == 4, str(ids))
         record("A3 preexisting hook preserved", "someone-else:keep" in ids)
         record("A4 env preserved", s.get("env", {}).get("FOO") == "bar")
-        record("A5 skill installed",
-               os.path.isfile(os.path.join(home, ".claude", "skills", "meta-review", "SKILL.md")))
-        record("A6 source-coverage skill installed",
-               os.path.isfile(os.path.join(home, ".claude", "skills", "source-coverage", "SKILL.md")))
+        # [finding 31] DERIVED from install.SKILL_NAMES, never a hand-written list. Three of
+        # the four were asserted by name, so completeness-audit - the skill added in v1.3.0
+        # precisely because close_skills_guard REQUIRES all four - was the one whose install
+        # nothing checked. A hook demanding a skill the installer silently failed to ship
+        # would have blocked every close with an unsatisfiable message, all gates green.
+        skill_names = _install_skill_names()
+        record("A5 installer ships >= 4 skills (derived, not listed)",
+               len(skill_names) >= 4, str(skill_names))
+        for _i, _name in enumerate(skill_names):
+            record(f"A5.{_i + 1} skill installed: {_name}",
+                   os.path.isfile(os.path.join(home, ".claude", "skills", _name, "SKILL.md")))
         record("A7 consistency-audit skill installed with bundled scripts",
-               os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit", "SKILL.md"))
-               and os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit",
-                                               "scripts", "audit.py")))
+               os.path.isfile(os.path.join(home, ".claude", "skills", "consistency-audit",
+                                           "scripts", "audit.py")))
+        # every skill close_skills_guard names must actually be among them
+        _required = _close_guard_required_skills()
+        record("A8 every skill close_skills_guard requires is installed",
+               all(os.path.isfile(os.path.join(home, ".claude", "skills", r, "SKILL.md"))
+                   for r in _required), f"requires={_required} ships={skill_names}")
 
         ups = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         ss = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
@@ -209,8 +244,10 @@ def main():
                not any(str(i).startswith("unbluff:") for i in ids2), str(ids2))
         record("G3 preexisting hook still there", "someone-else:keep" in ids2)
         record("G4 env still there", s2.get("env", {}).get("FOO") == "bar")
-        record("G5 skill removed",
-               not os.path.exists(os.path.join(home, ".claude", "skills", "meta-review")))
+        # [finding 31] every installed skill must come back OUT, not just the first one.
+        _left = [n for n in _install_skill_names()
+                 if os.path.exists(os.path.join(home, ".claude", "skills", n))]
+        record("G5 every installed skill removed", not _left, f"left behind: {_left}")
 
         for d in (proj, repo2, clean, nmproj):
             shutil.rmtree(d, ignore_errors=True)

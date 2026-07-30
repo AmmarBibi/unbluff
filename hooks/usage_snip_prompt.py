@@ -18,6 +18,7 @@ Exits 0 always; stdout becomes additional session context. Run with --selftest.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 NOTICE = """[usage-budget] You cannot read this user's subscription quota - no tool exposes it. \
@@ -53,18 +54,51 @@ def selftest() -> int:
         fails.append("notice lost the quality-is-never-degraded rule")
     if "do not nag" not in NOTICE:
         fails.append("notice lost the conditional guard - it would fire on trivial sessions")
-    # malformed / empty stdin must still exit 0 and still emit the notice
+    # [finding 29] Exercise the path 100% of real invocations take FIRST. Only the
+    # malformed-stdin branch was covered, so `json.load` succeeding was never tested at all:
+    # main() could return 1, or emit nothing, on every genuine SessionStart and stay green.
     import io
-    real_in, real_out = sys.stdin, sys.stdout
-    sys.stdin, sys.stdout = io.StringIO("not json"), io.StringIO()
-    try:
-        rc, out = main(), sys.stdout.getvalue()
-    finally:
-        sys.stdin, sys.stdout = real_in, real_out
+    import json as _json
+
+    def _drive(payload):
+        real_in, real_out = sys.stdin, sys.stdout
+        sys.stdin, sys.stdout = io.StringIO(payload), io.StringIO()
+        try:
+            return main(), sys.stdout.getvalue()
+        finally:
+            sys.stdin, sys.stdout = real_in, real_out
+
+    real_payload = _json.dumps({"session_id": "abc123", "source": "startup",
+                                "cwd": "/some/project",
+                                "transcript_path": "/x/y.jsonl"})
+    rc, out = _drive(real_payload)
     if rc != 0:
-        fails.append(f"must exit 0 on malformed stdin, got {rc}")
+        fails.append(f"valid SessionStart payload must exit 0, got {rc}")
     if "usage-budget" not in out:
-        fails.append("notice not emitted on malformed stdin")
+        fails.append("valid SessionStart payload emitted no notice - the hook is a no-op "
+                     "on every real invocation")
+    if out.strip() != NOTICE.strip():
+        fails.append("valid-payload output is not the NOTICE verbatim: %r" % out[:120])
+    for phrase in ("wait for the reset", "do not nag", "Workflow"):
+        if phrase not in out:
+            fails.append(f"valid-payload output lost the {phrase!r} rule")
+
+    # malformed / empty stdin must still exit 0 and still emit the notice
+    for bad in ("not json", "", "[]", "null"):
+        rc, out = _drive(bad)
+        if rc != 0:
+            fails.append(f"must exit 0 on stdin {bad!r}, got {rc}")
+        if "usage-budget" not in out:
+            fails.append(f"notice not emitted on stdin {bad!r}")
+
+    # and through a REAL process, so the __main__ dispatch is covered too
+    import subprocess
+    proc = subprocess.run([sys.executable, os.path.abspath(__file__)], input=real_payload,
+                          capture_output=True, text=True, timeout=60,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or "usage-budget" not in (proc.stdout or ""):
+        fails.append("subprocess valid-payload run wrong: rc=%s stdout=%r"
+                     % (proc.returncode, (proc.stdout or "")[:120]))
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

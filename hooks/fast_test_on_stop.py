@@ -35,7 +35,33 @@ STATE_DIR = os.environ.get("UNBLUFF_STATE_DIR") or os.path.join(
 
 
 def _changed_source_files(porcelain: str) -> list[str]:
-    """Paths of modified/added/renamed SOURCE files from `git status --porcelain=v1` output."""
+    """Paths of modified/added/renamed SOURCE files from `git status --porcelain=v1` output.
+
+    Accepts BOTH the -z (NUL-separated) form the callers now request and the newline form.
+
+    -z matters for the CONTRACT, not for the boolean: the callers only ask "did any source
+    change?", and a C-quoted `"donn\\303\\251es.py"` still ends in `.py`, so detection was
+    never actually lost. What was wrong is that the returned PATH was a mangled string no
+    os.path call could open - a correct-looking answer that breaks the first caller to use
+    the paths for anything. With -z git emits raw bytes and no quoting, and a rename's
+    original name arrives as its own field rather than inside a " -> " substring that a
+    filename may legitimately contain.
+    """
+    if "\0" in porcelain:
+        out = []
+        fields = porcelain.split("\0")
+        i = 0
+        while i < len(fields):
+            entry = fields[i]
+            i += 1
+            if len(entry) < 4:
+                continue
+            xy, path = entry[:2], entry[3:]
+            if "R" in xy or "C" in xy:
+                i += 1        # the ORIGINAL name follows as a separate field; skip it
+            if os.path.splitext(path)[1].lower() in SRC_EXT:
+                out.append(path)
+        return out
     out = []
     for line in porcelain.splitlines():
         if len(line) < 4:
@@ -209,8 +235,9 @@ def _notice_no_gate(cwd: str) -> int:
     if os.path.exists(np):
         return 0
     try:
-        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1"],
-                                   capture_output=True, text=True, timeout=10).stdout
+        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+                                   capture_output=True, text=True, timeout=10,
+                                   encoding="utf-8", errors="surrogateescape").stdout
     except (OSError, subprocess.SubprocessError):
         return 0
     if not _changed_source_files(porcelain):
@@ -256,8 +283,9 @@ def main() -> int:
         return 0
 
     try:
-        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1"],
-                                   capture_output=True, text=True, timeout=10).stdout
+        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+                                   capture_output=True, text=True, timeout=10,
+                                   encoding="utf-8", errors="surrogateescape").stdout
     except (OSError, subprocess.SubprocessError):
         return 0
     if not _changed_source_files(porcelain):
@@ -286,6 +314,24 @@ def main() -> int:
 def selftest() -> int:
     import tempfile
     fails = []
+    # 1b. [plan item 41] the -z form the callers actually request. Fields are NUL-separated
+    # and a rename's ORIGINAL name is its own field, so a " -> " parser would mis-read it.
+    # git C-quotes non-ASCII under the newline form, which left the returned path a mangled
+    # string no os.path call could open - the boolean stayed right, the contract did not.
+    z = (" M src/app.py\0R  new/thing.ts\0old.js\0 M docs/readme.md\0"
+         "?? tools/données.py\0")
+    got = _changed_source_files(z)
+    if "src/app.py" not in got:
+        fails.append(f"-z parser missed a modified source file: {got}")
+    if "new/thing.ts" not in got:
+        fails.append(f"-z parser missed the NEW side of a rename: {got}")
+    if "old.js" in got:
+        fails.append(f"-z parser counted a rename's ORIGINAL name as a change: {got}")
+    if "docs/readme.md" in got:
+        fails.append(f"-z parser treated a doc as source: {got}")
+    if "tools/données.py" not in got:
+        fails.append(f"-z parser lost a non-ASCII path: {got}")
+
     # 1. porcelain parser: modified source, renamed source, non-source, untracked source
     porcelain = ' M src/app.py\nR  old.js -> new/thing.ts\n M docs/readme.md\n?? tools/new_tool.py\n'
     got = _changed_source_files(porcelain)

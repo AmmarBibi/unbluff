@@ -1,0 +1,114 @@
+[
+  {
+    "unit": "hooks/pre_push_gate.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "hooks/close_skills_guard.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "hooks/duplicate_registration_check.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "hooks/hook_health_check.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "hooks/fast_test_on_stop.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "hooks/usage_snip_prompt.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "run_selftests.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  },
+  {
+    "unit": "install.py",
+    "run_id": "wf_b5ea865a-a33",
+    "lenses": [
+      "cross-platform",
+      "test-quality",
+      "silent-failure",
+      "security"
+    ],
+    "agents": 43,
+    "findings": 39,
+    "confirmed": 34,
+    "utc": "2026-07-29T00:00:00+00:00"
+  }
+]

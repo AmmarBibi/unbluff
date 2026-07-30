@@ -35,28 +35,91 @@ import ast
 import hashlib
 import json
 import os
-import re
+import shlex
 import sys
 from collections import defaultdict
 
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
-PY_IN_STRING = re.compile(r"[^\"\s]*[/\\][A-Za-z0-9_.-]+\.py")
+
+_UNKNOWN_KIND = ("UNKNOWN - at least one file could not be read, so sameness was NOT "
+                 "determined; check both by hand before deleting either")
+
+
+def _path_tokens(text: str) -> list[str]:
+    """Every .py path in a command string, split the way a shell splits it.
+
+    Replaces the regex `[^"\\s]*[/\\\\][A-Za-z0-9_.-]+\\.py`, whose leading `[^"\\s]*` cannot
+    cross a space. `"C:\\Users\\John Doe\\.claude\\hooks\\rate_prompt.py"` therefore matched
+    nothing usable, and BOTH headline detections went silent - for every user whose home
+    directory contains a space, which on Windows is the ordinary case. No fixture used one,
+    so the hook reported a clean bill on a machine where it was doing nothing at all.
+    """
+    try:
+        toks = shlex.split(text, posix=False)   # posix=False: Windows backslashes survive
+    except ValueError:
+        toks = text.split()
+    out = []
+    for t in toks:
+        t = t.strip().strip('"').strip("'")
+        if t.lower().endswith(".py"):
+            out.append(t)
+    return out
+
+
+def settings_layers(settings_path: str | None = None, cwd: str | None = None) -> list[str]:
+    """Every settings file Claude Code merges, most-global first.
+
+    Reading only ~/.claude/settings.json hid the commonest real double-wiring: the same hook
+    in the user file AND in the project's .claude/settings.json. Both fire on every event,
+    and the check printed nothing.
+    """
+    base = cwd or os.getcwd()
+    out = [settings_path or SETTINGS]
+    if not settings_path:
+        out.append(os.path.join(os.path.expanduser("~"), ".claude", "settings.local.json"))
+    out.append(os.path.join(base, ".claude", "settings.json"))
+    out.append(os.path.join(base, ".claude", "settings.local.json"))
+    seen, uniq = set(), []
+    for p in out:
+        key = os.path.normcase(os.path.abspath(p))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(p)
+    return uniq
 
 
 def _iter_commands(settings_path: str):
-    """Yield every script path referenced by any hook, from `command` and `args`."""
+    """Yield every script path referenced by any hook, from `command` and `args`.
+
+    Yields DUPLICATES as duplicates - the caller must not collapse them (see audit)."""
     try:
-        data = json.load(open(settings_path, encoding="utf-8"))
+        with open(settings_path, encoding="utf-8") as fh:
+            data = json.load(fh)
     except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
         return
     for groups in (data.get("hooks") or {}).values():
         for group in groups or []:
+            if not isinstance(group, dict):
+                continue
             for hook in group.get("hooks", []) or []:
-                parts = [hook.get("command") or ""]
-                parts += [a for a in (hook.get("args") or []) if isinstance(a, str)]
-                for part in parts:
-                    for match in PY_IN_STRING.findall(part):
-                        yield match.strip('"')
+                if not isinstance(hook, dict):
+                    continue
+                for match in _path_tokens(hook.get("command") or ""):
+                    yield match
+                for arg in (hook.get("args") or []):
+                    if not isinstance(arg, str):
+                        continue
+                    # An args entry is ALREADY one token; re-splitting it on whitespace is
+                    # what broke paths with spaces. Only fall back to tokenizing when the
+                    # entry plainly is not a bare path.
+                    stripped = arg.strip().strip('"').strip("'")
+                    if stripped.lower().endswith(".py"):
+                        yield stripped
+                    else:
+                        for match in _path_tokens(arg):
+                            yield match
 
 
 def _split(path: str) -> tuple[str, str]:
@@ -91,44 +154,62 @@ def dispatched_modules(dispatcher_path: str) -> list[str]:
     return names
 
 
-def audit(settings_path: str | None = None) -> list[str]:
+def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]:
     """Return problem lines (empty == healthy).
 
     Resolves SETTINGS at CALL time, not definition time: a default of `=SETTINGS` binds the
     module constant when the function is defined, so overriding it (tests, alternate configs)
     silently has no effect. Found 2026-07-29 while probing the stdout path.
     """
-    settings_path = settings_path or SETTINGS
-    registered: dict[str, set[str]] = defaultdict(set)
-    for path in _iter_commands(settings_path):
-        head, tail = _split(path)
-        registered[tail].add(head)
+    # A LIST, not a set. Collapsing registrations into a set of directories made the
+    # commonest double-fire - the SAME path wired twice - vanish before it could be counted,
+    # so the check reported healthy for exactly the fault that motivated it (rate_prompt
+    # firing twice on every prompt). Two entries must stay two entries.
+    registered: dict[str, list[str]] = defaultdict(list)
+    for layer in settings_layers(settings_path, cwd):
+        label = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(layer)))) \
+            or "?"
+        scope = "user" if os.path.normcase(os.path.abspath(layer)) == \
+            os.path.normcase(os.path.abspath(settings_path or SETTINGS)) else label
+        for path in _iter_commands(layer):
+            head, tail = _split(path)
+            registered[tail].append("%s|%s|" % (head, scope))
 
-    effective: dict[str, set[str]] = {k: set(v) for k, v in registered.items()}
-    for base, roots in list(registered.items()):
+    effective: dict[str, list[str]] = {k: list(v) for k, v in registered.items()}
+    for base, entries in list(registered.items()):
         if "dispatcher" not in base:
             continue
-        for root in roots:
+        for entry in entries:
+            root, scope, _ = entry.split("|", 2)
             for mod in dispatched_modules(os.path.join(root, base)):
-                effective.setdefault(mod + ".py", set()).add(root + "|via " + base)
+                effective.setdefault(mod + ".py", []).append(
+                    "%s|%s|via %s" % (root, scope, base))
 
     problems: list[str] = []
     for base in sorted(effective):
-        roots = sorted(effective[base])
-        if len(roots) < 2:
+        entries = sorted(effective[base])
+        if len(entries) < 2:
             continue
         digests = {}
-        for entry in roots:
+        for i, entry in enumerate(entries):
             root = entry.split("|", 1)[0]
-            digests[entry] = _digest(os.path.join(root, base))
-        distinct = {d for d in digests.values() if d}
-        kind = ("SAME FILE twice (redundant)" if len(distinct) == 1
-                else "DIFFERENT PROGRAMS sharing a name (nondeterministic)")
-        problems.append("%s - registered %d times - %s:" % (base, len(roots), kind))
-        for entry in roots:
-            root, _, via = entry.partition("|")
-            problems.append("      <- %s%s  [sha %s]" % (
-                root, (" (" + via + ")") if via else "", digests[entry] or "missing"))
+            digests[i] = _digest(os.path.join(root, base))
+        values = list(digests.values())
+        if any(v is None for v in values):
+            # Do NOT drop the unknowns and compare what is left. One readable file plus one
+            # missing one used to leave a single distinct digest and the report asserted
+            # "SAME FILE twice (redundant)" - a verdict it had never computed, pointing the
+            # reader at the wrong copy to delete.
+            kind = _UNKNOWN_KIND
+        elif len(set(values)) == 1:
+            kind = "SAME FILE twice (redundant)"
+        else:
+            kind = "DIFFERENT PROGRAMS sharing a name (nondeterministic)"
+        problems.append("%s - registered %d times - %s:" % (base, len(entries), kind))
+        for i, entry in enumerate(entries):
+            root, scope, via = entry.split("|", 2)
+            problems.append("      <- %s [%s]%s  [sha %s]" % (
+                root, scope, (" (" + via + ")") if via else "", digests[i] or "UNREADABLE"))
     return problems
 
 
@@ -162,6 +243,7 @@ def _selftest() -> int:
                 {"command": os.path.join(a, "solo.py")},
             ]}]}}, fh)
 
+        fails = []
         out = "\n".join(audit(settings))
         checks = [
             ("widget.py" in out and "DIFFERENT PROGRAMS" in out, "variant conflict not flagged"),
@@ -170,9 +252,89 @@ def _selftest() -> int:
         ]
         for ok, msg in checks:
             if not ok:
-                print("SELFTEST FAIL: " + msg)
-                print(out or "(nothing reported)")
-                return 1
+                fails.append(msg + " || got: " + (out or "(nothing reported)")[:200])
+
+        # ------------------------------------------------------- v1.3.1 regressions
+        def _audit_of(entries, where=None, cwd=None):
+            p = os.path.join(where or td, "s_%d.json" % len(os.listdir(where or td)))
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump({"hooks": {"Stop": [{"hooks": entries}]}}, fh)
+            return "\n".join(audit(p, cwd=cwd)), p
+
+        # (4) [findings 20, 23] THE COMMONEST DUPLICATE: the SAME path registered twice.
+        # Registrations were collapsed into a SET of directories, so two identical entries
+        # became one and the check reported a clean bill - for the exact double-fire that
+        # motivated this hook (rate_prompt firing twice on every prompt).
+        dup = os.path.join(a, "twice.py")
+        with open(dup, "w", encoding="utf-8") as fh:
+            fh.write("q = 1\n")
+        out4, _ = _audit_of([{"command": dup}, {"command": dup}])
+        if "twice.py" not in out4:
+            fails.append("the same path registered TWICE was reported as healthy || " +
+                         (out4 or "(nothing reported)")[:200])
+        elif "2 times" not in out4:
+            fails.append("same-path duplicate found but not counted: " + out4[:200])
+
+        # (5) [findings 21, 22] a SPACE anywhere in a path killed BOTH headline detections.
+        # `C:\Users\John Doe\...` is the common Windows case, and no fixture used one, so
+        # the hook went completely silent for those users while reporting nothing wrong.
+        spaced = os.path.join(td, "John Doe", "hooks")
+        os.makedirs(spaced, exist_ok=True)
+        s1 = os.path.join(spaced, "spaced.py")
+        with open(s1, "w", encoding="utf-8") as fh:
+            fh.write("s = 1\n")
+        out5, _ = _audit_of([{"command": '"%s" "%s"' % (sys.executable, s1)},
+                             {"command": "python", "args": [s1]}])
+        if "spaced.py" not in out5:
+            fails.append("a path containing a space silently disabled detection || " +
+                         (out5 or "(nothing reported)")[:200])
+        # Asserting only the FILENAME is not enough: the old regex still matched the fragment
+        # after the space ("Doe\\hooks\\spaced.py"), so the duplicate was reported with a root
+        # that does not exist - detected for the wrong reason, and unusable for fixing it.
+        # The full directory must appear, and the digest must have been readable from it.
+        elif spaced.replace("\\", "/") not in out5.replace("\\", "/"):
+            fails.append("duplicate reported with a TRUNCATED root - the path was matched "
+                         "from after the space || " + out5[:240])
+        elif "UNREADABLE" in out5:
+            fails.append("root parsed from a spaced path does not resolve to the real file || "
+                         + out5[:240])
+
+        # (6) [findings 24, 26] user + PROJECT scope. Reading only ~/.claude/settings.json
+        # made the commonest real double-wiring invisible: the same hook in the user file
+        # and in the project's .claude/settings.json. Both fire, every event.
+        proj = os.path.join(td, "proj")
+        os.makedirs(os.path.join(proj, ".claude"), exist_ok=True)
+        shared = os.path.join(a, "shared.py")
+        with open(shared, "w", encoding="utf-8") as fh:
+            fh.write("sh = 1\n")
+        with open(os.path.join(proj, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"command": shared}]}]}}, fh)
+        out6, _ = _audit_of([{"command": shared}], cwd=proj)
+        if "shared.py" not in out6:
+            fails.append("a hook wired at BOTH user and project scope was invisible || " +
+                         (out6 or "(nothing reported)")[:200])
+
+        # (7) [finding 25] when a file cannot be read, its digest is None. Those were
+        # DISCARDED before the comparison, so one readable file plus one missing one left a
+        # single distinct digest and the report asserted "SAME FILE twice (redundant)" - a
+        # verdict it had not computed, steering the reader to delete the wrong copy.
+        ghost = os.path.join(td, "ghost", "vanished.py")
+        real_one = os.path.join(a, "vanished.py")
+        with open(real_one, "w", encoding="utf-8") as fh:
+            fh.write("v = 1\n")
+        out7, _ = _audit_of([{"command": real_one}, {"command": ghost}])
+        if "vanished.py" not in out7:
+            fails.append("missing-file duplicate not reported at all: " + out7[:160])
+        elif "SAME FILE" in out7:
+            fails.append("asserted SAME FILE while a digest was unavailable - the verdict "
+                         "was never computed || " + out7[:200])
+        elif "UNKNOWN" not in out7 and "could not be read" not in out7:
+            fails.append("no explicit unknown verdict for an unreadable file: " + out7[:200])
+
+        if fails:
+            for f in fails:
+                print("SELFTEST FAIL: " + f)
+            return 1
 
         # main() must actually REACH audit() and PRINT. Testing audit() alone leaves the
         # reporting path uncovered - and a late-bound default silently made SETTINGS

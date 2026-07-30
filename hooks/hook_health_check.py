@@ -25,6 +25,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 _HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -254,6 +255,72 @@ def check_config(cfg: dict) -> tuple[int, list[str]]:
     return n_cmd, problems
 
 
+def stale_root_registrations(cfg: dict, hooks_dir: str = None) -> list:
+    """Hooks of THIS suite registered from a directory other than the one they ship in.
+
+    Measured on this machine 2026-07-30: usage_snip_prompt and close_skills_guard were still
+    wired to ~/.claude/hooks copies that had diverged from the repo by 89 and 471 AST tokens.
+    Every fix to close_skills_guard therefore sat in git while the OLD program actually ran.
+
+    Nothing reported it, because it is not a duplicate and it is not a missing file:
+      * duplicate_registration_check saw exactly one registration for each - correct
+      * hook_health_check saw a command that resolves to a real script - also correct
+    "Registered once, from the wrong root" was a state no check had a name for, and it is
+    the failure mode that makes a whole release invisible on the machine it was written on.
+    Deleting the stale copies fixes today; this names the state, so it cannot come back.
+    """
+    d = hooks_dir or _HOOKS_DIR
+    ours = {os.path.basename(p): p for p in all_hook_files(d)}
+    problems = []
+    for cmd in _iter_hook_commands(cfg):
+        for token in _script_tokens(cmd):
+            name = os.path.basename(token)
+            if name not in ours:
+                continue
+            reg_dir = os.path.dirname(os.path.abspath(token))
+            if os.path.normcase(reg_dir) == os.path.normcase(os.path.abspath(d)):
+                continue
+            same = _same_file(token, ours[name])
+            problems.append(
+                "%s is registered from %s but this suite ships it in %s (%s)" % (
+                    name, reg_dir, d,
+                    "identical copy" if same else "THE TWO COPIES ARE DIFFERENT PROGRAMS - "
+                                                  "your fixes are not the code that runs"))
+    return problems
+
+
+def _same_file(a: str, b: str) -> bool:
+    try:
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def _iter_hook_commands(cfg: dict):
+    for groups in (cfg.get("hooks") or {}).values():
+        for group in groups or []:
+            if not isinstance(group, dict):
+                continue
+            for hook in group.get("hooks", []) or []:
+                if not isinstance(hook, dict):
+                    continue
+                parts = [hook.get("command") or ""]
+                parts += [a for a in (hook.get("args") or []) if isinstance(a, str)]
+                for part in parts:
+                    yield part
+
+
+def _script_tokens(text: str) -> list:
+    """The .py paths in a command string, shell-tokenized (spaces in paths survive)."""
+    try:
+        toks = shlex.split(text, posix=False)
+    except ValueError:
+        toks = text.split()
+    return [t.strip().strip('"').strip("'") for t in toks
+            if t.strip().strip('"').strip("'").lower().endswith(".py")]
+
+
 def main() -> int:
     sp = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     try:
@@ -270,6 +337,7 @@ def main() -> int:
         return 0
     n_cmd, problems = check_config(cfg)
     problems += floor_violations()
+    problems += stale_root_registrations(cfg)
     swept = selftestable_hooks()
     total_hooks = len(all_hook_files())
     weekly_problems, n_run, n_passed, n_skipped = run_weekly_selftests(swept, _STATE_DIR)
@@ -358,6 +426,41 @@ def selftest() -> int:
     if _twins:
         fails.append(f"a SECOND selftest detector exists in {_twins} - import "
                      f"selftestable_hooks() instead; two copies of one rule is the defect")
+
+    # 0c. [plan item 38, corrected] "registered once, but from the wrong root". The live
+    # config wired close_skills_guard and usage_snip_prompt to ~/.claude/hooks copies that
+    # had DIVERGED from the repo, so a whole release of fixes never ran. No existing check
+    # could see it: not a duplicate, not a missing file. Must be caught even when the stale
+    # copy is byte-identical, because it will not stay identical.
+    with tempfile.TemporaryDirectory() as _sd:
+        _elsewhere = os.path.join(_sd, "elsewhere")
+        os.makedirs(_elsewhere, exist_ok=True)
+        _victim = os.path.basename(all_hook_files()[0])
+        _stale = os.path.join(_elsewhere, _victim)
+        with open(_stale, "w", encoding="utf-8") as f:
+            f.write("# a DIVERGED copy of a hook this suite ships\n")
+        _cfg = {"hooks": {"SessionStart": [{"hooks": [
+            {"command": '"%s" "%s"' % (sys.executable, _stale)}]}]}}
+        _probs = stale_root_registrations(_cfg)
+        if not any(_victim in p for p in _probs):
+            fails.append(f"a hook registered from the WRONG root ({_stale}) was not flagged")
+        elif not any("DIFFERENT PROGRAMS" in p for p in _probs):
+            fails.append(f"wrong-root registration flagged but divergence not named: {_probs}")
+        # and a correctly-wired one must stay silent
+        _ok_cfg = {"hooks": {"SessionStart": [{"hooks": [
+            {"command": '"%s" "%s"' % (sys.executable, all_hook_files()[0])}]}]}}
+        if stale_root_registrations(_ok_cfg):
+            fails.append("false positive on a hook registered from its own directory")
+        # a path with a SPACE must not slip past the tokenizer (same class as finding 21)
+        _spaced_dir = os.path.join(_sd, "John Doe", "hooks")
+        os.makedirs(_spaced_dir, exist_ok=True)
+        _spaced = os.path.join(_spaced_dir, _victim)
+        with open(_spaced, "w", encoding="utf-8") as f:
+            f.write("# diverged\n")
+        _sp_cfg = {"hooks": {"SessionStart": [{"hooks": [
+            {"command": '"%s" "%s"' % (sys.executable, _spaced)}]}]}}
+        if not any(_victim in p for p in stale_root_registrations(_sp_cfg)):
+            fails.append("a wrong-root registration with a SPACE in the path was missed")
 
     # 1. a known-good config shape: python exe + this very script as an absolute arg
     good = {"hooks": {"Stop": [{"hooks": [{"type": "command",

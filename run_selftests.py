@@ -111,6 +111,13 @@ def main():
         if rc != 0:
             failed.append("skill-deps")
 
+    # Informational every run, a BLOCKER only at release (--release). Printing it here is the
+    # point: "CI green" and "reviewed since it last changed" are different questions, and the
+    # second one had no answer at all until this ledger existed.
+    fresh = os.path.join(HERE, "tools", "check_review_freshness.py")
+    if os.path.exists(fresh):
+        subprocess.run([sys.executable, fresh], stdin=subprocess.DEVNULL)
+
     record_gate_run(ran, failed, skipped)
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
