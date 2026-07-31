@@ -175,13 +175,23 @@ MUTATIONS = [
     ("duplicate_registration_check", "D9", "selftest reads the invoking cwd's real config again",
      [('            out_ = "\\n".join(audit(p, cwd=cwd or hermetic))',
        '            out_ = "\\n".join(audit(p, cwd=cwd))')], False),
+    # WINDOWS-ONLY in effect, and it took a CI round to see why. Dropping the saved pgid is a
+    # genuine no-op on POSIX: start_new_session makes pgid == proc.pid, and _kill_tree already
+    # falls back to proc.pid, so it kills the same process group either way. SURVIVED on ubuntu
+    # was a true statement about the MUTATION, not about the test - the honest fix is to say
+    # what platform it actually exercises, not to keep re-timing the fixture (P13 F). The
+    # POSIX half of the same cleanup is covered by D10c below.
     ("fast_test_on_stop", "D10", "kill_tree loses the saved pgid / job (grandchild survives)",
      [("        _kill_tree(proc, pgid, job)  # release the pipe; never leave what we spawned "
        "running",
-       "        _kill_tree(proc)")], False),
+       "        _kill_tree(proc)")], "nt"),
     # WINDOWS-ONLY by construction: _win_job_kill_on_close() already returns None on POSIX, so
     # this edit is a literal no-op there and "SURVIVED" would be a statement about the platform,
     # not about the test. CI reported it as a decorative test for exactly that reason (P13 F).
+    ("fast_test_on_stop", "D10c", "the POSIX kill stops being group-wide (only the direct "
+     "child dies, the grandchild lives)",
+     [("                os.killpg(target, signal.SIGKILL)",
+       "                os.kill(target, signal.SIGKILL)")], True),
     ("fast_test_on_stop", "D10b", "the Windows job object is never created",
      [("    job = _win_job_kill_on_close()", "    job = None")], "nt"),
     ("hook_health_check", "D11", "the weekly sweep loses its aggregate budget",
