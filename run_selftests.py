@@ -49,6 +49,9 @@ AUX_GATES = (
     # the review-freshness gate's own scope check: it asked about 17 of 31 tracked .py files
     # and could not detect its own sabotage until P13 A1
     ("review-freshness-scope", ("tools", "check_review_freshness.py"), ("--selftest",)),
+    # the README pastes a run_selftests transcript as EVIDENCE; it claimed 18 while the suite
+    # ran 21. A stale paste reads exactly like a fresh one.
+    ("readme-fresh", ("tools", "check_readme_fresh.py"), ()),
 )
 
 # tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification

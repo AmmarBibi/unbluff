@@ -3,6 +3,77 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [1.3.1] - 2026-07-31
+
+From adjudicating 48 review findings that four adversarial passes had produced and **never
+resolved** - neither confirmed nor refuted - because the review harness itself capped
+verification at four findings per lens. Half of every finding those reviews produced was
+discarded in silence while each pass reported the survivor count as the finding count.
+
+### Added
+- **`hooks/capped_report.py`** - one implementation of "cap a findings list without lying about
+  it", shared by five hooks that had each grown their own. It encodes the distinction that
+  matters: a DISPLAY cap is fine if it names what it hid, but a COLLECTION cap that `break`s
+  destroys the total, and you cannot report what you dropped if you stopped counting. Its
+  selftest walks every hook's **AST** for a list capped against a `MAX_*` constant outside the
+  helper - structural rather than textual, because a grep-based guard would have to contain the
+  pattern it forbids.
+- **`tools/check_readme_fresh.py`** - the README pastes a `run_selftests` transcript as
+  evidence; it claimed 18 while the suite ran 21. A stale paste reads exactly like a fresh one.
+- **`mutations-windows` CI job** - some mutations are meaningful only on Windows, so an
+  ubuntu-only mutation job proved them nowhere while printing a clean summary.
+
+### Fixed
+- **`meta_audit_on_stop`** - `count_unpushed` mapped "no upstream" (rc=128) to `0`, the same
+  value as "clean and synced", so a branch created with `git checkout -b` and never pushed was
+  byte-identical to a fully-pushed tree for its entire pre-first-push life. The marker regex
+  `PARKED?` requires the E: it matched the non-word "PARKE" and missed the bare "PARK". A
+  decision tag was matched anywhere in the line, suppressing "TODO: make sure the socket is
+  closed". `_is_superseded` matched the word anywhere in the first five lines, skipping an
+  ACTIVE plan that merely said "replaces PLAN_V2, which is superseded". The unpushed bullet was
+  appended last, so the display cap discarded it first.
+- **`stop_dispatcher` / `post_tooluse_dispatcher`** - a hook that CRASHED was recorded as
+  `rc=0` in the fire ledger, making "checked and found nothing" and "raised and verified
+  nothing" the same record. Fixed in both twins.
+- **`hook_health_check`, `duplicate_registration_check`, `rate_prompt`** - malformed input
+  (a non-string `command`, a `hooks` value of the wrong type, a non-string `prompt`) either
+  raised and discarded the whole report, or silenced the checker entirely. A checker that goes
+  quiet is indistinguishable from one reporting a clean bill of health.
+- **`numbers_match_on_write`** - a config whose `sources` key never PARSED opted the project
+  out silently; the lesson had been applied at the resolve layer but not the parse layer.
+- **`plan_defer_guard` / `meta_audit_on_stop`** - `*plan*.md` is a substring match, so
+  `explanation.md` was a plan file. Both hooks carried it; there is now one predicate.
+- **`fast_test_on_stop` / `pre_push_gate`** - one option table for two gates clamped a push
+  `timeout = 1800` to 600, making the remedy the gate's own error message prescribes a no-op.
+  The two gates also keyed their SHARED state file on different directories (session cwd vs
+  repo toplevel), so the advertised fast path never fired from a subdirectory.
+- **`transcript_util`** - an image-ONLY prompt carries no text block, so the turn boundary
+  slid back to the previous turn.
+- **`tools/check_review_freshness`** - `units()` asked about 17 of 31 tracked `.py` files,
+  omitting `tools/`, `tests/` **and itself**: the gate could not detect its own sabotage.
+  Proved by committing `def backdoor(): return 42` into `tools/mutation_check.py` with
+  `--release` still exiting 0. Now derived from globs intersected with `git ls-files`.
+- **`run_selftests`** - five auxiliary gates were invoked under a bare `if os.path.exists(...)`,
+  so renaming a tool silently deleted its gate.
+- **`tools/mutation_check`** - copied only `hooks/`, so no fix in `tools/` or a top-level entry
+  point could be mutation-tested at all. The harness that certifies every other fix as pinned
+  had a blind spot covering its own directory.
+
+### Changed
+- `pre_push_gate.py` (1113 -> 561) and `fast_test_on_stop.py` (900 -> 539) are back under the
+  800-line rule, with each `selftest()` in a sibling `*_selftest.py`.
+- Several regression tests that could not fail for the property they named were rewritten: two
+  asserted gates that a prior gate had already made unreachable, three carried an exemption but
+  no marker, and one selftest printed its results into a redirected `StringIO`.
+
+### Notes
+Three defects were introduced by this release's own fixes and caught by the mutation harness
+rather than by review: a fix silently disarmed another finding's test, a `cwd` restore ran too
+early and stopped a hermeticity check from testing anything, and the file split rebound a
+monkeypatched name in the wrong module. Each left the suite green. A behaviour-preserving
+refactor whose safety net is the selftests is only as safe as the proof that the selftests
+still bite.
+
 ## [1.3.0] - 2026-07-29
 
 From consolidating two diverged copies of this suite that were both wired into a single

@@ -150,12 +150,14 @@ Don't take the demos on faith - run it yourself (this is exactly what CI runs on
 
 ```text
 $ python run_selftests.py
-rate_prompt: OK  fast_test_on_stop: OK  show_your_proof: OK  meta_audit_on_stop: OK
-memory_hygiene_guard: OK  stop_dispatcher: OK  hook_health_check: OK  plan_defer_guard: OK
-post_tooluse_dispatcher: OK  numbers_match_on_write: OK  duplicate_registration_check: OK
-close_skills_guard: OK  usage_snip_prompt: OK  pre_push_gate: OK  consistency-audit-skill: OK
-examples-settings-fresh: OK  python-floor: OK  skill-deps: OK
-all 18 selftests passed
+capped_report: OK  close_skills_guard: OK  duplicate_registration_check: OK
+fast_test_on_stop: OK  hook_health_check: OK  memory_hygiene_guard: OK
+meta_audit_on_stop: OK  numbers_match_on_write: OK  plan_defer_guard: OK
+post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  show_your_proof: OK
+stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
+consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
+skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
+all 22 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
