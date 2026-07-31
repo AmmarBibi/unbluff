@@ -245,7 +245,17 @@ def main() -> int:
 
     # Sanity: the hook files must exist before we point settings at them.
     if install:
-        missing = [s for s in REQUIRED_HOOKS if not os.path.exists(os.path.join(HOOKS_DIR, s))]
+        # [MEDIUM-1] DERIVED, with the tuple as a floor only. REQUIRED_HOOKS was a hardcoded
+        # 14-name roster and today's transcript_util.py was the one hooks/*.py absent from it,
+        # so a partial checkout missing it would let install print "Done." while
+        # close_skills_guard tracebacks rc=1 and show_your_proof dies inside the dispatcher.
+        # This exact class was already fixed in run_selftests.py and hook_health_check.py -
+        # the third copy of the roster was simply never converted.
+        import glob as _glob
+        required = set(REQUIRED_HOOKS)
+        required.update(os.path.basename(p) for p in _glob.glob(os.path.join(HOOKS_DIR, "*.py")))
+        missing = [s for s in sorted(required)
+                   if not os.path.exists(os.path.join(HOOKS_DIR, s))]
         if missing:
             sys.exit(f"ERROR: missing hook files in {HOOKS_DIR}: {missing}\n"
                      f"(Partial checkout? The Stop and PostToolUse dispatchers import their sub-hooks.)")

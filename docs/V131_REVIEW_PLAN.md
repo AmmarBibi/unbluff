@@ -730,3 +730,82 @@ All five fixed, each pinned by a mutation that fails without it. Two things wort
 With P9 closed, every numbered item in this file is either fixed with a mutation-verified
 regression test, or carries a written justification. `tools/check_review_freshness.py --release`
 is the standing gate for whether that stays true.
+
+## P10 - third adversarial pass (run `wf_a51d3013-715`, 2026-07-31)
+
+21 agents, 4 lenses (regression-hunter, shared-module, silent-failure, test-quality) over the
+19 units this session changed. 16 raw findings, **15 survived refutation**, deduped to 11
+unique. **7 HIGH. Four were REGRESSIONS introduced by this session's own fixes.** Verdict from
+the synthesis: not shippable as-is.
+
+That is the headline result of the whole exercise: a third pass over code already reviewed
+twice, and already carrying mutation-verified tests for every prior finding, still found seven
+HIGH defects - most of them created by the fixes for the previous two rounds.
+
+### FIXED (all 11)
+
+- **HIGH-1 `hook_health_check`:169 - regression from D11.** `if name in done: continue` treated
+  a persisted `"fail"` and `"skip"` as proved. A FAIL was skipped on the next session,
+  `problems` came back empty, and the marker was written - **seven days of "[hook-health] OK"
+  over a hook that had actually failed**. The mirror image was as bad: a SKIP (real -
+  `pre_push_gate --selftest` exits 77 without git) blocks the marker forever while every hook
+  is already in `done`, so the sweep is permanently due and permanently runs nothing. Now only
+  `"pass"` is skipped, and the progress file is age-stamped so a slice that can never complete
+  cannot freeze the recorded passes indefinitely.
+- **HIGH-2 `numbers_match_on_write`:439 - the M1 fix was inert in production.** `main()` gated
+  emission on `code == 2`, but `run()` deliberately returns `(0, message)` for the M1
+  broken-config warning and the oversize-report skip. Both were discarded before reaching the
+  user. The fix shipped, was mutation-pinned, and **never once reached a user** - because its
+  test called `run()` directly and never went through `main()`.
+- **HIGH-3 `transcript_util`:46 - regression from the H6 extraction.** The shared prefix list
+  included PROSE: `"continue from where you left off."`, `"caveat:"`, `"[fast-test]"`. A human
+  typing any of those is classified as a harness injection, `last_user` never advances, and
+  audits run BEFORE the close satisfy `close_skills_guard` - the exact failure it exists to
+  prevent, triggered by an ordinary sentence. All 80 real-corpus instances already carry
+  `isMeta`, so the prose prefixes bought nothing. Deleted; the selftest that asserted the buggy
+  behaviour now asserts the inverse.
+- **HIGH-4 `fast_test_on_stop`:410,458** - `git status --porcelain -z` without `-uall` collapses
+  a wholly-untracked directory to `?? src/`, whose extension is not in SRC_EXT, so adding a new
+  module reads as "no source changed" on exactly the turn it is added. `pre_push_gate`
+  disagreed with it (it uses `ls-files -cmo`). `-uall` added to both.
+- **HIGH-5 `tools/mutation_check.py`:301** - `executed = len(MUTATIONS) - len(skipped)` ignored
+  the `only` filter, so `mutation_check.py pre_push_gate` printed **"51 of 51 mutations
+  executed, 0 skipped / all mutations caught"** after running two. The one line the entire
+  evidence base rests on was arithmetic nonsense under the filter its own docstring advertises.
+- **HIGH-6 `meta_audit_on_stop`:297** - the selftest's last assertion was about the REAL
+  environment (`is_git_worktree(this file's dir)`), and `mutation_check` copies `hooks/` into a
+  non-git tempdir, so the baseline was ALREADY RED there and mutations M6 and D5-twin were
+  certified CAUGHT for an identity edit. Fixed on both sides: the assertion now builds the repo
+  it needs, and `mutation_check` runs the UNMUTATED selftest first and reports
+  `HARNESS ERROR: baseline already RED` rather than crediting a mutation.
+- **HIGH-7 `tools/check_review_freshness.py`:89** - `dirty_units()` returned `set()` for both
+  "clean" and "git could not answer", so `--release` exits 0 over uncommitted changes. Its twin
+  `last_change()` had been given the `None` third state; this one had not. Same defect class,
+  same file, one function apart.
+- **MEDIUM-1 `install.py`:55** - `REQUIRED_HOOKS` was the THIRD hardcoded roster in this repo,
+  and today's `transcript_util.py` was the only `hooks/*.py` missing from it. Derived now, tuple
+  kept as a floor - the same conversion `run_selftests.py` and `hook_health_check.py` already had.
+- **MEDIUM-2 `tools/mutation_check.py`:271** - any non-zero rc counted as CAUGHT, so `SKIP_RC=77`
+  certified 13 `pre_push_gate` mutations as pinned on a machine without git. New UNPROVEN bucket.
+- **LOW-1 `numbers_match_on_write`:349** - the `except Exception` fallback called
+  `index_sources` without `exclude`, re-opening H2. A caller left behind when the parameter
+  was added.
+- **LOW-2 `fast_test_on_stop`:454** - `last.get("ts", 0)` on a poisoned state file raises;
+  `stop_dispatcher` swallows it, so the Stop gate goes permanently dead in that repo. The
+  hardening applied to `pre_push_gate.last_pass` (finding 9) was never applied to its twin
+  reader of the SAME file.
+
+### What three passes actually demonstrated
+
+| Pass | Scope | Confirmed | Introduced by the previous pass |
+|---|---|---|---|
+| 1 (v1.3.0) | 6 of 14 hooks | 34 | - |
+| 2 | the 6 fixed units | 11 | 7 |
+| 3 | all 19 changed units | 11 | 4 |
+
+Every round of fixes created defects at roughly a third the rate it removed them, and the new
+ones concentrate in the verification tooling and in the seams between newly-shared modules.
+Extraction into a shared module is not a neutral refactor: HIGH-3 and MEDIUM-1 both exist only
+because `transcript_util` was created today. The rate is falling (7 then 4) but it is not zero,
+which is the argument for the review-freshness gate being a standing release blocker rather
+than a one-off.

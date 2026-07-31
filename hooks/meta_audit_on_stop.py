@@ -293,9 +293,31 @@ def _selftest_repo_probe() -> list:
         fails.append("count_unpushed does not call the SHARED repo probe - it has grown its "
                      "own again, which is the twin this check exists to prevent")
 
-    # and the shared probe must handle the case both private ones got wrong
-    if not fast_test.is_git_worktree(os.path.dirname(os.path.abspath(__file__))):
-        fails.append("shared probe says a SUBDIRECTORY of this repo is not a work tree")
+    # [HIGH-6] HERMETIC. This asserted `is_git_worktree(this file's directory)` - a claim about
+    # the REAL environment. mutation_check copies hooks/ into a plain tempdir with no .git, so
+    # the baseline was ALREADY RED there and mutations M6 and D5-twin were certified CAUGHT for
+    # an identity edit. A selftest that depends on where its file happens to live cannot
+    # distinguish a broken probe from a scratch directory. Build the repo the test needs.
+    import subprocess as _sp
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        try:
+            ok = _sp.run(["git", "-C", _td, "init", "-q"], capture_output=True,
+                         timeout=60).returncode == 0
+        except (OSError, _sp.SubprocessError):
+            ok = False
+        if not ok:
+            print("SELFTEST SKIP: git unavailable, repo-probe cases untested")
+        else:
+            sub = os.path.join(_td, "pkg", "deep")
+            os.makedirs(sub, exist_ok=True)
+            if not fast_test.is_git_worktree(_td):
+                fails.append("shared probe says a plain repo is not a work tree")
+            if not fast_test.is_git_worktree(sub):
+                fails.append("shared probe says a SUBDIRECTORY of a repo is not a work tree")
+            with _tf.TemporaryDirectory() as _plain:
+                if fast_test.is_git_worktree(_plain):
+                    fails.append("shared probe says a non-repo directory IS a work tree")
     return fails
 
 

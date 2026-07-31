@@ -85,9 +85,9 @@ def dirty_units(unit_list: list) -> set:
                            capture_output=True, text=True, timeout=30,
                            encoding="utf-8", errors="surrogateescape")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return set()
+        return None
     if r.returncode != 0:
-        return set()
+        return None
     out = set()
     fields = (r.stdout or "").split("\0")
     i = 0
@@ -125,7 +125,14 @@ def evaluate() -> tuple[list, list, list, list]:
             newest[unit] = (when, entry)
 
     all_units = units()
+    # [HIGH-7] `dirty_units` returns None when git could not answer - NOT an empty set. The
+    # empty set meant "nothing is dirty", identical to a clean tree, so --release exited 0
+    # over uncommitted changes wherever git failed. Its twin `last_change()` was given exactly
+    # this third state; this one was not. An unanswerable question is not a passing one.
     dirty = dirty_units(all_units)
+    dirty_unknown = dirty is None
+    if dirty_unknown:
+        dirty = set()
     stale, unreviewed, unknown, fresh = [], [], [], []
     for unit in all_units:
         if unit not in newest:
@@ -134,7 +141,9 @@ def evaluate() -> tuple[list, list, list, list]:
         reviewed_at, entry = newest[unit]
         raw = last_change(unit)
         changed = _parse(raw or "")
-        if raw is None:
+        if dirty_unknown:
+            unknown.append((unit, "git could not report whether the working tree is dirty"))
+        elif raw is None:
             unknown.append((unit, "git could not answer when this last changed "
                                   "(not a checkout, or git unavailable)"))
         elif changed is None:

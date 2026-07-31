@@ -39,18 +39,24 @@ SYNTHETIC_PREFIXES = (
     "<bash-stdout>",
     "<bash-stderr>",
     "[request interrupted",
-    "caveat:",
     "this session is being continued",
-    # Found in real transcripts by the 2026-07-30 review; absent from BOTH hooks' lists.
     "base directory for this skill",
-    "continue from where you left off.",
-    "[show-your-proof]",       # a hook's own stderr, fed back and mistaken for a prompt
-    "[close_skills_guard]",
-    "[plan-defer-guard]",
-    "[numbers-match]",
-    "[fast-test]",
-    "[pre-push]",
 )
+
+# DELIBERATELY NOT in the list above: "caveat:", "continue from where you left off.",
+# "[fast-test]", "[pre-push]", "[show-your-proof]" and friends.
+#
+# Those are PROSE a human can plausibly type - "Caveat: the API is rate limited", "continue
+# from where you left off." is a perfectly ordinary instruction, and a user quoting a hook's
+# output back at Claude starts a line with "[fast-test]". Classifying such a prompt as a
+# harness injection means `last_user` never advances, so audits run BEFORE the close satisfy
+# close_skills_guard and it exits 0 in silence - the exact failure it exists to prevent,
+# triggered by the user typing an ordinary sentence.
+#
+# They bought nothing: all 80 instances of these strings in the real 139-transcript corpus
+# already carry `isMeta` or `sourceToolUseID`, so the structural check catches every one. A
+# prefix list can only ever cover wordings someone has already seen; the structural markers
+# cover the rest. Keep this list to tags no human types.
 
 
 def first_text(content) -> str | None:
@@ -178,14 +184,28 @@ def selftest() -> int:
                    "Base directory for this skill: /x/y",
                    "[Request interrupted by user]",
                    "<command-name>/model</command-name>",
-                   "Continue from where you left off.",
-                   "[show-your-proof] The last reply claims success"):
+                   "<bash-input>ls</bash-input>"):
         check(user(prefix), False, f"synthetic as STRING: {prefix[:32]}")
         check(user([{"type": "text", "text": prefix}]), False,
               f"synthetic as BLOCK LIST: {prefix[:32]}")
         # and the one that slipped through: synthetic text stamped origin=human
         check(user([{"type": "text", "text": prefix}], origin={"kind": "human"}), False,
               f"synthetic + origin=human: {prefix[:32]}")
+
+    # [HIGH-3] The inverse, which the prose prefixes broke: an ordinary human sentence that
+    # merely BEGINS like harness output must still count as the user. Misclassifying it stops
+    # `last_user` advancing, so audits run before the close satisfy close_skills_guard and it
+    # exits 0 in silence - the very failure it exists to prevent, caused by normal typing.
+    for human_prose in ("Continue from where you left off.",
+                        "Caveat: the API is rate limited, so batch the calls.",
+                        "[fast-test] fired again - can you look at why?",
+                        "[pre-push] blocked me, what is it complaining about?"):
+        check(user(human_prose), True, f"human prose must not read as harness: {human_prose[:34]}")
+        check(user([{"type": "text", "text": human_prose}]), True,
+              f"same as a block list: {human_prose[:34]}")
+        # ...but the SAME text WITH a structural marker is still an injection
+        check(user(human_prose, isMeta=True), False,
+              f"isMeta still wins over prose: {human_prose[:30]}")
 
     # both hooks' entry shapes must work: with and without a top-level `type`
     check({"message": {"role": "user", "content": "hi"}}, True, "no top-level type")

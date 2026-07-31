@@ -407,7 +407,7 @@ def _notice_no_gate(cwd: str) -> int:
     if os.path.exists(np):
         return 0
     try:
-        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z", "-uall"],
                                    capture_output=True, text=True, timeout=10,
                                    encoding="utf-8", errors="surrogateescape").stdout
     except (OSError, subprocess.SubprocessError):
@@ -448,14 +448,25 @@ def main() -> int:
 
     sp = _state_path(cwd)
     try:
-        last = json.load(open(sp, encoding="utf-8"))
+        with open(sp, encoding="utf-8") as fh:
+            last = json.load(fh)
     except (OSError, ValueError):
         last = {}
-    if time.time() - last.get("ts", 0) < debounce_s:
+    # [LOW-2] Treat every field as hostile, exactly as pre_push_gate.last_pass does. This
+    # reader is the TWIN of that one - same file, same fields - and only one was hardened.
+    # A non-dict or non-numeric `ts` raised here; stop_dispatcher swallows it, so the Stop
+    # gate went permanently dead in that repo and the poisoned file is never rewritten.
+    if not isinstance(last, dict):
+        last = {}
+    try:
+        last_ts = float(last.get("ts") or 0)
+    except (TypeError, ValueError):
+        last_ts = 0.0
+    if time.time() - last_ts < debounce_s:
         return 0
 
     try:
-        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+        porcelain = subprocess.run(["git", "-C", cwd, "status", "--porcelain=v1", "-z", "-uall"],
                                    capture_output=True, text=True, timeout=10,
                                    encoding="utf-8", errors="surrogateescape").stdout
     except (OSError, subprocess.SubprocessError):

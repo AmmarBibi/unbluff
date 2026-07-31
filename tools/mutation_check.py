@@ -249,6 +249,26 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
     try:
         shutil.copytree(os.path.join(REPO, "hooks"), os.path.join(scratch, "hooks"),
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        verify_target = os.path.join(scratch, "hooks", (verify or hook) + ".py")
+
+        # [HIGH-6] BASELINE FIRST, on the UNMUTATED copy. If the verifying selftest is already
+        # red in a scratch tree - e.g. meta_audit's asserted something about the REAL
+        # environment that a non-git tempdir cannot satisfy - then EVERY mutation "fails" for
+        # a reason unrelated to the mutation and the harness certifies them all as CAUGHT.
+        # Two mutations (M6, D5-twin) were certified exactly that way.
+        try:
+            base = subprocess.run([sys.executable, verify_target, "--selftest"],
+                                  capture_output=True, text=True, timeout=400,
+                                  stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+            if base.returncode not in (0, 77):
+                return ("HARNESS ERROR: baseline already RED before mutating (%s --selftest "
+                        "rc=%s) - this mutation would prove nothing"
+                        % (os.path.basename(verify_target), base.returncode))
+        except subprocess.TimeoutExpired:
+            return "HARNESS ERROR: baseline selftest timed out before mutating"
+        except (OSError, subprocess.SubprocessError) as e:
+            return "HARNESS ERROR: baseline selftest could not run (%s)" % e
+
         target = os.path.join(scratch, "hooks", hook + ".py")
         text = open(target, encoding="utf-8").read()
         for find, replace in edits:
@@ -257,8 +277,7 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
             text = text.replace(find, replace, 1)
         with open(target, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        if verify:
-            target = os.path.join(scratch, "hooks", verify + ".py")
+        target = verify_target
         try:
             p = subprocess.run([sys.executable, target, "--selftest"], capture_output=True,
                                text=True, timeout=400, stdin=subprocess.DEVNULL,
@@ -268,6 +287,11 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
             return "CAUGHT (the mutated hook hung - the bound is real)"
         if rc == 0:
             return "SURVIVED - the test for finding %s is DECORATIVE" % finding
+        if rc == 77:
+            # SKIP_RC. The verifying selftest could not RUN (no git/sh), so it asserted
+            # nothing - counting a non-zero rc as "caught" certified 13 pre_push_gate
+            # mutations as pinned on any machine without git.
+            return "UNPROVEN (the verifying selftest could not run - rc 77)"
         return "CAUGHT (rc=%s)" % rc
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -280,10 +304,18 @@ def main() -> int:
     survivors = []
     errors = []
     skipped = []
+    unproven = []
+    filtered = 0
     for entry in MUTATIONS:
         hook, finding, desc, edits, posix_only = entry[:5]
         verify = entry[5] if len(entry) > 5 else ""
         if args.only and args.only not in (hook, verify):
+            # [HIGH-5] COUNT the filtered-out entries. They were recorded in no bucket while
+            # the denominator stayed len(MUTATIONS), so `mutation_check.py pre_push_gate`
+            # printed "51 of 51 mutations executed, 0 skipped / all mutations caught" after
+            # running two. The one line the whole evidence base rests on was arithmetic
+            # nonsense under the filter the docstring itself advertises.
+            filtered += 1
             continue
         verdict = run(hook, finding, desc, edits, posix_only, verify)
         print("[%-28s #%-8s] %-58s -> %s" % (hook, finding, desc[:58], verdict))
@@ -293,13 +325,22 @@ def main() -> int:
             errors.append((hook, finding, verdict))
         elif verdict.startswith("SKIPPED"):
             skipped.append((hook, finding))
+        elif verdict.startswith("UNPROVEN"):
+            unproven.append((hook, finding))
     print()
     # ALWAYS print the denominator. "all mutations caught" was printed unqualified while a
     # posix-only mutation had never executed on this machine - so deleting the os.chmod it
     # guards left the harness certifying every fix as pinned. This file's output is the
     # evidence base for the whole fix round; it must not overstate what it ran.
-    executed = len(MUTATIONS) - len(skipped)
-    print("%d of %d mutations executed, %d skipped" % (executed, len(MUTATIONS), len(skipped)))
+    considered = len(MUTATIONS) - filtered
+    executed = considered - len(skipped) - len(unproven)
+    scope = " (filter %r: %d of %d entries considered)" % (args.only, considered,
+                                                           len(MUTATIONS)) if args.only else ""
+    print("%d of %d mutations executed, %d skipped, %d unproven%s"
+          % (executed, considered, len(skipped), len(unproven), scope))
+    if unproven:
+        print("UNPROVEN (%d): %s" % (len(unproven), unproven))
+        print("  The verifying selftest could not RUN, so it asserted nothing.")
     if errors:
         print("HARNESS ERRORS (%d) - a mutation could not be applied, so nothing was proven:"
               % len(errors))
@@ -314,9 +355,15 @@ def main() -> int:
         if os.environ.get("CI"):
             print("  CI must not skip: failing.")
             return 1
+    if unproven and os.environ.get("CI"):
+        return 1
     if not survivors and not errors:
-        if skipped:
-            print("every EXECUTED mutation was caught; %d remain unproven here" % len(skipped))
+        if args.only:
+            print("filtered run - this proves nothing about the %d entries not considered"
+                  % filtered)
+        elif skipped or unproven:
+            print("every EXECUTED mutation was caught; %d remain unproven here"
+                  % (len(skipped) + len(unproven)))
         else:
             print("all mutations caught - every fix is pinned by a test that fails without it")
     return 1 if (survivors or errors) else 0

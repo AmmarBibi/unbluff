@@ -140,13 +140,22 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
         pass  # no marker -> due
 
     progress_path = os.path.join(state_dir, _WEEKLY_PROGRESS)
+    done = {}
     try:
         with open(progress_path, encoding="utf-8") as f:
-            done = json.load(f)
-        if not isinstance(done, dict):
-            done = {}
+            saved = json.load(f)
+        if isinstance(saved, dict):
+            # [HIGH-1] Age-stamp the slice. Without this, a sweep that can never complete -
+            # e.g. a hook listed but missing, whose problem is appended without ever entering
+            # `done` - freezes every recorded "pass" indefinitely, so those hooks are never
+            # re-run again either. A partial slice older than the week it belongs to is stale
+            # and starts over.
+            started = saved.get("__started__")
+            if isinstance(started, str) and _days_since(started) < _WEEK_DAYS:
+                done = {k: v for k, v in saved.items() if k != "__started__"}
     except (OSError, ValueError):
         done = {}
+    started_on = datetime.date.today().isoformat()
 
     def _persist():
         # After EVERY hook, not after the loop. The whole point is that a session killed
@@ -154,7 +163,9 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
         try:
             os.makedirs(state_dir, exist_ok=True)
             with open(progress_path, "w", encoding="utf-8") as fh:
-                json.dump(done, fh)
+                payload = dict(done)
+                payload["__started__"] = started_on
+                json.dump(payload, fh)
         except OSError:
             pass
 
@@ -166,7 +177,15 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
         if not os.path.exists(path):
             problems.append(f"weekly selftest: missing hook {name}")
             continue
-        if name in done:
+        # ONLY a recorded PASS may be skipped. [HIGH-1, a regression from the D11 resumability
+        # rewrite] `if name in done` treated a persisted "fail" and "skip" as proved: on the
+        # next session the failing hook was skipped, `problems` came back empty, and the marker
+        # at the bottom was written - buying SEVEN DAYS of "[hook-health] OK" over a hook that
+        # had actually failed. The mirror image was just as bad: a "skip" blocks the marker
+        # forever while every hook is already in `done`, so the sweep is permanently due and
+        # permanently runs nothing. Re-running fail/skip re-appends their problem text, which
+        # is what keeps the gate at the bottom closed.
+        if done.get(name) == "pass":
             continue                      # already proved in an earlier slice
         if time.monotonic() >= deadline:
             remaining += 1                # out of budget: leave it for the next session

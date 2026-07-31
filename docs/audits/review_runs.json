@@ -390,5 +390,243 @@
     "findings": 16,
     "confirmed": 13,
     "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/pre_push_gate.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/fast_test_on_stop.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/hook_health_check.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/transcript_util.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/close_skills_guard.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/show_your_proof.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/duplicate_registration_check.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/memory_hygiene_guard.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/meta_audit_on_stop.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/numbers_match_on_write.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/plan_defer_guard.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/usage_snip_prompt.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "run_selftests.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "install.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "tests/test_integration.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "tools/mutation_check.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "tools/check_review_freshness.py",
+    "run_id": "wf_a51d3013-715",
+    "lenses": [
+      "regression-hunter",
+      "shared-module",
+      "silent-failure",
+      "test-quality"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 11,
+    "utc": "2026-07-31T12:27:22+00:00"
   }
 ]

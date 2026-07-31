@@ -346,7 +346,9 @@ def _cached_index(sources: "list[str]", root: str, state_dir: str,
             pass
         return values
     except Exception:
-        return index_sources(sources, root)
+        # LOW-1: `exclude` was dropped on this fallback, re-opening H2 (a report
+        # validating against itself) whenever the cache path raised.
+        return index_sources(sources, root, exclude)
 
 
 def run(payload: dict, state_dir: str) -> "tuple[int, str]":
@@ -436,7 +438,12 @@ def main() -> int:
     try:
         state_dir = os.environ.get("UNBLUFF_STATE_DIR") or DEFAULT_STATE_DIR
         code, message = run(payload, state_dir)
-        if code == 2 and message:
+        # [HIGH-2] Emit the message whatever the code. run() deliberately returns
+        # (0, message) twice - the M1 "sources resolve to nothing, NOTHING was verified"
+        # warning and the oversize-report skip - and gating emission on code==2 made both
+        # inert in production while their tests, which call run() directly, stayed green.
+        # The M1 fix shipped, was mutation-pinned, and never reached a single user.
+        if message:
             sys.stderr.write(message)
         return code
     except Exception:  # a broken hook must never block the user
