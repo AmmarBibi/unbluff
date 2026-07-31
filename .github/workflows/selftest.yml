@@ -50,6 +50,22 @@ jobs:
       - name: Revert each fix and require the suite to go red
         run: python tools/mutation_check.py
 
+  mutations-windows:
+    # The MIRROR of the job above, and it exists for the same reason that one does. Some
+    # mutations can only be meaningful on Windows - the job-object cleanup (#D10b) is a literal
+    # no-op on POSIX - so an ubuntu-only mutation job proves them NOWHERE while printing a
+    # clean summary. That is the exact shape of failure this repo is about, reproduced in the
+    # harness that exists to detect it (P13 F).
+    name: mutation harness (windows-only mutations)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Revert each fix and require the suite to go red
+        run: python tools/mutation_check.py
+
   integration:
     name: integration (install -> fire -> uninstall)
     runs-on: ubuntu-latest

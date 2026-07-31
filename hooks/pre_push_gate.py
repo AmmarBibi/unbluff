@@ -721,6 +721,21 @@ def selftest() -> int:
             except (OSError, subprocess.SubprocessError) as e:
                 return -1, str(e)
 
+        # 9a. [finding 1, CRITICAL] The BEHAVIOURAL case below can only fail where the
+        # process locale is not UTF-8 - i.e. on Windows. On Linux, dropping the explicit codec
+        # is a literal no-op, so CI reported this mutation as a decorative test twice while the
+        # Windows run caught it every time. Assert the INVARIANT too, which holds everywhere:
+        # git speaks UTF-8 on every platform and this module must never fall back to the
+        # locale codec, whatever the locale happens to be on the machine running the suite.
+        if _GIT_TEXT.get("encoding") != "utf-8":
+            fails.append("_git() no longer pins an explicit utf-8 codec (%r) - on a non-UTF-8 "
+                         "locale it decodes git's output with the locale codec, which turns a "
+                         "non-ASCII repo path into one that does not exist and makes the gate "
+                         "announce 'no test command' over unverified code" % (_GIT_TEXT,))
+        if not _GIT_TEXT.get("errors"):
+            fails.append("_git() no longer pins an error handler (%r) - an undecodable byte "
+                         "then raises instead of round-tripping" % (_GIT_TEXT,))
+
         # 9. [finding 1, CRITICAL] a non-ASCII repo path must not silently disable the gate.
         # git emits UTF-8; decoding it with the Windows locale codec yields a path that does
         # not exist, so resolve_command finds nothing and the gate reports the healthy-sounding

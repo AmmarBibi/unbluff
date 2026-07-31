@@ -531,6 +531,7 @@ def main() -> int:
 
 def _selftest_gate_alignment() -> list:
     """[P13 D5/D6] The two gates must share a CEILING policy and a state ANCHOR."""
+    global project_root, STATE_DIR
     import tempfile
     fails = []
 
@@ -569,6 +570,36 @@ def _selftest_gate_alignment() -> list:
             fails.append("a session in a package SUBDIRECTORY keys the shared state file "
                          "differently from the repo toplevel, so the pass it records is "
                          "invisible to the push gate and the fast path never fires")
+
+        # ...and main() must actually APPLY it. The check above only proves project_root()
+        # computes the right answer; deleting the one line in main() that calls it left this
+        # green (its own mutation came back SURVIVED). Recorder + real main(), same shape as
+        # the shared-repo-probe twin guard.
+        called = []
+        real_pr, real_state = project_root, STATE_DIR
+
+        def _recorder(cwd):
+            called.append(cwd)
+            return real_pr(cwd)
+
+        project_root = _recorder
+        STATE_DIR = os.path.join(td, "state")
+        try:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            real_stdin, sys.stdin = sys.stdin, __import__("io").StringIO(
+                __import__("json").dumps({"session_id": "anchor-test", "cwd": sub}))
+            real_err, sys.stderr = sys.stderr, __import__("io").StringIO()
+            try:
+                main()
+            finally:
+                sys.stdin, sys.stderr = real_stdin, real_err
+        finally:
+            project_root = real_pr
+            STATE_DIR = real_state
+        if not called:
+            fails.append("main() does not anchor the shared state on the repo toplevel - it is "
+                         "keying on the raw session cwd again, so a pass recorded from a "
+                         "package subdirectory is invisible to the push gate")
     return fails
 
 
@@ -670,16 +701,31 @@ def selftest() -> int:
     import tempfile as _tf5
     _d5 = _tf5.mkdtemp()
     try:
-        survived = os.path.join(_d5, "SURVIVED").replace("\\", "/")
-        grandchild = (
-            "import time,sys;"
-            "time.sleep(4);"
-            "open(r'%s','w').write('x')" % survived)
-        spawner = ('"%s" -c "import subprocess,sys; subprocess.Popen([sys.executable,\'-c\','
-                   '\'%s\'])"' % (_py, grandchild.replace("'", "\\'")))
-        run_tests(spawner, _d5, 5)
+        survived = os.path.join(_d5, "SURVIVED")
+        started = os.path.join(_d5, "STARTED")
+        # SCRIPT FILES, not nested -c quoting. The old spawner embedded a quoted python
+        # program inside another quoted python program inside a shell command; cmd.exe
+        # tolerated it, /bin/sh did not. On Linux the grandchild therefore never started, the
+        # marker never appeared, and this assertion passed for entirely the wrong reason - CI
+        # reported the mutation as a decorative test for two runs (P13 F).
+        gc_py = os.path.join(_d5, "gc.py")
+        with open(gc_py, "w", encoding="utf-8") as _f:
+            _f.write("import time\n"
+                     "open(r'%s', 'w').write('x')\n"
+                     "time.sleep(4)\n"
+                     "open(r'%s', 'w').write('x')\n" % (started, survived))
+        sp_py = os.path.join(_d5, "spawn.py")
+        with open(sp_py, "w", encoding="utf-8") as _f:
+            _f.write("import subprocess, sys\n"
+                     "subprocess.Popen([sys.executable, r'%s'])\n" % gc_py)
+        run_tests('"%s" "%s"' % (_py, sp_py.replace("\\", "/")), _d5, 5)
         time.sleep(7)   # well past the grandchild's own sleep
-        if os.path.exists(survived):
+        # A fixture that never RAN proves nothing. Without this the case degrades to a silent
+        # pass wherever the spawn fails, which is precisely what happened on Linux.
+        if not os.path.exists(started):
+            fails.append("the D10 grandchild fixture never started, so the kill assertion "
+                         "proves nothing here - fix the fixture rather than trusting the green")
+        elif os.path.exists(survived):
             fails.append("run_tests left the grandchild ALIVE - it outlived the kill and "
                          "wrote its marker; a dev server started by a test leaks every turn")
     finally:

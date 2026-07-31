@@ -12,8 +12,9 @@ FAILURE of this harness: it means the regression test for that finding does not 
     python tools/mutation_check.py                 # every mutation
     python tools/mutation_check.py pre_push_gate   # only mutations for one hook
 
-Mutations marked posix_only are skipped on Windows (os.chmod exec bits are a no-op there), so
-they are the ones only CI can prove.
+Mutations marked posix_only=True are skipped on Windows (os.chmod exec bits are a no-op
+there), so they are the ones only CI can prove. posix_only="nt" is the mirror: windows-only
+code that does not exist on POSIX, which must SKIP on Linux rather than report SURVIVED.
 """
 from __future__ import annotations
 
@@ -178,8 +179,11 @@ MUTATIONS = [
      [("        _kill_tree(proc, pgid, job)  # release the pipe; never leave what we spawned "
        "running",
        "        _kill_tree(proc)")], False),
+    # WINDOWS-ONLY by construction: _win_job_kill_on_close() already returns None on POSIX, so
+    # this edit is a literal no-op there and "SURVIVED" would be a statement about the platform,
+    # not about the test. CI reported it as a decorative test for exactly that reason (P13 F).
     ("fast_test_on_stop", "D10b", "the Windows job object is never created",
-     [("    job = _win_job_kill_on_close()", "    job = None")], False),
+     [("    job = _win_job_kill_on_close()", "    job = None")], "nt"),
     ("hook_health_check", "D11", "the weekly sweep loses its aggregate budget",
      [("        if time.monotonic() >= deadline:", "        if False:")], False),
     ("hook_health_check", "D11b", "sweep progress is no longer persisted per hook",
@@ -283,10 +287,10 @@ MUTATIONS = [
     ("transcript_util", "D4", "an image-only prompt is not a turn boundary again",
      [("    return first_text(content) is not None or has_user_media(content)",
        "    return first_text(content) is not None")], False),
-    ("fast_test_on_stop", "D5", "the push gate shares the turn-end 600s ceiling again",
+    ("fast_test_on_stop", "P13-D5", "the push gate shares the turn-end 600s ceiling again",
      [('PUSH_OPTIONS = {"timeout": (5, 7200), "debounce": (0, 86400)}',
        'PUSH_OPTIONS = {"timeout": (5, 600), "debounce": (0, 86400)}')], False),
-    ("fast_test_on_stop", "D6", "the Stop gate keys shared state on the SESSION dir again",
+    ("fast_test_on_stop", "P13-D6", "the Stop gate keys shared state on the SESSION dir again",
      [("    cwd = project_root(cwd)\n", "")], False),
     ("pre_push_gate", "D8", "--install-global stops disclosing the hook names it drops",
      [("    return tuple(sorted(all_client_hook_candidates() & HIGH_FREQUENCY_HOOKS))",
@@ -377,8 +381,14 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
         if find not in live_text:
             return "HARNESS ERROR: mutation anchor not found: %r" % (find[:70],)
 
-    if posix_only and os.name == "nt":
+    # `posix_only` is True for posix-only, or the string "nt" for windows-only. A mutation that
+    # can only be MEANINGFUL on one platform must SKIP on the other, never report SURVIVED: a
+    # no-op edit staying green says nothing about the test, and reading it as a decorative test
+    # sent us hunting a defect that was not there (P13 F). A skip is reported and is not a pass.
+    if posix_only is True and os.name == "nt":
         return "SKIPPED (posix only - this machine cannot run it; CI must)"
+    if posix_only == "nt" and os.name != "nt":
+        return "SKIPPED (windows only - the code it mutates does not exist on this platform)"
     scratch = tempfile.mkdtemp(prefix="unbluff-mut-")
     try:
         _ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
@@ -438,13 +448,35 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def duplicate_ids() -> list:
+    """(unit, finding) pairs that appear more than once.
+
+    Two entries sharing an id make the report ambiguous and the CLI filter unable to name one
+    of them - and it happened by accident the moment a second round of findings reused the
+    D-series letters (P13). Cheap to check, impossible to notice by eye in an 80-entry table.
+    """
+    seen, dupes = set(), []
+    for entry in MUTATIONS:
+        key = (entry[0], entry[1])
+        if key in seen:
+            dupes.append(key)
+        seen.add(key)
+    return dupes
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("only", nargs="?", default="", help="only mutations for this hook")
     args = ap.parse_args()
+    dupes = duplicate_ids()
+    if dupes:
+        print("HARNESS ERROR: duplicate mutation ids %r - the report cannot name them apart"
+              % (dupes,))
+        return 1
     survivors = []
     errors = []
     skipped = []
+    other_platform = []
     unproven = []
     filtered = 0
     for entry in MUTATIONS:
@@ -470,7 +502,10 @@ def main() -> int:
         elif verdict.startswith("HARNESS ERROR"):
             errors.append((hook, finding, verdict))
         elif verdict.startswith("SKIPPED"):
-            skipped.append((hook, finding))
+            # A skip is still not a pass, but a mutation marked for the OTHER platform can
+            # never run here, so failing CI on it would just make the build permanently red.
+            # It has to run on the other platform's job instead - which is why one now exists.
+            (other_platform if "only" in verdict else skipped).append((hook, finding))
         elif verdict.startswith("UNPROVEN"):
             unproven.append((hook, finding))
     print()
@@ -479,11 +514,11 @@ def main() -> int:
     # guards left the harness certifying every fix as pinned. This file's output is the
     # evidence base for the whole fix round; it must not overstate what it ran.
     considered = len(MUTATIONS) - filtered
-    executed = considered - len(skipped) - len(unproven)
+    executed = considered - len(skipped) - len(other_platform) - len(unproven)
     scope = " (filter %r: %d of %d entries considered)" % (args.only, considered,
                                                            len(MUTATIONS)) if args.only else ""
-    print("%d of %d mutations executed, %d skipped, %d unproven%s"
-          % (executed, considered, len(skipped), len(unproven), scope))
+    print("%d of %d mutations executed, %d skipped, %d not-runnable-here, %d unproven%s"
+          % (executed, considered, len(skipped), len(other_platform), len(unproven), scope))
     if unproven:
         print("UNPROVEN (%d): %s" % (len(unproven), unproven))
         print("  The verifying selftest could not RUN, so it asserted nothing.")
@@ -495,6 +530,11 @@ def main() -> int:
     if survivors:
         print("MUTATIONS SURVIVED (%d): %s" % (len(survivors), survivors))
         print("Each one names a fix whose regression test does not actually bite.")
+    if other_platform:
+        # Named, never silent: the denominator has to show these were not executed here.
+        print("NOT RUNNABLE ON THIS PLATFORM (%d): %s" % (len(other_platform), other_platform))
+        print("  These are proven by the OTHER platform's job, not by this one. If that job "
+              "does not exist, they are proven NOWHERE.")
     if skipped:
         print("SKIPPED (%d): %s" % (len(skipped), skipped))
         print("  A skip is NOT a pass - these fixes are unproven on this machine.")
@@ -507,9 +547,9 @@ def main() -> int:
         if args.only:
             print("filtered run - this proves nothing about the %d entries not considered"
                   % filtered)
-        elif skipped or unproven:
+        elif skipped or unproven or other_platform:
             print("every EXECUTED mutation was caught; %d remain unproven here"
-                  % (len(skipped) + len(unproven)))
+                  % (len(skipped) + len(unproven) + len(other_platform)))
         else:
             print("all mutations caught - every fix is pinned by a test that fails without it")
     return 1 if (survivors or errors) else 0
