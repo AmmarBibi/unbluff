@@ -26,7 +26,29 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# (hook, finding, description, [(find, replace), ...], posix_only)
+# Source trees copied into each scratch tree. `hooks/` ALONE meant a fix in tools/ or in a
+# top-level entry point could not be mutation-tested at all - the harness that certifies every
+# other fix as pinned had a blind spot covering its own directory, and the review-freshness
+# gate meant to notice such things omitted tools/ for the same reason (P13 A1). Both halves of
+# the evidence base were unwatched at once.
+COPY_TREES = ("hooks", "tools", "tests", "skills")
+COPY_FILES = ("install.py", "run_selftests.py")
+
+
+def unit_path(root: str, name: str) -> str:
+    """Resolve a mutation target to a path under `root`.
+
+    A bare name is a hook (`hooks/<name>.py`) - the original and still commonest form. A name
+    containing "/" is repo-relative (`tools/check_review_freshness`), which is what lets this
+    harness reach the gate tooling.
+    """
+    if "/" in name:
+        return os.path.normpath(os.path.join(root, *(name + ".py").split("/")))
+    return os.path.join(root, "hooks", name + ".py")
+
+
+# (unit, finding, description, [(find, replace), ...], posix_only[, verify_unit])
+# `unit` is a hook name, or a repo-relative path like "tools/check_review_freshness".
 MUTATIONS = [
     ("pre_push_gate", "1", "git output decoded with the locale codec again (non-ASCII paths)",
      [('_GIT_TEXT = {"encoding": "utf-8", "errors": "surrogateescape"}', "_GIT_TEXT = {}")], False),
@@ -221,6 +243,26 @@ MUTATIONS = [
      "hook_health_check"),
     ("hook_health_check", "32", "a skipped selftest is counted as a pass again",
      [("    if not problems and not n_skipped:", "    if not problems:")], False),
+    # ---- P13: the never-adjudicated findings. These are the FIRST mutations this harness has
+    # ever been able to apply outside hooks/ - the gate tooling was unreachable until the
+    # copy-tree widening above, which is the same blind spot as A1 itself.
+    ("tools/check_review_freshness", "A1", "units() back to the hooks-only roster (tools/ and "
+     "tests/ unwatched)",
+     [('UNIT_GLOBS = ("hooks/*.py", "tools/*.py", "tests/*.py", "scripts/*.py",\n'
+       '              "skills/*/scripts/*.py", "install.py", "run_selftests.py")',
+       'UNIT_GLOBS = ("hooks/*.py", "install.py", "run_selftests.py")')], False),
+    ("tools/check_review_freshness", "A1b", "_tracked() returns an empty set instead of None "
+     "when git cannot answer",
+     [("    if r.returncode != 0:\n        return None\n    return {x.replace",
+       "    if r.returncode != 0:\n        return set()\n    return {x.replace")], False),
+    ("./run_selftests", "A3", "a missing auxiliary-gate file is silently skipped again",
+     [("    return [label for label, parts, _extra in gates\n"
+       "            if not os.path.exists(os.path.join(root, *parts))]",
+       "    return []")], False),
+    ("./run_selftests", "A3b", "an undeclared tools/ file no longer forces a decision",
+     [("    return (sorted(present - gate_basenames - set(not_a_gate)),\n"
+       "            sorted(set(not_a_gate) - present))",
+       "    return ([], sorted(set(not_a_gate) - present))")], False),
 ]
 
 
@@ -233,7 +275,7 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
     # Validate the ANCHOR even when the mutation will be skipped. The early return used to
     # precede this, so a #30 anchor that had drifted was never checked on the authoring
     # machine and the harness still printed "all mutations caught".
-    live = os.path.join(REPO, "hooks", hook + ".py")
+    live = unit_path(REPO, hook)
     try:
         with open(live, encoding="utf-8") as f:
             live_text = f.read()
@@ -247,9 +289,16 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
         return "SKIPPED (posix only - this machine cannot run it; CI must)"
     scratch = tempfile.mkdtemp(prefix="unbluff-mut-")
     try:
-        shutil.copytree(os.path.join(REPO, "hooks"), os.path.join(scratch, "hooks"),
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        verify_target = os.path.join(scratch, "hooks", (verify or hook) + ".py")
+        _ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
+        for tree in COPY_TREES:
+            src = os.path.join(REPO, tree)
+            if os.path.isdir(src):
+                shutil.copytree(src, os.path.join(scratch, tree), ignore=_ignore)
+        for name in COPY_FILES:
+            src = os.path.join(REPO, name)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(scratch, name))
+        verify_target = unit_path(scratch, verify or hook)
 
         # [HIGH-6] BASELINE FIRST, on the UNMUTATED copy. If the verifying selftest is already
         # red in a scratch tree - e.g. meta_audit's asserted something about the REAL
@@ -269,7 +318,7 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
         except (OSError, subprocess.SubprocessError) as e:
             return "HARNESS ERROR: baseline selftest could not run (%s)" % e
 
-        target = os.path.join(scratch, "hooks", hook + ".py")
+        target = unit_path(scratch, hook)
         text = open(target, encoding="utf-8").read()
         for find, replace in edits:
             if find not in text:
@@ -309,7 +358,12 @@ def main() -> int:
     for entry in MUTATIONS:
         hook, finding, desc, edits, posix_only = entry[:5]
         verify = entry[5] if len(entry) > 5 else ""
-        if args.only and args.only not in (hook, verify):
+        # Match the bare name too: the unit may be written "./run_selftests" or
+        # "tools/mutation_check", and a filter that only compared the full string made those
+        # entries unreachable from the CLI - i.e. silently unrunnable, which is this file's
+        # own failure mode.
+        _names = {hook, verify, hook.rsplit("/", 1)[-1], verify.rsplit("/", 1)[-1]}
+        if args.only and args.only not in _names:
             # [HIGH-5] COUNT the filtered-out entries. They were recorded in no bucket while
             # the denominator stayed len(MUTATIONS), so `mutation_check.py pre_push_gate`
             # printed "51 of 51 mutations executed, 0 skipped / all mutations caught" after

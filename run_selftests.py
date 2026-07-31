@@ -33,6 +33,58 @@ from hook_health_check import (  # noqa: E402  (path set above)
     selftestable_hooks,
 )
 
+# (label, path parts under the repo root, extra argv). A FLOOR: every entry MUST exist and run.
+AUX_GATES = (
+    # the consistency-audit skill's mechanical extractor - ships in the repo, exposes a
+    # --selftest, but lives outside hooks/ so the detection glob above cannot see it
+    ("consistency-audit-skill", ("skills", "consistency-audit", "scripts", "audit.py"),
+     ("--selftest",)),
+    # examples/settings.json is what people copy when wiring by hand; it went stale twice
+    ("examples-settings-fresh", ("tools", "regen_example_settings.py"), ("--check",)),
+    # the README advertises a Python floor; CI only exercises files it actually runs
+    ("python-floor", ("tools", "check_python_floor.py"), ()),
+    # a hook can name a skill the repo does not ship (close_skills_guard shipped requiring
+    # four while only three were installed); nothing connected those lists until this gate
+    ("skill-deps", ("tools", "check_skill_deps.py"), ()),
+    # the review-freshness gate's own scope check: it asked about 17 of 31 tracked .py files
+    # and could not detect its own sabotage until P13 A1
+    ("review-freshness-scope", ("tools", "check_review_freshness.py"), ("--selftest",)),
+)
+
+# tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification
+# check below fails if a tool appears in neither list, or if a name here stops existing.
+NOT_A_GATE = {
+    "mutation_check.py",            # a gate, but minutes-long: CI runs it as its own job
+    "compare_delivery_gate.py",     # measurement, produces numbers for the plan
+    "measure_dispatcher_cost.py",   # measurement
+    "hook_divergence_report.py",    # reporting
+    "make_hook_screenshot.py",      # docs asset generation
+}
+
+
+def missing_gates(root: str, gates=AUX_GATES) -> list:
+    """Labels of AUX_GATES whose file is not present under `root`.
+
+    Pure and root-parameterised so the selftest can build a tree where gates ARE missing. The
+    old code asked `if os.path.exists(...)` inline and skipped in silence, so this question had
+    no answer anywhere: a renamed tool removed its gate and the suite still printed all-green.
+    """
+    return [label for label, parts, _extra in gates
+            if not os.path.exists(os.path.join(root, *parts))]
+
+
+def classify_tools(tools_dir: str, gates=AUX_GATES, not_a_gate=NOT_A_GATE) -> tuple:
+    """(unclassified, stale_exempt) for the tools/ directory.
+
+    DETECTION with a floor: a new tool must be declared a gate or explicitly exempted, and an
+    exemption naming a file that no longer exists is itself reported - otherwise the exemption
+    list rots into cover for whatever gets added next.
+    """
+    gate_basenames = {parts[-1] for _l, parts, _e in gates if parts[0] == "tools"}
+    present = {os.path.basename(p) for p in glob.glob(os.path.join(tools_dir, "*.py"))}
+    return (sorted(present - gate_basenames - set(not_a_gate)),
+            sorted(set(not_a_gate) - present))
+
 
 def main():
     failed = []
@@ -70,46 +122,47 @@ def main():
             if rc != 0:
                 failed.append(name)
         print(f"{name}: {label}")
-    # Also gate the consistency-audit skill's mechanical extractor: its scripts ship in the
-    # repo and expose a --selftest, but they live outside hooks/ so the glob above misses them.
-    skill_audit = os.path.join(HERE, "skills", "consistency-audit", "scripts", "audit.py")
-    if os.path.exists(skill_audit):
+    # Auxiliary gates: real checks that are not hook selftests. Each one used to be invoked
+    # under a bare `if os.path.exists(...)` with no else, so RENAMING a tool silently deleted
+    # its gate - `ran` just got smaller and there was no expected count to compare it against
+    # (P13 A3). A missing gate file is now a FAILURE, which is the only reading that cannot be
+    # mistaken for "nothing to check".
+    for label, parts, extra in AUX_GATES:
+        path = os.path.join(HERE, *parts)
         ran += 1
-        rc = subprocess.run([sys.executable, skill_audit, "--selftest"],
+        if not os.path.exists(path):
+            print(f"{label}: FAIL (gate file missing: {'/'.join(parts)} - a gate that cannot "
+                  f"be found is not a gate that passed)")
+            failed.append(label)
+            continue
+        rc = subprocess.run([sys.executable, path, *extra],
                             stdin=subprocess.DEVNULL).returncode
-        print(f"consistency-audit-skill: {'OK' if rc == 0 else 'FAIL'}")
+        if rc == SKIP_RC:
+            # Same contract as the hook selftests above: a skip is not a pass, and CI must
+            # never skip - the point of running everywhere is that it actually executes.
+            if os.environ.get("CI"):
+                print(f"{label}: FAIL (gate could not run, and CI must not skip)")
+                failed.append(label)
+            else:
+                print(f"{label}: SKIPPED")
+                skipped.append(label)
+            continue
+        print(f"{label}: {'OK' if rc == 0 else 'FAIL'}")
         if rc != 0:
-            failed.append("consistency-audit-skill")
-    # examples/settings.json is what people copy when wiring by hand; it went stale twice.
-    # Derive-and-compare so a drift is a red build, not a silent copy-paste that omits hooks.
-    regen = os.path.join(HERE, "tools", "regen_example_settings.py")
-    if os.path.exists(regen):
-        ran += 1
-        rc = subprocess.run([sys.executable, regen, "--check"],
-                            stdin=subprocess.DEVNULL).returncode
-        print(f"examples-settings-fresh: {'OK' if rc == 0 else 'FAIL'}")
-        if rc != 0:
-            failed.append("examples-settings-fresh")
+            failed.append(label)
 
-    # The README advertises a Python floor; CI only exercises files it actually runs.
-    # Parse every file at the floor so a tools/ script cannot silently break the promise.
-    floor = os.path.join(HERE, "tools", "check_python_floor.py")
-    if os.path.exists(floor):
-        ran += 1
-        rc = subprocess.run([sys.executable, floor], stdin=subprocess.DEVNULL).returncode
-        print(f"python-floor: {'OK' if rc == 0 else 'FAIL'}")
-        if rc != 0:
-            failed.append("python-floor")
-
-    # A hook can name a skill the repo does not ship (close_skills_guard shipped requiring
-    # four while only three were installed). Nothing connected those lists until this gate.
-    deps = os.path.join(HERE, "tools", "check_skill_deps.py")
-    if os.path.exists(deps):
-        ran += 1
-        rc = subprocess.run([sys.executable, deps], stdin=subprocess.DEVNULL).returncode
-        print(f"skill-deps: {'OK' if rc == 0 else 'FAIL'}")
-        if rc != 0:
-            failed.append("skill-deps")
+    # DETECTION, not just a list: every tools/*.py must be classified as a gate or explicitly
+    # as not-a-gate. Adding a tool therefore forces the decision instead of defaulting to
+    # "ungated and nobody noticed" - the same shape as KNOWN_NO_SELFTEST for the hooks.
+    unclassified, stale_exempt = classify_tools(os.path.join(HERE, "tools"))
+    if unclassified:
+        print(f"FAIL: {len(unclassified)} file(s) in tools/ are classified neither as an "
+              f"AUX_GATES entry nor in NOT_A_GATE: {unclassified}")
+        failed.append("tools-classification")
+    if stale_exempt:
+        print(f"FAIL: NOT_A_GATE names {len(stale_exempt)} file(s) that no longer exist "
+              f"(the exemption is rotting): {stale_exempt}")
+        failed.append("tools-classification")
 
     # Informational every run, a BLOCKER only at release (--release). Printing it here is the
     # point: "CI green" and "reviewed since it last changed" are different questions, and the
@@ -165,5 +218,46 @@ def record_gate_run(ran, failed, skipped=()):
         pass
 
 
+def selftest() -> int:
+    """[P13 A3] HERMETIC checks for the two decisions that used to have no answer at all."""
+    import tempfile
+    fails = []
+
+    # 1. a gate whose file is absent must be REPORTED, never skipped. An empty tree is the
+    #    strongest form of "every tool was renamed", so every label must come back.
+    with tempfile.TemporaryDirectory() as empty:
+        got = missing_gates(empty)
+        want = [label for label, _p, _e in AUX_GATES]
+        if sorted(got) != sorted(want):
+            fails.append("missing_gates() on an empty tree reported %r, expected all %d gate "
+                         "labels %r - a gate file that is gone must not read as a pass"
+                         % (got, len(want), want))
+    # ...and the real tree must have none missing, or the suite is lying right now.
+    live_missing = missing_gates(HERE)
+    if live_missing:
+        fails.append("AUX_GATES names %d gate(s) that do not exist in this repo: %r"
+                     % (len(live_missing), live_missing))
+
+    # 2. a tools/ file that is neither a gate nor exempt must be reported, and an exemption
+    #    naming a vanished file must be reported too.
+    with tempfile.TemporaryDirectory() as td:
+        tools = os.path.join(td, "tools")
+        os.makedirs(tools)
+        for name in ("check_python_floor.py", "brand_new_tool.py"):
+            with open(os.path.join(tools, name), "w", encoding="utf-8") as f:
+                f.write("x = 1\n")
+        unclassified, stale = classify_tools(tools, not_a_gate={"deleted_tool.py"})
+        if unclassified != ["brand_new_tool.py"]:
+            fails.append("classify_tools() did not flag an undeclared tool: %r" % (unclassified,))
+        if stale != ["deleted_tool.py"]:
+            fails.append("classify_tools() did not flag an exemption for a file that no longer "
+                         "exists: %r" % (stale,))
+
+    for f in fails:
+        print("SELFTEST FAIL:", f)
+    print("SELFTEST OK" if not fails else "SELFTEST FAILED")
+    return 0 if not fails else 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(selftest() if "--selftest" in sys.argv else main())
