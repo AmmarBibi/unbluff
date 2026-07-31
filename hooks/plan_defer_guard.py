@@ -31,6 +31,12 @@ import time
 
 HOOK_NAME = "plan_defer_guard"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+import capped_report  # noqa: E402  ONE way to cap a findings list, shared by five hooks
+
 MAX_BULLET_LINES = 10
 SNIPPET_LEN = 150
 SESSION_ID_CHARS = 12
@@ -124,30 +130,27 @@ def dangling_homes(name: str, text: str) -> tuple:
     return claims, promises
 
 
-def scan_plan_text(name: str, text: str) -> list:
-    findings = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        if len(findings) >= MAX_BULLET_LINES:
-            break
-        if is_soft_defer_line(line):
-            findings.append(f"{name}:{lineno}: {line.strip()[:SNIPPET_LEN]}")
-    return findings
+def scan_plan_text(name: str, text: str) -> tuple[list, int]:
+    """(capped findings, REAL total). [P13 B7] The scan used to `break` at the cap, so the
+    total was destroyed and the message could show 10 of 40 with nothing saying so."""
+    hits = (f"{name}:{lineno}: {line.strip()[:SNIPPET_LEN]}"
+            for lineno, line in enumerate(text.splitlines(), 1) if is_soft_defer_line(line))
+    return capped_report.keep(hits, MAX_BULLET_LINES)
 
 
-def build_message(name: str, findings: list, claims: list = (), promises: list = ()) -> str:
+def build_message(name: str, findings: list, claims: list = (), promises: list = (),
+                  total: int | None = None) -> str:
     lines = []
     if claims and promises:
         lines.append(f"[plan-defer-guard] DANGLING HOME in {name} - the file claims every gap is "
                      "homed, yet still promises future items:")
-        lines.extend(f"- claim   {item}" for item in claims[:2])
-        lines.extend(f"- promise {item}" for item in promises[:5])
-        if len(promises) > 5:
-            lines.append(f"- ... +{len(promises) - 5} more promises")
+        lines.extend(capped_report.render(claims, 2, prefix="- claim   ", noun="claim"))
+        lines.extend(capped_report.render(promises, 5, prefix="- promise ", noun="promise"))
         lines.append("A '-> new item' pointer is NOT a home; only a real row is. OPEN the row in "
                      "this same edit, or drop the all-homed claim.")
     if findings:
         lines.append(f"[plan-defer-guard] optional-forever language in {name}:")
-        lines.extend(f"- {item}" for item in findings)
+        lines.extend(capped_report.render(findings, MAX_BULLET_LINES, total=total))
         lines.append("Reclassify each into a SCHEDULED build item (materiality order) OR an "
                      "explicit FINALIZED justified exclusion - the plan must have zero "
                      "optional-forever items. (A grep only catches what the plan names; run the "
@@ -195,7 +198,7 @@ def run(payload: dict, state_dir: str) -> tuple:
     except OSError:
         return 0, ""
     name = os.path.basename(path)
-    findings = scan_plan_text(name, text)
+    findings, total = scan_plan_text(name, text)
     claims, promises = dangling_homes(name, text)
     dangling = bool(claims and promises)  # neither half is a defect on its own
     if not findings and not dangling:
@@ -203,7 +206,7 @@ def run(payload: dict, state_dir: str) -> tuple:
     os.makedirs(state_dir, exist_ok=True)
     with open(marker, "w", encoding="utf-8") as f:
         f.write(f"fired {time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
-    return 2, build_message(name, findings, claims, promises)
+    return 2, build_message(name, findings, claims, promises, total)
 
 
 def main() -> int:
@@ -345,8 +348,25 @@ def _selftest_dangling() -> list:
     return fails
 
 
+
+def _selftest_cap_notice() -> list:
+    """[P13 B7] The scan caps at 10; the message must say so and name the real total."""
+    fails = []
+    text = "\n".join("| %d | low-pri thing -> park." % i for i in range(15))
+    findings, total = scan_plan_text("PLAN.md", text)
+    if total != 15:
+        fails.append("scan_plan_text reported total %r, expected the real 15 - a scan that "
+                     "stops counting cannot report what it dropped" % (total,))
+    if len(findings) != MAX_BULLET_LINES:
+        fails.append("display cap wrong: %d" % len(findings))
+    msg = build_message("PLAN.md", findings, total=total)
+    if "5 more" not in msg or "15 total" not in msg:
+        fails.append("truncation notice does not name what was hidden and out of what: %r"
+                     % (msg,))
+    return fails
+
 def selftest() -> int:
-    fails = _selftest_line_cases() + _selftest_pipeline() + _selftest_dangling()
+    fails = _selftest_cap_notice() + _selftest_line_cases() + _selftest_pipeline() + _selftest_dangling()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

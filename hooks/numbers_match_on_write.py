@@ -44,6 +44,12 @@ HOOK_NAME = "numbers_match_on_write"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
 CONFIG_NAME = "number-sources.txt"
 SESSION_ID_CHARS = 12
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+import capped_report  # noqa: E402  ONE way to cap a findings list, shared by five hooks
+
 MAX_BULLETS = 12
 # Hard cap on findings COLLECTED (display is capped at MAX_BULLETS). Separate numbers so
 # the reported total is real: capping collection at the display width made the message
@@ -274,13 +280,11 @@ def is_report_file(path: str, globs: "list[str]") -> bool:
 def build_message(name: str, sources: "list[str]", findings: "list[str]") -> str:
     lines = ["[numbers-match] %d cited number(s) in %s have no match in the source data (%s):"
              % (len(findings), name, ", ".join(sources))]
-    lines.extend("- " + f for f in findings[:MAX_BULLETS])
-    hidden = len(findings) - MAX_BULLETS
-    if hidden > 0:
-        # Say what was truncated. The count above is now the REAL total, and the marker
-        # suppresses this hook for the rest of the session, so an unannounced truncation
-        # means those findings are never mentioned again.
-        lines.append("  (+%d more not shown)" % hidden)
+    # Say what was truncated. The count above is the REAL total, and the marker suppresses
+    # this hook for the rest of the session, so an unannounced truncation means those findings
+    # are never mentioned again. Shared with four sibling hooks that each had their own copy
+    # of this decision, three of which got it wrong (P13 B5-B7).
+    lines.extend(capped_report.render(findings, MAX_BULLETS))
     lines.append("Verify each against the source-of-truth data (recompute/re-export) or correct the "
                  "prose. Numbers that are derived, rounded beyond tolerance, or definitional are fine "
                  "to keep - this is a mechanical check, not a judge.")
@@ -670,7 +674,12 @@ def _selftest_mediums() -> list:
                 fails.append("M2: reported the DISPLAY cap as the total: %r" % head)
             if "40 cited number" not in head:
                 fails.append("M2: total is not the real count: %r" % head)
-            if "more not shown" not in msg:
+            # Assert the NUMBERS, not the phrasing: a wording-coupled check goes red on a
+            # rename and green on a wrong count, which is exactly backwards.
+            if "28 more" not in msg or "40 total" not in msg:
+                fails.append("M2: the truncation notice does not name how many were hidden "
+                             "and out of what: %r" % (msg.splitlines()[-2:],))
+            if "not shown" not in msg:
                 fails.append("M2: truncated the list with no notice - the marker then "
                              "suppresses the hook for the rest of the session")
 

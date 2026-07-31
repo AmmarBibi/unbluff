@@ -47,6 +47,12 @@ import os
 import re
 import sys
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+import capped_report  # noqa: E402  ONE way to cap a findings list, shared by five hooks
+
 HOOK_NAME = "memory_hygiene_guard"
 INDEX_FILE = "MEMORY.md"
 MAX_INDEX_BULLET_LEN = 400
@@ -134,8 +140,8 @@ def _has_commit_hash(line: str) -> bool:
     return bool(HASH_TOKEN_RE.search(line)) and bool(HASH_CONTEXT_RE.search(line))
 
 
-def scan_index_lines(lines: list[str]) -> list[tuple[int, str]]:
-    """Scan MEMORY.md index lines. Returns [(lineno, message)], capped."""
+def scan_index_lines(lines: list[str]) -> tuple[list, int]:
+    """Scan MEMORY.md index lines. Returns (capped [(lineno, message)], REAL total)."""
     findings: list[tuple[int, str]] = []
     for lineno, line in enumerate(lines, 1):
         if line.lstrip().startswith("- [") and len(line) > MAX_INDEX_BULLET_LEN:
@@ -144,13 +150,12 @@ def scan_index_lines(lines: list[str]) -> list[tuple[int, str]]:
             findings.append((lineno, "commit hash in index: " + _snippet(line)))
         elif INDEX_EVOLVING_RE.search(line):
             findings.append((lineno, "evolving state in index: " + _snippet(line)))
-        if len(findings) >= MAX_FINDINGS_PER_FILE:
-            break
-    return findings
+    # [P13 B6] Count everything, cap afterwards - see scan_plain_lines.
+    return capped_report.keep(findings, MAX_FINDINGS_PER_FILE)
 
 
-def scan_plain_lines(lines: list[str]) -> list[tuple[int, str]]:
-    """Section-aware scan of a non-index memory file. Returns [(lineno, snippet)]."""
+def scan_plain_lines(lines: list[str]) -> tuple[list, int]:
+    """Section-aware scan of a non-index memory file. Returns (capped [(lineno, snippet)], REAL total)."""
     findings: list[tuple[int, str]] = []
     # [M4] The latch opens only on a HEADING and re-arms on any heading of the same or
     # shallower depth. It used to open on ANY line containing "historical" and close only on a
@@ -176,19 +181,25 @@ def scan_plain_lines(lines: list[str]) -> list[tuple[int, str]]:
             continue
         if PLAIN_NEXT_RE.search(line) or PLAIN_TESTS_RE.search(line) or _has_commit_hash(line):
             findings.append((lineno, _snippet(line)))
-            if len(findings) >= MAX_FINDINGS_PER_FILE:
-                break
-    return findings
+    # [P13 B6] Count everything, cap afterwards. Breaking at the cap destroyed the total, so
+    # the "+N more" the message prints was computed from the survivors and under-reported.
+    return capped_report.keep(findings, MAX_FINDINGS_PER_FILE)
 
 
-def collect_findings(memory_dir: str) -> list[str]:
-    """Scan all *.md files in memory_dir; return 'file:lineno: <msg>' strings."""
+def collect_findings(memory_dir: str) -> tuple[list, int]:
+    """Scan all *.md files in memory_dir; return (capped 'file:lineno: <msg>' strings, REAL total).
+
+    The total is carried out of the per-file scans so the message's "+N more" names what was
+    really dropped. It used to be computed from the already-truncated list, so it under-reported
+    by however much the per-file cap had silently eaten (P13 B6).
+    """
     try:
         names = sorted(os.listdir(memory_dir))
     except OSError:
-        return []
+        return [], 0
     ordered = [n for n in names if n == INDEX_FILE] + [n for n in names if n != INDEX_FILE]
     findings: list[str] = []
+    total = 0
     for name in ordered:
         if not name.lower().endswith(".md"):
             continue
@@ -200,9 +211,11 @@ def collect_findings(memory_dir: str) -> list[str]:
                 lines = fh.read().splitlines()
         except OSError:
             continue
-        pairs = scan_index_lines(lines) if name == INDEX_FILE else scan_plain_lines(lines)
+        pairs, file_total = (scan_index_lines(lines) if name == INDEX_FILE
+                             else scan_plain_lines(lines))
         findings.extend(f"{name}:{lineno}: {message}" for lineno, message in pairs)
-    return findings
+        total += file_total
+    return findings, total
 
 
 def _marker_path(state_dir: str, session_id: object) -> str:
@@ -248,7 +261,7 @@ def main() -> int:
                              f"Nothing was verified.\n")
         return 0
 
-    findings = collect_findings(memory_dir)
+    findings, total = collect_findings(memory_dir)
     if not findings:
         return 0
 
@@ -257,10 +270,8 @@ def main() -> int:
         fh.write("fired\n")
 
     out = ["[memory-hygiene] memory rot for this project:"]
-    out.extend(f"  - {finding}" for finding in findings[:MAX_BULLETS_IN_MESSAGE])
-    hidden = len(findings) - MAX_BULLETS_IN_MESSAGE
-    if hidden > 0:
-        out.append(f"  (+{hidden} more finding(s) not shown)")
+    out.extend(capped_report.render(findings, MAX_BULLETS_IN_MESSAGE, prefix="  - ",
+                                    total=total))
     out.append(FOOTER)
     sys.stderr.write("\n".join(out) + "\n")
     return 2
@@ -276,33 +287,36 @@ def _selftest_scans(check) -> None:
 
     # MEMORY.md index fixtures.
     bloated = "- [Big](big.md) - " + "x" * 450
-    got = scan_index_lines([bloated])
+    got, _tot = scan_index_lines([bloated])
     check("SHOULD-FIRE index bloat >400", len(got) == 1 and "bloat" in got[0][1])
-    got = scan_index_lines(["- [P](p.md) - fixed in commit abc1234 on main"])
+    got, _tot = scan_index_lines(["- [P](p.md) - fixed in commit abc1234 on main"])
     check("SHOULD-FIRE index commit hash + word", len(got) == 1 and got[0][0] == 1)
-    got = scan_index_lines(["- [P](p.md) - request id deadbeef99 seen in logs"])
+    got, _tot = scan_index_lines(["- [P](p.md) - request id deadbeef99 seen in logs"])
     check("should-NOT-fire bare hex token (no commit word)", got == [])
-    got = scan_index_lines(["- [P](p.md) - NEXT: wire the API"])
+    got, _tot = scan_index_lines(["- [P](p.md) - NEXT: wire the API"])
     check("SHOULD-FIRE index NEXT:", len(got) == 1)
-    got = scan_index_lines(["- [P](p.md) - 34 tests pass as of today"])
+    got, _tot = scan_index_lines(["- [P](p.md) - 34 tests pass as of today"])
     check("SHOULD-FIRE index test count", len(got) == 1)
-    got = scan_index_lines(["- [P](p.md) - short durable pointer, no rot"])
+    got, _tot = scan_index_lines(["- [P](p.md) - short durable pointer, no rot"])
     check("should-NOT-fire clean index line", got == [])
 
     # Non-index (plain) fixtures with section awareness.
-    got = scan_plain_lines(["# T", "NEXT ORDER: do x -> y"])
+    got, _tot = scan_plain_lines(["# T", "NEXT ORDER: do x -> y"])
     check("SHOULD-FIRE plain NEXT ORDER outside quarantine", len(got) == 1 and got[0][0] == 2)
-    got = scan_plain_lines(["# T", "## HISTORICAL BUILD LOG (quarantined)", "NEXT ORDER: do x -> y"])
+    got, _tot = scan_plain_lines(["# T", "## HISTORICAL BUILD LOG (quarantined)", "NEXT ORDER: do x -> y"])
     check("should-NOT-fire NEXT ORDER inside quarantine", got == [])
-    got = scan_plain_lines(["## HISTORICAL", "NEXT = a", "## Current state", "NEXT = b"])
+    got, _tot = scan_plain_lines(["## HISTORICAL", "NEXT = a", "## Current state", "NEXT = b"])
     check("SHOULD-FIRE after '## ' heading re-arms scan", len(got) == 1 and got[0][0] == 4)
-    got = scan_plain_lines(["12 tests pass on branch main"])
+    got, _tot = scan_plain_lines(["12 tests pass on branch main"])
     check("SHOULD-FIRE plain test count", len(got) == 1)
-    got = scan_plain_lines(["pushed 9f8e7d6a5b to origin"])
+    got, _tot = scan_plain_lines(["pushed 9f8e7d6a5b to origin"])
     check("SHOULD-FIRE plain commit hash + push word", len(got) == 1)
-    got = scan_plain_lines([f"NEXT = step {i}" for i in range(10)])
+    got, _tot = scan_plain_lines([f"NEXT = step {i}" for i in range(10)])
+    # [P13 B6] the REAL total must survive the per-file cap, or the message's "+N more" is
+    # computed from the survivors and under-reports whatever the cap already ate.
+    check("per-file cap reports the real total, not the capped one", _tot == 10)
     check("cap 6 findings per file", len(got) == MAX_FINDINGS_PER_FILE)
-    got = scan_plain_lines(["Durable fact: engine lives in src/."])
+    got, _tot = scan_plain_lines(["Durable fact: engine lives in src/."])
     check("should-NOT-fire clean plain line", got == [])
 
 
@@ -317,11 +331,11 @@ def _selftest_collect(check) -> None:
             fh.write("# Index\n\n- [P](p.md) - clean pointer\n")
         with open(os.path.join(mem, "p.md"), "w", encoding="utf-8") as fh:
             fh.write("# P\n\nDurable fact only.\n")
-        check("should-NOT-fire collect on clean tree", collect_findings(mem) == [])
+        check("should-NOT-fire collect on clean tree", collect_findings(mem)[0] == [])
 
         with open(os.path.join(mem, "p.md"), "w", encoding="utf-8") as fh:
             fh.write("# P\n\nNEXT ORDER: do x -> y\n")
-        got = collect_findings(mem)
+        got, _tot = collect_findings(mem)
         check(
             "SHOULD-FIRE collect on rot tree",
             len(got) == 1 and got[0].startswith("p.md:3: "),
@@ -409,19 +423,19 @@ def _selftest_main(check) -> None:
                       "- a bullet about the historical background of this project",
                       "- NEXT = ship the thing"]
     check("M4: prose mentioning 'historical' does not quarantine the rest of the file",
-          any(ln == 3 for ln, _ in scan_plain_lines(prose_then_rot)))
+          any(ln == 3 for ln, _ in scan_plain_lines(prose_then_rot)[0]))
     quarantined = ["## HISTORICAL",
                    "- NEXT = inside the quarantined section",
                    "## Live",
                    "- NEXT = this one counts"]
-    hits = [ln for ln, _ in scan_plain_lines(quarantined)]
+    hits = [ln for ln, _ in scan_plain_lines(quarantined)[0]]
     check("M4: a quarantined SECTION is still skipped", 2 not in hits)
     check("M4: a same-depth heading re-arms the scan", 4 in hits)
     deeper = ["### HISTORICAL notes",
               "- NEXT = inside quarantine",
               "# Top",
               "- NEXT = after a shallower heading"]
-    hits2 = [ln for ln, _ in scan_plain_lines(deeper)]
+    hits2 = [ln for ln, _ in scan_plain_lines(deeper)[0]]
     check("M4: '###' opens the latch and a shallower '#' re-arms it",
           2 not in hits2 and 4 in hits2)
 

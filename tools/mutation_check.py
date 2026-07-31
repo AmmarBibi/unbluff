@@ -259,6 +259,37 @@ MUTATIONS = [
      [("    return [label for label, parts, _extra in gates\n"
        "            if not os.path.exists(os.path.join(root, *parts))]",
        "    return []")], False),
+    ("meta_audit_on_stop", "B1", "count_unpushed maps 'no upstream' back to 0 (a never-pushed "
+     "branch looks identical to a clean tree)",
+     [('    if ahead is None:\n        remotes = _git(cwd, "remote")\n'
+       '        if remotes is None or not remotes.strip():\n            return 0\n'
+       '        ahead = _git(cwd, "rev-list", "--count", "HEAD", "--not", "--remotes")\n'
+       '        if ahead is None:\n            return 0\n',
+       "    if ahead is None:\n        return 0\n")], False),
+    ("meta_audit_on_stop", "B2", "the marker stem mis-groups its suffix again (PARKED? matches "
+     "PARKE, misses PARK)",
+     [('_MARKER_STEMS = (("PARK", "ED"),', '_MARKER_STEMS = (("PARKE", "D"),')], False),
+    ("meta_audit_on_stop", "B3", "a decision tag is matched anywhere in the line again",
+     [("    return bool(_ALLOW_CAPS_RE.search(line) or _ALLOW_BRACKET_RE.search(line))",
+       "    return bool(re.search(_TAG_ALT, line, re.IGNORECASE))")], False),
+    ("meta_audit_on_stop", "B4", "_is_superseded back to a substring match anywhere in the head",
+     [("    return any(_SUPERSEDED_DECL_RE.match(line) for line in text.splitlines()[:5])",
+       '    return "superseded" in "\\n".join(text.splitlines()[:5]).lower()')], False),
+    ("meta_audit_on_stop", "B5", "the unpushed bullet goes back to LAST, where the cap eats it",
+     [("    return head + plan_findings, total + len(head)",
+       "    return plan_findings + head, total + len(head)")], False),
+    # The shared cap helper: three hooks now depend on it, so a mutation here must be caught by
+    # the hook whose message would start lying, not only by capped_report's own selftest.
+    ("capped_report", "B6", "keep() reports the SURVIVOR count as the total again",
+     [("    all_items = list(items)\n    return all_items[:limit], len(all_items)",
+       "    all_items = list(items)\n    return all_items[:limit], len(all_items[:limit])")],
+     False, "memory_hygiene_guard"),
+    ("capped_report", "B7", "render() truncates with no notice again",
+     [('    hidden = real_total - len(shown)\n    if hidden > 0:',
+       "    hidden = real_total - len(shown)\n    if False:")], False, "plan_defer_guard"),
+    ("capped_report", "B8", "the twin-guard stops seeing a hook that grew its own cap",
+     [("    offenders = []\n    for path in sorted(glob.glob(os.path.join(hooks_dir, \"*.py\"))):",
+       "    offenders = []\n    for path in []:")], False),
     ("./run_selftests", "A3b", "an undeclared tools/ file no longer forces a decision",
      [("    return (sorted(present - gate_basenames - set(not_a_gate)),\n"
        "            sorted(set(not_a_gate) - present))",
