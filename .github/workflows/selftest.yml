@@ -33,6 +33,23 @@ jobs:
       - name: Run hook selftests
         run: python run_selftests.py
 
+  mutations:
+    # The harness that proves the regression tests actually BITE was invoked by no automation
+    # at all - it ran only when someone remembered. A decorative test could therefore reappear
+    # between manual runs, which is the one failure this repo exists to prevent. Runs on
+    # ubuntu so that the posix-only mutation (#30, the install() chmod) executes for the FIRST
+    # time anywhere; on Windows it can only ever report SKIPPED.
+    # CI=true also makes an UNPROVEN mutation (a verifying selftest that could not run) fail.
+    name: mutation harness (do the tests bite?)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Revert each fix and require the suite to go red
+        run: python tools/mutation_check.py
+
   integration:
     name: integration (install -> fire -> uninstall)
     runs-on: ubuntu-latest
