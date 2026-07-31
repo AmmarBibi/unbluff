@@ -255,6 +255,31 @@ MUTATIONS = [
      "when git cannot answer",
      [("    if r.returncode != 0:\n        return None\n    return {x.replace",
        "    if r.returncode != 0:\n        return set()\n    return {x.replace")], False),
+    # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
+    # input is indistinguishable from one reporting a clean bill of health.
+    ("stop_dispatcher", "C1", "a crashed hook is recorded as a clean rc=0 again",
+     [("                results[key] = CRASH_RC", "                results[key] = 0")], False),
+    ("post_tooluse_dispatcher", "C1b", "the TWIN dispatcher records a crash as clean again",
+     [("                results[key] = CRASH_RC", "                results[key] = 0")], False),
+    ("rate_prompt", "C2", "a non-string prompt reaches .strip() again",
+     [("    prompt = _as_text(prompt).strip()", '    prompt = (prompt or "").strip()')], False),
+    ("hook_health_check", "C4", "_iter_hook_commands stops type-guarding the containers",
+     [("    hooks_cfg = cfg.get(\"hooks\") if isinstance(cfg, dict) else None\n"
+       "    if not isinstance(hooks_cfg, dict):\n        return\n    for groups in "
+       "hooks_cfg.values():\n        if not isinstance(groups, list):\n            continue",
+       "    for groups in (cfg.get(\"hooks\") or {}).values():\n        if False:\n"
+       "            continue")], False),
+    ("hook_health_check", "C5", "a non-string command reaches .strip() again",
+     [('                raw_command = h.get("command", "")\n'
+       "                if raw_command is not None and not isinstance(raw_command, str):",
+       '                raw_command = h.get("command", "")\n'
+       "                if False:")], False),
+    ("duplicate_registration_check", "C6", "a non-string command silences the whole audit again",
+     [("                if cmd is not None and not isinstance(cmd, str):",
+       "                if False:")], False),
+    ("numbers_match_on_write", "C8", "an unparsed `sources` key opts the project out silently",
+     [('    if not cfg["sources"]:\n        # [P13 C8]', '    if not cfg["sources"]:\n'
+       '        return 0, ""\n    if False:\n        # [P13 C8]')], False),
     ("./run_selftests", "A3", "a missing auxiliary-gate file is silently skipped again",
      [("    return [label for label, parts, _extra in gates\n"
        "            if not os.path.exists(os.path.join(root, *parts))]",

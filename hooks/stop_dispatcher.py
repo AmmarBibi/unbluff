@@ -37,11 +37,18 @@ HOOKS = (
 )
 
 
+CRASH_RC = -1   # a hook that RAISED. Non-firing like 0, but never confusable with a clean run.
+
+
+crashes: dict = {}   # key -> "ExcType: msg" for the run just executed
+
+
 def run_hooks(payload_text: str, hooks=HOOKS) -> dict[str, int]:
     """Run each hook module in-process against the same payload; return {key: rc}."""
     if HOOK_DIR not in sys.path:
         sys.path.insert(0, HOOK_DIR)
     results: dict[str, int] = {}
+    crashes.clear()
     real_stdin = sys.stdin
     try:
         for module_name, key in hooks:
@@ -50,8 +57,13 @@ def run_hooks(payload_text: str, hooks=HOOKS) -> dict[str, int]:
                 sys.stdin = io.StringIO(payload_text)
                 rc = module.main()
                 results[key] = rc if isinstance(rc, int) else 0
-            except (Exception, SystemExit):  # a broken hook (even if it exits) must not stop the others
-                results[key] = 0
+            except (Exception, SystemExit) as exc:  # a broken hook (even if it exits) must not stop the others
+                # ...but a CRASH is not a CLEAN RUN. The exit code stays non-firing;
+                # the LEDGER must not record a hook that verified nothing this turn
+                # as rc=0, because that ledger is the suite's own evidence of what
+                # fired, and a swallowed crash made it indistinguishable (P13 C1).
+                results[key] = CRASH_RC
+                crashes[key] = "%s: %s" % (type(exc).__name__, exc)
     finally:
         sys.stdin = real_stdin
     return results
@@ -75,6 +87,7 @@ def write_ledger(payload: dict, results: dict[str, int]) -> None:
             "cwd": payload.get("cwd", ""),
             "results": results,
             "fired": sorted(k for k, rc in results.items() if rc == 2),
+            "crashed": dict(sorted(crashes.items())),
         })
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -93,6 +106,39 @@ def main() -> int:
     results = run_hooks(payload_text)
     write_ledger(payload, results)
     return 2 if any(rc == 2 for rc in results.values()) else 0
+
+
+def _selftest_crash_is_not_clean() -> list:
+    """[P13 C1] A hook that RAISES must not be recorded as a clean rc=0 run.
+
+    The dispatcher's fail-silent EXIT behaviour is correct and stays. What was wrong is the
+    LEDGER: it is this suite's own evidence of what fired, and a crashed hook - which verified
+    nothing at all that turn - was written down identically to one that ran and found nothing.
+    """
+    fails = []
+
+    class _Boom:
+        @staticmethod
+        def main():
+            raise RuntimeError("hook exploded")
+
+    import sys as _sys
+    _sys.modules["_ub_boom_hook"] = _Boom
+    try:
+        results = run_hooks("{}", hooks=(("_ub_boom_hook", "boom"),))
+    finally:
+        _sys.modules.pop("_ub_boom_hook", None)
+    if results.get("boom") == 0:
+        fails.append("a hook that raised was recorded as rc=0 - identical to a clean run, so "
+                     "the fire ledger cannot tell 'checked and found nothing' from 'never ran'")
+    if results.get("boom") != CRASH_RC:
+        fails.append("a crashed hook got rc=%r, expected CRASH_RC=%r" % (results.get("boom"),
+                                                                        CRASH_RC))
+    if "boom" not in crashes:
+        fails.append("the crash was not recorded with its exception for the ledger")
+    if any(rc == 2 for rc in results.values()):
+        fails.append("a crashed hook must never count as FIRING")
+    return fails
 
 
 def selftest() -> int:
@@ -147,6 +193,7 @@ def selftest() -> int:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+    fails += _selftest_crash_is_not_clean()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

@@ -54,6 +54,8 @@ def _path_tokens(text: str) -> list[str]:
     directory contains a space, which on Windows is the ordinary case. No fixture used one,
     so the hook reported a clean bill on a machine where it was doing nothing at all.
     """
+    if not isinstance(text, str):
+        return []
     try:
         toks = shlex.split(text, posix=False)   # posix=False: Windows backslashes survive
     except ValueError:
@@ -88,7 +90,7 @@ def settings_layers(settings_path: str | None = None, cwd: str | None = None) ->
     return uniq
 
 
-def _iter_commands(settings_path: str):
+def _iter_commands(settings_path: str, malformed: list | None = None):
     """Yield every script path referenced by any hook, from `command` and `args`.
 
     Yields DUPLICATES as duplicates - the caller must not collapse them (see audit)."""
@@ -106,7 +108,19 @@ def _iter_commands(settings_path: str):
             for hook in group.get("hooks", []) or []:
                 if not isinstance(hook, dict):
                     continue
-                for match in _path_tokens(hook.get("command") or ""):
+                cmd = hook.get("command")
+                if cmd is not None and not isinstance(cmd, str):
+                    # [P13 C6] Survive AND say so. shlex.split() on a non-str raises
+                    # AttributeError, and _path_tokens caught only ValueError, so the hook went
+                    # completely silent - reporting neither the malformed entry nor the
+                    # duplicates it could still see. Silence from a checker is the one outcome
+                    # indistinguishable from a clean bill of health.
+                    if malformed is not None:
+                        malformed.append("%s: hook 'command' is %s, not a string - this entry "
+                                         "was skipped" % (os.path.basename(settings_path),
+                                                          type(cmd).__name__))
+                    continue
+                for match in _path_tokens(cmd or ""):
                     yield match
                 for arg in (hook.get("args") or []):
                     if not isinstance(arg, str):
@@ -166,12 +180,13 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
     # so the check reported healthy for exactly the fault that motivated it (rate_prompt
     # firing twice on every prompt). Two entries must stay two entries.
     registered: dict[str, list[str]] = defaultdict(list)
+    malformed: list[str] = []
     for layer in settings_layers(settings_path, cwd):
         label = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(layer)))) \
             or "?"
         scope = "user" if os.path.normcase(os.path.abspath(layer)) == \
             os.path.normcase(os.path.abspath(settings_path or SETTINGS)) else label
-        for path in _iter_commands(layer):
+        for path in _iter_commands(layer, malformed):
             head, tail = _split(path)
             registered[tail].append("%s|%s|" % (head, scope))
 
@@ -185,7 +200,7 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
                 effective.setdefault(mod + ".py", []).append(
                     "%s|%s|via %s" % (root, scope, base))
 
-    problems: list[str] = []
+    problems: list[str] = list(malformed)
     for base in sorted(effective):
         entries = sorted(effective[base])
         if len(entries) < 2:
@@ -211,6 +226,35 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
             problems.append("      <- %s [%s]%s  [sha %s]" % (
                 root, scope, (" (" + via + ")") if via else "", digests[i] or "UNREADABLE"))
     return problems
+
+
+def _selftest_malformed_command() -> list:
+    """[P13 C6] A non-string `command` must be REPORTED, and must not silence the rest."""
+    import tempfile
+    fails = []
+    with tempfile.TemporaryDirectory() as td:
+        real = os.path.join(td, "rate_prompt.py")
+        with open(real, "w", encoding="utf-8") as fh:
+            fh.write("x = 1" + chr(10))
+        cfg = os.path.join(td, "settings.json")
+        with open(cfg, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [
+                {"command": {"not": "a string"}},
+                {"command": real},
+                {"command": real},
+            ]}]}}, fh)
+        try:
+            out = chr(10).join(audit(cfg, cwd=td))
+        except Exception as e:
+            fails.append("audit() raised on a non-string command: %r" % (e,))
+            return fails
+        if "not a string" not in out:
+            fails.append("a malformed hook command was neither reported nor named: %r" % (out,))
+        if "rate_prompt.py" not in out:
+            fails.append("one malformed entry silenced the duplicates the hook could still "
+                         "see - a checker that goes quiet looks exactly like a clean bill "
+                         "of health: %r" % (out,))
+    return fails
 
 
 def _selftest() -> int:
@@ -266,124 +310,137 @@ def _selftest() -> int:
         with open(os.path.join(noisy, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
             json.dump({"hooks": {"Stop": [{"hooks": [{"command": loud}, {"command": loud}]}]}}, fh)
         _real_cwd = os.getcwd()
+        # [P13 C7] try/finally. The restore used to sit ~130 lines below, on the SUCCESS path
+        # only, so any failure in between left the process cwd inside a TemporaryDirectory -
+        # whose cleanup then raised, replacing the selftest's own failure report with an
+        # unrelated traceback. The report is destroyed exactly when it matters.
         os.chdir(noisy)
-        out = "\n".join(audit(settings, cwd=hermetic))
-        if "ambient_hook.py" in out:
-            fails.append("audit() leaked the invoking cwd's project config despite an "
-                         "explicit hermetic cwd")
-        checks = [
-            ("widget.py" in out and "DIFFERENT PROGRAMS" in out, "variant conflict not flagged"),
-            ("twin.py" in out and "SAME FILE" in out, "args-style duplicate not detected"),
-            ("solo.py" not in out, "false positive on singly-registered hook"),
-        ]
-        for ok, msg in checks:
-            if not ok:
-                fails.append(msg + " || got: " + (out or "(nothing reported)")[:200])
+        try:
+            out = "\n".join(audit(settings, cwd=hermetic))
+            if "ambient_hook.py" in out:
+                fails.append("audit() leaked the invoking cwd's project config despite an "
+                             "explicit hermetic cwd")
+            checks = [
+                ("widget.py" in out and "DIFFERENT PROGRAMS" in out, "variant conflict not flagged"),
+                ("twin.py" in out and "SAME FILE" in out, "args-style duplicate not detected"),
+                ("solo.py" not in out, "false positive on singly-registered hook"),
+            ]
+            for ok, msg in checks:
+                if not ok:
+                    fails.append(msg + " || got: " + (out or "(nothing reported)")[:200])
 
-        # ------------------------------------------------------- v1.3.1 regressions
-        def _audit_of(entries, where=None, cwd=None):
-            p = os.path.join(where or td, "s_%d.json" % len(os.listdir(where or td)))
-            with open(p, "w", encoding="utf-8") as fh:
-                json.dump({"hooks": {"Stop": [{"hooks": entries}]}}, fh)
-            # cwd defaults to a directory with NO .claude, never os.getcwd() - see D9 above.
-            out_ = "\n".join(audit(p, cwd=cwd or hermetic))
-            if "ambient_hook.py" in out_:
-                fails.append("_audit_of leaked the invoking cwd's project config - the "
-                             "fixture verdict depends on where the test was launched (D9)")
-            return out_, p
+            # ------------------------------------------------------- v1.3.1 regressions
+            def _audit_of(entries, where=None, cwd=None):
+                p = os.path.join(where or td, "s_%d.json" % len(os.listdir(where or td)))
+                with open(p, "w", encoding="utf-8") as fh:
+                    json.dump({"hooks": {"Stop": [{"hooks": entries}]}}, fh)
+                # cwd defaults to a directory with NO .claude, never os.getcwd() - see D9 above.
+                out_ = "\n".join(audit(p, cwd=cwd or hermetic))
+                if "ambient_hook.py" in out_:
+                    fails.append("_audit_of leaked the invoking cwd's project config - the "
+                                 "fixture verdict depends on where the test was launched (D9)")
+                return out_, p
 
-        # (4) [findings 20, 23] THE COMMONEST DUPLICATE: the SAME path registered twice.
-        # Registrations were collapsed into a SET of directories, so two identical entries
-        # became one and the check reported a clean bill - for the exact double-fire that
-        # motivated this hook (rate_prompt firing twice on every prompt).
-        dup = os.path.join(a, "twice.py")
-        with open(dup, "w", encoding="utf-8") as fh:
-            fh.write("q = 1\n")
-        out4, _ = _audit_of([{"command": dup}, {"command": dup}])
-        if "twice.py" not in out4:
-            fails.append("the same path registered TWICE was reported as healthy || " +
-                         (out4 or "(nothing reported)")[:200])
-        elif "2 times" not in out4:
-            fails.append("same-path duplicate found but not counted: " + out4[:200])
+            # (4) [findings 20, 23] THE COMMONEST DUPLICATE: the SAME path registered twice.
+            # Registrations were collapsed into a SET of directories, so two identical entries
+            # became one and the check reported a clean bill - for the exact double-fire that
+            # motivated this hook (rate_prompt firing twice on every prompt).
+            dup = os.path.join(a, "twice.py")
+            with open(dup, "w", encoding="utf-8") as fh:
+                fh.write("q = 1\n")
+            out4, _ = _audit_of([{"command": dup}, {"command": dup}])
+            if "twice.py" not in out4:
+                fails.append("the same path registered TWICE was reported as healthy || " +
+                             (out4 or "(nothing reported)")[:200])
+            elif "2 times" not in out4:
+                fails.append("same-path duplicate found but not counted: " + out4[:200])
 
-        # (5) [findings 21, 22] a SPACE anywhere in a path killed BOTH headline detections.
-        # `C:\Users\John Doe\...` is the common Windows case, and no fixture used one, so
-        # the hook went completely silent for those users while reporting nothing wrong.
-        spaced = os.path.join(td, "John Doe", "hooks")
-        os.makedirs(spaced, exist_ok=True)
-        s1 = os.path.join(spaced, "spaced.py")
-        with open(s1, "w", encoding="utf-8") as fh:
-            fh.write("s = 1\n")
-        out5, _ = _audit_of([{"command": '"%s" "%s"' % (sys.executable, s1)},
-                             {"command": "python", "args": [s1]}])
-        if "spaced.py" not in out5:
-            fails.append("a path containing a space silently disabled detection || " +
-                         (out5 or "(nothing reported)")[:200])
-        # Asserting only the FILENAME is not enough: the old regex still matched the fragment
-        # after the space ("Doe\\hooks\\spaced.py"), so the duplicate was reported with a root
-        # that does not exist - detected for the wrong reason, and unusable for fixing it.
-        # The full directory must appear, and the digest must have been readable from it.
-        elif spaced.replace("\\", "/") not in out5.replace("\\", "/"):
-            fails.append("duplicate reported with a TRUNCATED root - the path was matched "
-                         "from after the space || " + out5[:240])
-        elif "UNREADABLE" in out5:
-            fails.append("root parsed from a spaced path does not resolve to the real file || "
-                         + out5[:240])
+            # (5) [findings 21, 22] a SPACE anywhere in a path killed BOTH headline detections.
+            # `C:\Users\John Doe\...` is the common Windows case, and no fixture used one, so
+            # the hook went completely silent for those users while reporting nothing wrong.
+            spaced = os.path.join(td, "John Doe", "hooks")
+            os.makedirs(spaced, exist_ok=True)
+            s1 = os.path.join(spaced, "spaced.py")
+            with open(s1, "w", encoding="utf-8") as fh:
+                fh.write("s = 1\n")
+            out5, _ = _audit_of([{"command": '"%s" "%s"' % (sys.executable, s1)},
+                                 {"command": "python", "args": [s1]}])
+            if "spaced.py" not in out5:
+                fails.append("a path containing a space silently disabled detection || " +
+                             (out5 or "(nothing reported)")[:200])
+            # Asserting only the FILENAME is not enough: the old regex still matched the fragment
+            # after the space ("Doe\\hooks\\spaced.py"), so the duplicate was reported with a root
+            # that does not exist - detected for the wrong reason, and unusable for fixing it.
+            # The full directory must appear, and the digest must have been readable from it.
+            elif spaced.replace("\\", "/") not in out5.replace("\\", "/"):
+                fails.append("duplicate reported with a TRUNCATED root - the path was matched "
+                             "from after the space || " + out5[:240])
+            elif "UNREADABLE" in out5:
+                fails.append("root parsed from a spaced path does not resolve to the real file || "
+                             + out5[:240])
 
-        # (6) [findings 24, 26] user + PROJECT scope. Reading only ~/.claude/settings.json
-        # made the commonest real double-wiring invisible: the same hook in the user file
-        # and in the project's .claude/settings.json. Both fire, every event.
-        proj = os.path.join(td, "proj")
-        os.makedirs(os.path.join(proj, ".claude"), exist_ok=True)
-        shared = os.path.join(a, "shared.py")
-        with open(shared, "w", encoding="utf-8") as fh:
-            fh.write("sh = 1\n")
-        with open(os.path.join(proj, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
-            json.dump({"hooks": {"Stop": [{"hooks": [{"command": shared}]}]}}, fh)
-        out6, _ = _audit_of([{"command": shared}], cwd=proj)
-        if "shared.py" not in out6:
-            fails.append("a hook wired at BOTH user and project scope was invisible || " +
-                         (out6 or "(nothing reported)")[:200])
+            # (6) [findings 24, 26] user + PROJECT scope. Reading only ~/.claude/settings.json
+            # made the commonest real double-wiring invisible: the same hook in the user file
+            # and in the project's .claude/settings.json. Both fire, every event.
+            proj = os.path.join(td, "proj")
+            os.makedirs(os.path.join(proj, ".claude"), exist_ok=True)
+            shared = os.path.join(a, "shared.py")
+            with open(shared, "w", encoding="utf-8") as fh:
+                fh.write("sh = 1\n")
+            with open(os.path.join(proj, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
+                json.dump({"hooks": {"Stop": [{"hooks": [{"command": shared}]}]}}, fh)
+            out6, _ = _audit_of([{"command": shared}], cwd=proj)
+            if "shared.py" not in out6:
+                fails.append("a hook wired at BOTH user and project scope was invisible || " +
+                             (out6 or "(nothing reported)")[:200])
 
-        # (7) [finding 25] when a file cannot be read, its digest is None. Those were
-        # DISCARDED before the comparison, so one readable file plus one missing one left a
-        # single distinct digest and the report asserted "SAME FILE twice (redundant)" - a
-        # verdict it had not computed, steering the reader to delete the wrong copy.
-        ghost = os.path.join(td, "ghost", "vanished.py")
-        real_one = os.path.join(a, "vanished.py")
-        with open(real_one, "w", encoding="utf-8") as fh:
-            fh.write("v = 1\n")
-        out7, _ = _audit_of([{"command": real_one}, {"command": ghost}])
-        if "vanished.py" not in out7:
-            fails.append("missing-file duplicate not reported at all: " + out7[:160])
-        elif "SAME FILE" in out7:
-            fails.append("asserted SAME FILE while a digest was unavailable - the verdict "
-                         "was never computed || " + out7[:200])
-        elif "UNKNOWN" not in out7 and "could not be read" not in out7:
-            fails.append("no explicit unknown verdict for an unreadable file: " + out7[:200])
+            # (7) [finding 25] when a file cannot be read, its digest is None. Those were
+            # DISCARDED before the comparison, so one readable file plus one missing one left a
+            # single distinct digest and the report asserted "SAME FILE twice (redundant)" - a
+            # verdict it had not computed, steering the reader to delete the wrong copy.
+            ghost = os.path.join(td, "ghost", "vanished.py")
+            real_one = os.path.join(a, "vanished.py")
+            with open(real_one, "w", encoding="utf-8") as fh:
+                fh.write("v = 1\n")
+            out7, _ = _audit_of([{"command": real_one}, {"command": ghost}])
+            if "vanished.py" not in out7:
+                fails.append("missing-file duplicate not reported at all: " + out7[:160])
+            elif "SAME FILE" in out7:
+                fails.append("asserted SAME FILE while a digest was unavailable - the verdict "
+                             "was never computed || " + out7[:200])
+            elif "UNKNOWN" not in out7 and "could not be read" not in out7:
+                fails.append("no explicit unknown verdict for an unreadable file: " + out7[:200])
 
-        # (8) [D9] HERMETICITY, asserted directly. Checking that the fixtures pass is not the
-        # same as checking they are isolated: on a machine whose cwd happens to hold a clean
-        # config, dropping the hermetic cwd changes nothing and the mutation survives. So build
-        # an ambient project that DOES wire a hook twice, run a CLEAN fixture from inside it,
-        # and require the report to stay clean. If the cwd layer leaks, this fails.
-        clean_p = os.path.join(td, "clean_fixture.json")
-        with open(clean_p, "w", encoding="utf-8") as fh:
-            json.dump({"hooks": {"Stop": [{"hooks": [{"command": os.path.join(a, "solo.py")}]}]}},
-                      fh)
-        leaked = "\n".join(audit(clean_p, cwd=hermetic))
-        if leaked.strip():
-            fails.append("hermetic fixture was not clean: " + leaked[:160])
-        ambient = "\n".join(audit(clean_p, cwd=noisy))
-        if "ambient_hook.py" not in ambient:
-            fails.append("the ambient-project fixture is not actually noisy - this test "
-                         "cannot detect a cwd leak, so it proves nothing")
-        from_noisy = "\n".join(audit(clean_p, cwd=hermetic))   # cwd IS noisy for this block
-        if from_noisy.strip():
-            fails.append("selftest is NOT hermetic - launching from a project whose own "
-                         "config wires a hook twice contaminated a clean fixture: "
-                         + from_noisy[:160])
+            # (8) [D9] HERMETICITY, asserted directly. Checking that the fixtures pass is not the
+            # same as checking they are isolated: on a machine whose cwd happens to hold a clean
+            # config, dropping the hermetic cwd changes nothing and the mutation survives. So build
+            # an ambient project that DOES wire a hook twice, run a CLEAN fixture from inside it,
+            # and require the report to stay clean. If the cwd layer leaks, this fails.
+            clean_p = os.path.join(td, "clean_fixture.json")
+            with open(clean_p, "w", encoding="utf-8") as fh:
+                json.dump({"hooks": {"Stop": [{"hooks": [{"command": os.path.join(a, "solo.py")}]}]}},
+                          fh)
+            leaked = "\n".join(audit(clean_p, cwd=hermetic))
+            if leaked.strip():
+                fails.append("hermetic fixture was not clean: " + leaked[:160])
+            ambient = "\n".join(audit(clean_p, cwd=noisy))
+            if "ambient_hook.py" not in ambient:
+                fails.append("the ambient-project fixture is not actually noisy - this test "
+                             "cannot detect a cwd leak, so it proves nothing")
+            from_noisy = "\n".join(audit(clean_p, cwd=hermetic))   # cwd IS noisy for this block
+            if from_noisy.strip():
+                fails.append("selftest is NOT hermetic - launching from a project whose own "
+                             "config wires a hook twice contaminated a clean fixture: "
+                             + from_noisy[:160])
+        finally:
+            # [P13 C7] Restore on EVERY exit path. The restore used to sit
+            # only on the success path below, so the `return 1` that reports a
+            # FAILING selftest left the process cwd inside a TemporaryDirectory -
+            # whose cleanup then raised, replacing the failure report with an
+            # unrelated traceback. The report is destroyed exactly when it matters.
+            os.chdir(_real_cwd)
 
+        fails += _selftest_malformed_command()
         if fails:
             for f in fails:
                 print("SELFTEST FAIL: " + f)
@@ -400,7 +457,6 @@ def _selftest() -> int:
         # main() correctly resolves the project layer from os.getcwd() - that IS the production
         # behaviour - so the TEST must control the cwd rather than the code. Without this the
         # check merged the launching project's real .claude/settings.json (D9).
-        os.chdir(_real_cwd)          # end of the deliberately-noisy-cwd block
         real_cwd = os.getcwd()
         try:
             os.chdir(hermetic)

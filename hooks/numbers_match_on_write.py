@@ -369,8 +369,22 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
             cfg = parse_config(fh.read())
     except OSError:
         return 0, ""
-    if not cfg["sources"] or not is_report_file(path, cfg["reports"]):
+    # Report gate FIRST, so an unparsed config adds no noise on files this hook would never
+    # have looked at anyway.
+    if not is_report_file(path, cfg["reports"]):
         return 0, ""
+    if not cfg["sources"]:
+        # [P13 C8] The twin of M1, one layer up. M1 established that a `sources` value which
+        # RESOLVES to nothing is a broken config rather than an opt-out - but the identical
+        # silent clean-pass was still returned when the KEY never parsed at all: `source =
+        # results`, `sources: results` (the YAML habit - parse_config needs `=`), or an empty
+        # file. find_config() having succeeded is proof the project OPTED IN, so a config the
+        # hook cannot read must speak rather than shrug.
+        return 2, ("[numbers-match] %s defines no usable `sources = ...` line, so NOTHING in "
+                   "%s was checked. Expected `sources = dir1, dir2` (an `=`, not a `:`). "
+                   "This is a broken config, not an opt-out: the hook found your config file, "
+                   "so this project asked for the check.\n"
+                   % (os.path.relpath(config_path, root), os.path.basename(path)))
     marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)
     if os.path.exists(marker):
         return 0, ""
@@ -697,9 +711,33 @@ def _selftest_mediums() -> list:
     return fails
 
 
+def _selftest_unparsed_config() -> list:
+    """[P13 C8] A config whose `sources` key never PARSED must speak, not opt out silently."""
+    import tempfile
+    fails = []
+    for label, body in (("misspelled key", "source = results" + chr(10)),
+                        ("YAML colon habit", "sources: results" + chr(10)),
+                        ("empty config", "")):
+        with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as state:
+            os.makedirs(os.path.join(proj, ".claude"))
+            with open(os.path.join(proj, ".claude", "number-sources.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(body)
+            report = os.path.join(proj, "REPORT.md")
+            with open(report, "w", encoding="utf-8") as fh:
+                fh.write("Peak stress was 512.4 MPa." + chr(10))
+            code, msg = run({"session_id": "cfg-" + label, "cwd": proj,
+                             "tool_input": {"file_path": report}}, state)
+            if code != 2 or "no usable" not in msg:
+                fails.append("%s: an unparsed config opted the project out in silence "
+                             "(code=%s msg=%r)" % (label, code, msg[:120]))
+    return fails
+
+
 def selftest() -> int:
     fails = (_selftest_units() + _selftest_pipeline() + _selftest_item45()
              + _selftest_mediums())
+    fails += _selftest_unparsed_config()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

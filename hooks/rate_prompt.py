@@ -52,9 +52,26 @@ RATE_INSTRUCTION = (
 )
 
 
+def _as_text(prompt):
+    """Coerce a payload 'prompt' field to text.
+
+    [P13 C2] A non-str shape (None, a list of content blocks, a dict, a number) used to reach
+    .strip() and raise an uncaught AttributeError. Every other stdin hook in this suite guards
+    its payload; this one did not, so a shape change upstream would take it down rather than
+    make it quiet - the opposite of the project's own "a broken hook must never block the
+    user" rule.
+    """
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, list):   # content-block form: [{"type": "text", "text": ...}, ...]
+        return "".join(b.get("text", "") for b in prompt
+                       if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return ""
+
+
 def instruction_for(prompt):
     """Return the standing-instruction string to inject, or None to stay silent. Pure function."""
-    prompt = (prompt or "").strip()
+    prompt = _as_text(prompt).strip()
     if not prompt or _TRIVIAL.match(prompt):
         return None
     if _LITERAL.search(prompt):
@@ -97,20 +114,40 @@ def selftest():
     r = instruction_for("fix the login bug in src/auth.py and add a test")
     check("substantive -> rate", r is not None and "one-line rating (X/10)" in r)
 
-    # main() integration: off-switch silences even a substantive prompt
+    # [P13 C2] non-string payload shapes must be survivable, not fatal
+    for bad in (None, 5, {"a": 1}, [], [{"type": "image"}]):
+        try:
+            r = instruction_for(bad)
+        except Exception as e:
+            fails.append(f"instruction_for({bad!r}) raised {e!r}")
+        else:
+            check(f"non-string prompt {bad!r} -> None", r is None)
+    r = instruction_for([{"type": "text", "text": "fix the login bug and add a test"}])
+    check("content-block prompt is read, not dropped",
+          r is not None and "one-line rating (X/10)" in r)
+
+    # main() integration: off-switch silences even a substantive prompt.
+    # [P13 C3] The OK/FAIL lines of these two checks used to be written into the StringIO that
+    # stdout was redirected to, so the only two integration checks in this selftest reported
+    # nothing at all - a failure here was invisible except as a count at the very end.
     _real_in, _real_out = sys.stdin, sys.stdout
     try:
         os.environ["CLAUDE_RATE_PROMPTS"] = "off"
         sys.stdin = io.StringIO(json.dumps({"prompt": "fix the parser"}))
         sys.stdout = io.StringIO()
         main()
-        check("off-switch -> no output", sys.stdout.getvalue() == "")
+        _off_output = sys.stdout.getvalue()
+        sys.stdout = _real_out
+        check("off-switch -> no output", _off_output == "")
+        sys.stdout = io.StringIO()
         # on: substantive prompt emits the rate instruction
         os.environ.pop("CLAUDE_RATE_PROMPTS", None)
         sys.stdin = io.StringIO(json.dumps({"prompt": "fix the parser bug and confirm"}))
         sys.stdout = io.StringIO()
         main()
-        check("on -> emits instruction", "one-line rating (X/10)" in sys.stdout.getvalue())
+        _on_output = sys.stdout.getvalue()
+        sys.stdout = _real_out
+        check("on -> emits instruction", "one-line rating (X/10)" in _on_output)
     finally:
         sys.stdin, sys.stdout = _real_in, _real_out
 

@@ -289,7 +289,16 @@ def check_config(cfg: dict) -> tuple[int, list[str]]:
                     problems.append(f"{event}: a hook entry is not an object")
                     continue
                 n_cmd += 1
-                command = (h.get("command", "") or "").strip()
+                # [P13 C5] `(x or "")` only rescues FALSY values, so None/0/[] fell through
+                # to the empty-command message but a dict, a list or an int hit .strip() and
+                # took the whole report down. Report the entry, keep the report.
+                raw_command = h.get("command", "")
+                if raw_command is not None and not isinstance(raw_command, str):
+                    problems.append(f"{event}: hook 'command' is "
+                                    f"{type(raw_command).__name__}, not a string - this entry "
+                                    f"cannot be validated")
+                    continue
+                command = (raw_command or "").strip()
                 if not command:
                     problems.append(f"{event}: empty hook command")
                     continue
@@ -366,15 +375,32 @@ def _same_file(a: str, b: str) -> bool:
 
 
 def _iter_hook_commands(cfg: dict):
-    for groups in (cfg.get("hooks") or {}).values():
-        for group in groups or []:
+    """[P13 C4] TOTAL over any settings shape: a malformed sub-tree costs you that sub-tree,
+    never the report. Every container was assumed to be the right type, so a `hooks` value that
+    was a string or a list, a group list that was a dict, or a non-list `args`, raised out of
+    the generator - past check_config's already-computed problem list, past floor_violations and
+    past the weekly-sweep line - and the ENTIRE hook-health report was discarded. A config
+    malformed enough to be worth reporting was the exact config that silenced the reporter."""
+    hooks_cfg = cfg.get("hooks") if isinstance(cfg, dict) else None
+    if not isinstance(hooks_cfg, dict):
+        return
+    for groups in hooks_cfg.values():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
             if not isinstance(group, dict):
                 continue
-            for hook in group.get("hooks", []) or []:
+            entries = group.get("hooks")
+            if not isinstance(entries, list):
+                continue
+            for hook in entries:
                 if not isinstance(hook, dict):
                     continue
-                parts = [hook.get("command") or ""]
-                parts += [a for a in (hook.get("args") or []) if isinstance(a, str)]
+                cmd = hook.get("command")
+                parts = [cmd] if isinstance(cmd, str) else []
+                args = hook.get("args")
+                if isinstance(args, (list, tuple)):
+                    parts += [a for a in args if isinstance(a, str)]
                 for part in parts:
                     yield part
 
@@ -431,6 +457,40 @@ def main() -> int:
     else:
         print(f"[hook-health] OK - {n_cmd} hook commands verified{weekly_note}")
     return 0
+
+
+def _selftest_malformed_config() -> list:
+    """[P13 C4/C5] A malformed sub-tree must cost that sub-tree, never the whole report."""
+    fails = []
+    shapes = [
+        {"hooks": "not-a-dict"},
+        {"hooks": ["not-a-dict"]},
+        {"hooks": {"Stop": "not-a-list"}},
+        {"hooks": {"Stop": {"not": "a list"}}},
+        {"hooks": {"Stop": [{"hooks": "not-a-list"}]}},
+        {"hooks": {"Stop": [{"hooks": [{"command": {"a": 1}}]}]}},
+        {"hooks": {"Stop": [{"hooks": [{"command": 42, "args": "not-a-list"}]}]}},
+        {"hooks": {"Stop": [{"hooks": [{"command": None}]}]}},
+        {"hooks": None},
+        "not-a-dict-at-all",
+    ]
+    for shape in shapes:
+        try:
+            list(_iter_hook_commands(shape))
+        except Exception as e:
+            fails.append("_iter_hook_commands raised on %r: %r - one bad sub-tree discards "
+                         "the entire hook-health report" % (shape, e))
+    # a non-string command must be REPORTED, not merely survived: surviving in silence still
+    # leaves the malformed entry unmentioned, which is half the defect.
+    bad = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": 42}]}]}}
+    try:
+        n_cmd, problems = check_config(bad)
+    except Exception as e:
+        fails.append("check_config raised on a non-string command: %r" % (e,))
+    else:
+        if not any("not a string" in str(p_) for p_ in problems):
+            fails.append("a non-string hook command was not reported: %r" % (problems,))
+    return fails
 
 
 def selftest() -> int:
@@ -674,6 +734,7 @@ def selftest() -> int:
             fails.append("completed sweep did not write the marker")
         if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
             fails.append("progress file not cleared after a completed sweep")
+    fails += _selftest_malformed_config()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")
