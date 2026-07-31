@@ -36,10 +36,21 @@ Each transcript line is JSON with a 'type' field ('user'/'assistant'/
 list of blocks ({'type':'text'|'tool_use'|'tool_result'|'thinking'}).
 Unknown types, malformed lines, and sidechain (subagent) entries are skipped.
 Synthetic user entries (e.g. '<task-notification>...') are not treated as
-real prompts.
+real prompts - via the SHARED classifier in transcript_util, which close_skills_guard
+also uses. Two hooks answering "is this the user speaking?" with two separately-wrong
+implementations was itself the defect.
 """
 
 from __future__ import annotations
+
+import os as _os
+import sys as _sys
+
+_HOOKS_DIR = _os.path.dirname(_os.path.abspath(__file__))
+if _HOOKS_DIR not in _sys.path:
+    _sys.path.insert(0, _HOOKS_DIR)
+
+import transcript_util  # noqa: E402  (path set above)
 
 import json
 import os
@@ -80,14 +91,10 @@ NEGATION_TOKENS = ("not ", "n't ", "never ", "cannot ", "unable ", "without ", "
 NEGATION_WINDOW_CHARS = 20
 
 # Plain-string user entries starting with these are synthetic, not real prompts.
-META_PROMPT_PREFIXES = (
-    "<task-notification>",
-    "<system-reminder>",
-    "<local-command",
-    "<command-name>",
-    "<bash-input>",
-    "<bash-stdout>",
-)
+# The prefix list lives in transcript_util.SYNTHETIC_PREFIXES - deliberately NOT here. This
+# hook's copy covered six tags and close_skills_guard's covered a different twelve; the union
+# plus three found in real transcripts is now in one place, and transcript_util's selftest
+# fails if a second list reappears anywhere in hooks/.
 
 FIRE_MESSAGE_TEMPLATE = (
     "[show-your-proof] The last reply claims success ('{phrase}') but this "
@@ -152,24 +159,15 @@ def is_real_user_prompt(entry):
     Real = 'user' type whose content is a plain string (not a known meta tag)
     or a block list containing a 'text' block and NO 'tool_result' block.
     """
-    if entry.get("type") != "user":
-        return False
-    content = get_content(entry)
-    if isinstance(content, str):
-        stripped = content.lstrip()
-        return not stripped.lower().startswith(META_PROMPT_PREFIXES)
-    if isinstance(content, list):
-        has_text = False
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type == "tool_result":
-                return False
-            if block_type == "text":
-                has_text = True
-        return has_text
-    return False
+    # Delegates to the SHARED classifier. The version this replaces applied
+    # META_PROMPT_PREFIXES only to the plain-STRING branch; the list branch accepted any block
+    # list containing a text block and checked neither isMeta nor sourceToolUseID. Measured
+    # across 139 transcripts (28,396 user entries): 288 harness injections arrive as LIST
+    # content and 266 were accepted as real prompts. Each one truncates the turn at the wrong
+    # place, so the hook counts the tools of a fragment - four verified stop-points would have
+    # fired "this turn ran no tools" at turns that ran 1-6 tools, and three transcripts
+    # selected this hook's OWN fed-back stderr as the user prompt.
+    return transcript_util.is_genuine_user(entry)
 
 
 def count_tool_uses(entries):

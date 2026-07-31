@@ -617,3 +617,98 @@ The first review found 34 defects in code written normally. This review found 11
 a property does not make the tool have that property. `check_review_freshness.py` shipped with the
 exact "unanswerable collapses to pass" defect it exists to prevent, in the same commit that fixed
 that defect elsewhere.
+
+## P9 - item 45: the eight never-reviewed hooks (run `wf_3355090a-59e`, 2026-07-30)
+
+21 agents, 4 lenses, 16 raw findings - **all 16 survived refutation** (none refuted, which is
+itself a signal: these files had never been looked at adversarially). Deduped to 13 confirmed
+defects across 5 files. The three dispatcher/health files came back CLEAN.
+
+| File | Confirmed | Worst |
+|---|---|---|
+| `numbers_match_on_write.py` | 6 | HIGH |
+| `memory_hygiene_guard.py` | 3 | HIGH |
+| `meta_audit_on_stop.py` | 2 | MEDIUM |
+| `show_your_proof.py` | 1 | HIGH |
+| `plan_defer_guard.py` | 1 | MEDIUM |
+| `post_tooluse_dispatcher.py`, `stop_dispatcher.py`, `hook_health_check.py` | 0 | clean |
+
+### FIXED
+
+- **H1 `numbers_match_on_write` ref-prefix regex had no LEFT word boundary.** `.search()`ed
+  against the 24 chars before every number, it matched the TAIL of any word: "p" swallowed
+  `drop 0.85 kPa`, "no" swallowed `each 3.75 mm`, "v" swallowed `rev 1.75 s`. 35 of 38 common
+  technical words hid the number after them, so a report of fabricated figures extracted ZERO
+  cited numbers and passed clean. `(?<![A-Za-z])` added; `Figure 3` / `Table 2` / `eq. 4` still
+  skipped, asserted both ways.
+- **H2 a report inside a source dir was its own evidence.** `SOURCE_EXTS` includes `.md` and
+  PostToolUse runs AFTER the write, so the fabricated number was in the index it was checked
+  against. Worse, the index is SHARED: one fabricated `.md` in the source tree exempted that
+  value for every report in the project. The report under check and everything matching the
+  `reports` globs are now excluded, and the exclusion is folded into the cache key.
+- **H3 `parse_config` did not strip trailing `#` comments.** The module's OWN documented
+  config, pasted verbatim, produced a source path of `data  # dirs/files (relative to...`, a
+  reports glob that can never match, `tol` silently reverting to the default, and
+  `check_integers=False` where the user wrote `true`. No template ships, so the broken form was
+  the only form a user could copy. The docstring config is now a test fixture.
+- **H4 `memory_hygiene_guard.sanitize_cwd` implemented 3 of Claude Code's replacements.** Ground
+  truth is `replace(/[^a-zA-Z0-9]/g,"-")` plus a 200-char truncate+hash. Any project path with
+  a `_`, `.`, space, or over 200 chars resolved to a directory that does not exist, so the hook
+  returned 0 on every Stop - permanently, silently. It worked on the author's machine and did
+  nothing for anyone else. Now matches the real rule, and an unlocatable memory dir reports
+  INCONCLUSIVE instead of passing.
+- **H5 `memory_hygiene_guard.main()` had zero end-to-end coverage.** Three disabling mutations
+  (`return 2`->`return 0`, `if not findings:`->`if True:`, dropping sanitize_cwd) each printed
+  `memory_hygiene_guard: OK` under the full suite. It was the only Stop hook with no end-to-end
+  path. `_selftest_main` now drives it through a temp projects root.
+- **H6 `show_your_proof` accepted harness injections as real prompts - a TWIN of finding 17.**
+  Its prefix list applied ONLY to the plain-string branch; the list branch accepted any block
+  list with a text block and checked neither `isMeta` nor `sourceToolUseID`. Measured across
+  139 transcripts / 28,396 user entries: 288 injections arrive as list content, **266 were
+  accepted**, truncating the turn so the hook counted a fragment's tools - four verified
+  stop-points would have fired "this turn ran no tools" at turns that ran 1-6 tools, and three
+  transcripts selected this hook's OWN fed-back stderr as the prompt.
+  **Fixed generally, not twice:** `hooks/transcript_util.py` is now the single classifier, and
+  close_skills_guard imports it too. Both hooks' prefix lists are deleted; the shared module's
+  selftest FAILS if a second list or classifier reappears anywhere in `hooks/`.
+- **M6 `meta_audit_on_stop`'s twin guard could not fail - and I wrote it hours earlier.**
+  `if "fast_test.is_git_worktree" not in src` greps the module's own source for a literal that
+  appears *inside the assertion*, so it was present four times and three survived deleting the
+  production call. The review mutation-tested it: swapping the probe for `.gitx` still printed
+  SELFTEST OK. Replaced with a BEHAVIOURAL check - the shared probe is swapped for a recorder
+  and the production path must actually call it. Pinned by mutation `M6`, which the regex
+  cannot see.
+
+### OPEN - scheduled, not deferred
+
+- **M1 `numbers_match_on_write`** - a typo'd `sources = reslts` yields an empty index, hits
+  `if not values: return 0, ""`, and the EMPTY index is cached under the SHA-1 of the empty
+  string, so later edits re-read it. A broken config is indistinguishable from opt-out. Fix:
+  when `find_config` succeeds but sources resolve to nothing, say so once per session and do
+  not cache an empty index.
+- **M2 `numbers_match_on_write`:234** - `run()` breaks at MAX_BULLETS then reports
+  `len(findings)` as the total: 40 unmatched numbers are announced as "12", with no truncation
+  notice, and the marker then suppresses the hook for the session. `memory_hygiene_guard`
+  already does this correctly - copy it.
+- **M3 `numbers_match_on_write`:213** - line numbers via `text.count("\n", 0, start)` per match
+  is O(numbers x filesize), and MAX_FILE_BYTES guards only SOURCE files. Measured 875 KB =
+  25.2 s, 3.5 MB = killed at 120 s; a killed hook reads as rc 0, so the check is both blocking
+  and not performed. Fix: bisect over precomputed newline offsets (3.5 MB -> 1.76 s) and cap
+  the report read.
+- **M4 `memory_hygiene_guard`:113** - the quarantine latch opens on ANY line containing
+  "historical" and re-arms only on a literal `## `. 53 of 63 real memory files have no `## `
+  heading at all, so one ordinary bullet would suppress the rest of the file for 84% of them.
+  Latent: 0/63 currently contain a trigger word. Fix: only consult QUARANTINE_RE on heading
+  lines; re-arm on any heading of the same or shallower depth.
+- **M5 `plan_defer_guard`:157** - the once-per-session marker is keyed by session alone, but
+  unlike meta_audit this hook scans ONE file per invocation. After firing on MASTER_PLAN.md,
+  editing ROADMAP.md with three optional-forever markers returns `(0, "")` without opening it.
+  `numbers_match_on_write.marker_path` already keys by (session, report) with this exact
+  rationale in its docstring. Fix: key by `(session_id, sha1(abspath(path)))`.
+
+### What this run says about the other numbers in this file
+
+The first review found 34 defects in six units. This one found 13 in eight units that had
+never been reviewed - including one HIGH (H6) that is the exact twin of a finding already fixed
+in a sibling hook, and one (M6) in a guard written earlier the same day specifically to prevent
+twins. "Never reviewed" was doing a lot of quiet work in this repo's health story.

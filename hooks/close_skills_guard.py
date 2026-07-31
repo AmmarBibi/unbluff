@@ -26,6 +26,14 @@ import os
 import subprocess
 import sys
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+# ONE classifier for "is this the user speaking?" - show_your_proof imports the same
+# module. Two implementations of one rule is what produced both hooks' defects.
+import transcript_util  # noqa: E402  (path set above)
+
 HOOK_NAME = "close_skills_guard"
 TARGET_BASENAME = "next_session_prompt.md"           # matched case-insensitively
 REQUIRED_SKILLS = ("consistency-audit", "completeness-audit", "source-coverage", "meta-review")
@@ -64,83 +72,26 @@ def _iter_entries(transcript_path: str):
         return
 
 
-# Text the HARNESS writes into a role=user entry. None of it is the user speaking, and each one
-# wrongly reset the detection window - telling Claude to re-run four expensive audit skills
-# after a correct close, and looping if another injection arrived during that stretch.
-_SYNTHETIC_PREFIXES = (
-    "[Request interrupted",
-    "<command-name>", "<command-message>", "<command-args>", "<local-command-",
-    "<system-reminder>", "<task-notification>", "<bash-input>", "<bash-stdout>",
-    "<bash-stderr>", "Caveat:", "This session is being continued",
-)
-
-
-def _first_text(content) -> str | None:
-    """The first text in this content, or None if it carries none.
-
-    Scans ANY text block rather than content[0]. A prompt that leads with a pasted IMAGE has
-    content [{image}, {text}], so the content[0] test read it as "not a user message" - the
-    window never reset and the guard passed silently. usage_snip_prompt.py asks the user for a
-    screenshot, so the two v1.3.0 hooks interlocked: the guard went blind on exactly the turn
-    the other one requests. Verified against real transcripts.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text")
-                if isinstance(text, str):
-                    return text
-    return None
-
-
-def _is_synthetic(content) -> bool:
-    text = _first_text(content)
-    return text is not None and text.lstrip().startswith(_SYNTHETIC_PREFIXES)
+# NOTE: this hook deliberately keeps NO prefix list and NO _first_text of its own. It had
+# both, show_your_proof had a different pair, and each was wrong in a way the other was not.
+# The list lives in transcript_util.SYNTHETIC_PREFIXES; transcript_util's selftest fails if a
+# second one reappears anywhere in hooks/.
 
 
 def _is_genuine_user(entry) -> bool:
-    """True iff this entry is the USER speaking - not a tool_result, not a harness injection.
+    """True iff this entry is the USER speaking - the SHARED classifier.
 
-    Two-tier by measurement, not by taste. Across 138 real transcripts the harness marks
-    genuine prompts with `origin: {"kind": "human"}` (396 of them) and background injections
-    with other kinds (150 task-notification) or isMeta (72). Where `origin` is present it is
-    authoritative. But 49 entries carried NO origin at all, and 12 of those were genuine
-    prompts ("continue", "yes go ahead") - so keying ONLY on origin would reject real user
-    turns and fire the guard after a correct close. Hence origin first, shape second.
+    Measured, not assumed. Across 138 real transcripts the harness marks genuine prompts with
+    `origin: {"kind": "human"}` (396) and background injections with other kinds (150
+    task-notification) or isMeta (72) - but 49 entries carried NO origin at all and 12 of those
+    were genuine prompts, so origin alone cannot decide it. And origin cannot be checked FIRST
+    either: the harness stamps kind=human on reminders a human indirectly caused.
+
+    show_your_proof asked the identical question with a different, separately-wrong answer, so
+    the rule now lives in transcript_util and both hooks import it. See that module for the
+    order of the tests and why each one is load-bearing.
     """
-    if not isinstance(entry, dict):
-        return False
-    if entry.get("isMeta") or entry.get("sourceToolUseID"):
-        return False
-    msg = entry.get("message")
-    if not isinstance(msg, dict):
-        msg = entry
-    if msg.get("role") != "user":
-        return False
-    content = msg.get("content")
-
-    # The synthetic filter runs FIRST, ahead of the origin shortcut. `origin.kind == "human"`
-    # is not proof that the USER typed this: the harness stamps it on injections a human
-    # indirectly caused, e.g. `<system-reminder>The user started your suggested background
-    # task task_...`. Five such entries exist in this user's own transcripts. With the origin
-    # check first, that returned True, ended the detection window, and made a CORRECT close
-    # (all four skills invoked) exit 2 demanding all four be re-run - the guard's original
-    # unsatisfiable failure mode, reintroduced through the field meant to prevent it. Every
-    # class-17 fixture paired synthetic text with a missing or non-human origin, so the suite
-    # reported OK throughout.
-    if _is_synthetic(content):
-        return False
-
-    origin = entry.get("origin")
-    if isinstance(origin, dict) and origin.get("kind"):
-        # Authoritative for entries that are not already known-synthetic: 'human' is the user,
-        # every other kind is the harness. A future kind is excluded by default - the safe way.
-        return origin.get("kind") == "human"
-
-    # A tool_result or an image-only entry has no text at all and is not a prompt.
-    return _first_text(content) is not None
+    return transcript_util.is_genuine_user(entry)
 
 
 def _skills_invoked(entry: dict) -> set[str]:
@@ -409,6 +360,15 @@ def selftest() -> int:
             # paired synthetic text with a missing or non-human origin, so the suite said OK.
             # Verified against 5 real entries in the user's own transcripts.
             ([_human("continue"), *all4, _human_system_reminder()], "human-stamped reminder"),
+            # isMeta as the ONLY signal: plain text, no recognisable prefix, no origin. The
+            # structural marker has to stand on its own, because the prefix list can only ever
+            # cover injections whose wording someone has already seen. Every other injection
+            # fixture here starts with a known tag, so without this case the isMeta check was
+            # untested - deleting it left the whole suite green.
+            ([_human("continue"), *all4,
+              {"isMeta": True, "message": {"role": "user",
+                                           "content": "Proceed with the remaining work."}}],
+             "isMeta injection with unrecognised wording"),
         ):
             code, msg = _verdict(entries, label)
             if code != 0:

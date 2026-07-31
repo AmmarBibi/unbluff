@@ -267,9 +267,33 @@ def _selftest_repo_probe() -> list:
         fails.append("meta_audit has its own .git probe again (%r) - call "
                      "fast_test.is_git_worktree instead; two probes for one question is the "
                      "defect" % (private_probe.group(0)[:60],))
-    if "fast_test.is_git_worktree" not in src:
-        fails.append("meta_audit no longer calls the shared repo probe")
-    # and it must actually work for the cases the private probes got wrong
+    # BEHAVIOURAL, not textual. The previous check was `if "fast_test.is_git_worktree" not in
+    # src` - and that literal appears in the assertion itself, so the string was present four
+    # times and three survived deleting the production call. Mutation-tested by the review:
+    # replacing the real probe with `os.path.exists(os.path.join(cwd, ".gitx"))` still printed
+    # SELFTEST OK. A test that greps for a string it itself contains cannot fail.
+    #
+    # Instead: replace the shared probe with a recorder and require the production path to
+    # actually call it. No comment, docstring or spelling variant can satisfy this.
+    called = []
+    real_probe = fast_test.is_git_worktree
+
+    def _recording_probe(cwd):
+        called.append(cwd)
+        return False
+
+    fast_test.is_git_worktree = _recording_probe
+    try:
+        count_unpushed(os.path.dirname(os.path.abspath(__file__)))
+    except Exception as exc:
+        fails.append(f"count_unpushed raised while probing: {exc!r}")
+    finally:
+        fast_test.is_git_worktree = real_probe
+    if not called:
+        fails.append("count_unpushed does not call the SHARED repo probe - it has grown its "
+                     "own again, which is the twin this check exists to prevent")
+
+    # and the shared probe must handle the case both private ones got wrong
     if not fast_test.is_git_worktree(os.path.dirname(os.path.abspath(__file__))):
         fails.append("shared probe says a SUBDIRECTORY of this repo is not a work tree")
     return fails

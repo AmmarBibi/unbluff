@@ -72,10 +72,17 @@ _UNIT_RE = re.compile(
     r"kPa|MPa|Pa|kW|mW|W\b|kV|mV|V\b|mA|A\b|x\b|X\b"
     r")"
 )
+# The (?<![A-Za-z]) is LOAD-BEARING. Without a left word boundary this alternation is
+# .search()ed against the 24 characters before every number and matches the TAIL of any word:
+# "p" swallows "drop 0.85 kPa", "no" swallows "each 3.75 mm", "v" swallows "rev 1.75 s",
+# "q" swallows "group 7.25 kg". 35 of 38 common technical words hid the number that followed,
+# so a report whose only figures were fabricated extracted ZERO cited numbers and the hook
+# returned a clean pass. Still skips "see Figure 3", "Table 2", "eq. 4", "p. 7".
 _REF_PREFIX_RE = re.compile(
+    r"(?<![A-Za-z])"
     r"(?:figure|fig|table|tbl|section|sect|sec|equation|eqn|eq|chapter|chap|ch|appendix|"
     r"app|reference|ref|step|stage|part|phase|question|q|item|version|v|no|number|num|"
-    r"line|page|pg|p|slide|footnote|note|eq\.)\.?\s*$",
+    r"line|page|pg|p|slide|footnote|note)\.?\s*$",
     re.IGNORECASE,
 )
 _TOKEN_RE = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?")
@@ -115,6 +122,13 @@ def parse_config(text: str) -> dict:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
+        # Strip a TRAILING comment too. Only a leading '#' was treated as a comment, so the
+        # module's own documented example - `sources = results, data  # dirs/files ...` -
+        # parsed into source paths of "data  # dirs/files (relative to .claude's parent" and
+        # "or absolute)", a reports glob that can never match, tol silently reverting to the
+        # default, and check_integers=False where the user wrote true. No template ships, so
+        # the documented form was the only form a user could copy.
+        val = val.split("#", 1)[0]
         key, val = key.strip().lower(), val.strip()
         if key == "sources":
             cfg["sources"] = [p.strip() for p in val.split(",") if p.strip()]
@@ -134,13 +148,24 @@ def parse_config(text: str) -> dict:
 # Source index + number extraction (mechanical)
 # --------------------------------------------------------------------------- #
 
-def index_sources(dirs: "list[str]", root: str) -> "list[float]":
-    """Sorted unique numeric values across the configured source dirs/files."""
+def index_sources(dirs: "list[str]", root: str, exclude=()) -> "list[float]":
+    """Sorted unique numeric values across the configured source dirs/files.
+
+    `exclude` holds absolute paths that must NOT be indexed - in practice the report under
+    check and anything else the config calls a report. SOURCE_EXTS includes ".md" and
+    PostToolUse runs AFTER the write, so a report living inside a configured source dir was
+    indexed as its own evidence: every fabricated number matched itself and the hook returned
+    a clean pass. The index is also SHARED, so one fabricated .md left in the source tree
+    silently exempted that value for every report in the project.
+    """
+    skip = {os.path.normcase(os.path.abspath(p)) for p in exclude}
     values = set()
     for entry in dirs:
         path = entry if os.path.isabs(entry) else os.path.join(root, entry)
         files = [path] if os.path.isfile(path) else _walk_source_files(path)
         for fpath in files:
+            if os.path.normcase(os.path.abspath(fpath)) in skip:
+                continue
             try:
                 if os.path.getsize(fpath) > MAX_FILE_BYTES:
                     continue
@@ -250,18 +275,24 @@ def marker_path(state_dir: str, session_id, report_path: str = "") -> str:
     return os.path.join(state_dir, "%s-%s-%s.done" % (HOOK_NAME, sid, tag))
 
 
-def _cached_index(sources: "list[str]", root: str, state_dir: str) -> "list[float]":
+def _cached_index(sources: "list[str]", root: str, state_dir: str,
+                  exclude=()) -> "list[float]":
     """index_sources with a small on-disk cache keyed by source paths + mtimes (fail-silent).
 
     A clean report re-runs the hook on every edit; without a cache each edit re-reads and
     re-parses the whole source tree. The cache is invalidated automatically when any source
     file's mtime changes, and stale cache files are pruned so state_dir does not grow.
     """
+    _skip = {os.path.normcase(os.path.abspath(p)) for p in exclude}
     try:
-        parts = []
+        # The exclusion is folded into the cache KEY: two reports in the same source tree
+        # exclude different files, so they must not share a cached index.
+        parts = ["exclude:" + "|".join(sorted(_skip))]
         for entry in sources:
             p = entry if os.path.isabs(entry) else os.path.join(root, entry)
             for f in ([p] if os.path.isfile(p) else _walk_source_files(p)):
+                if os.path.normcase(os.path.abspath(f)) in _skip:
+                    continue
                 try:
                     st = os.stat(f)
                     # nanosecond mtime + size: a sub-second content change (same whole
@@ -278,7 +309,7 @@ def _cached_index(sources: "list[str]", root: str, state_dir: str) -> "list[floa
                 return [float(v) for v in cached]
         except (OSError, ValueError):
             pass
-        values = index_sources(sources, root)
+        values = index_sources(sources, root, exclude)
         try:
             os.makedirs(state_dir, exist_ok=True)
             for old in glob.glob(os.path.join(state_dir, "%s-index-*.json" % HOOK_NAME)):
@@ -320,7 +351,15 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
             report_text = fh.read()
     except OSError:
         return 0, ""
-    values = _cached_index(cfg["sources"], root, state_dir)
+    # Exclude the report under check AND every other file the config calls a report: a
+    # report is never evidence for itself, and a poisoned index is shared by all of them.
+    excluded = [path]
+    for entry in cfg["sources"]:
+        base = entry if os.path.isabs(entry) else os.path.join(root, entry)
+        for cand in ([base] if os.path.isfile(base) else _walk_source_files(base)):
+            if is_report_file(cand, cfg["reports"]):
+                excluded.append(cand)
+    values = _cached_index(cfg["sources"], root, state_dir, excluded)
     if not values:
         return 0, ""
     findings = []
@@ -454,8 +493,76 @@ def _selftest_pipeline() -> "list[str]":
     return fails
 
 
+def _selftest_item45() -> list:
+    """H1/H2/H3 from the 2026-07-30 review of the never-reviewed hooks."""
+    import tempfile
+    fails = []
+
+    # H1: _REF_PREFIX_RE had no LEFT word boundary, so it matched the tail of any word and
+    # swallowed the number after it. 35 of 38 common technical words hid their number, which
+    # means a report of fabricated figures extracted nothing and passed clean.
+    for phrase, want in (("drop 0.85 kPa", True), ("up 12.5%", True), ("each 3.75 mm", True),
+                         ("group 7.25 kg", True), ("gap 0.25 mm", True), ("rev 1.75 s", True),
+                         ("slope 0.42 rad", True), ("stop 3.5 s", True),
+                         # genuine cross-references must STILL be skipped - `step` is one of
+                         # them ("Step 2"), so a number right after it is correctly ignored.
+                         ("see Figure 3", False), ("Table 2", False), ("eq. 4", False),
+                         ("p. 7", False), ("Section 5", False), ("v 2", False),
+                         ("step 2", False)):
+        got = bool(cited_numbers(phrase, False))
+        if got != want:
+            fails.append("H1 ref-prefix: %r should%s yield a cited number, got %s"
+                         % (phrase, "" if want else " NOT", got))
+
+    # H3: a TRAILING comment must not become part of the value. The module's own documented
+    # config is the fixture, verbatim - it was unparseable by its own parser.
+    cfg = parse_config("sources = results, data            # dirs/files (relative)\n"
+                       "reports = *REPORT*.md              # optional basename globs\n"
+                       "tol = 0.05                         # optional relative tolerance\n"
+                       "check_integers = true              # optional; default off\n")
+    if cfg["sources"] != ["results", "data"]:
+        fails.append("H3 config: trailing comment leaked into sources: %r" % (cfg["sources"],))
+    if cfg["reports"] != ["*REPORT*.md"]:
+        fails.append("H3 config: trailing comment leaked into reports: %r" % (cfg["reports"],))
+    if abs(cfg["tol"] - 0.05) > 1e-9:
+        fails.append("H3 config: tol silently reverted to the default: %r" % (cfg["tol"],))
+    if cfg["check_integers"] is not True:
+        fails.append("H3 config: check_integers=true was not honoured")
+
+    # H2: a report living INSIDE a configured source dir must not be its own evidence.
+    # SOURCE_EXTS includes .md and PostToolUse runs after the write, so it indexed itself.
+    with tempfile.TemporaryDirectory() as td:
+        root = os.path.join(td, "proj")
+        results = os.path.join(root, "results")
+        os.makedirs(results, exist_ok=True)
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+        with open(os.path.join(root, ".claude", CONFIG_NAME), "w", encoding="utf-8") as fh:
+            fh.write("sources = results\nreports = *report*.md\n")
+        with open(os.path.join(results, "sweep.csv"), "w", encoding="utf-8") as fh:
+            fh.write("run,val\n1,10.0\n2,20.0\n")
+        report = os.path.join(results, "RESULTS_report.md")
+        with open(report, "w", encoding="utf-8") as fh:
+            fh.write("The measured stress was 512.4 MPa across the sweep.\n")
+        state = os.path.join(td, "state")
+        code, msg = run({"tool_input": {"file_path": report}, "cwd": root,
+                         "session_id": "h2"}, state)
+        if code != 2 or "512.4" not in msg:
+            fails.append("H2: a report inside a source dir validated against ITSELF - "
+                         "fabricated 512.4 passed (code=%s msg=%r)" % (code, msg[:120]))
+        # and a second report must not be exempted by the first one's presence in the tree
+        report2 = os.path.join(results, "other_report.md")
+        with open(report2, "w", encoding="utf-8") as fh:
+            fh.write("A different fabricated value: 512.4 MPa again.\n")
+        code2, msg2 = run({"tool_input": {"file_path": report2}, "cwd": root,
+                           "session_id": "h2b"}, state)
+        if code2 != 2 or "512.4" not in msg2:
+            fails.append("H2: one fabricated report in the source tree exempted its value "
+                         "for every OTHER report (code=%s msg=%r)" % (code2, msg2[:120]))
+    return fails
+
+
 def selftest() -> int:
-    fails = _selftest_units() + _selftest_pipeline()
+    fails = _selftest_units() + _selftest_pipeline() + _selftest_item45()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

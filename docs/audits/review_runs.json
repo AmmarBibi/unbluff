@@ -264,5 +264,131 @@
     "findings": 16,
     "confirmed": 11,
     "utc": "2026-07-30T11:26:48+00:00"
+  },
+  {
+    "unit": "hooks/rate_prompt.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/show_your_proof.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/meta_audit_on_stop.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/memory_hygiene_guard.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/stop_dispatcher.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/plan_defer_guard.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/post_tooluse_dispatcher.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/numbers_match_on_write.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
+  },
+  {
+    "unit": "hooks/transcript_util.py",
+    "run_id": "wf_3355090a-59e",
+    "lenses": [
+      "silent-failure",
+      "cross-platform",
+      "test-quality",
+      "adversarial-input"
+    ],
+    "agents": 21,
+    "findings": 16,
+    "confirmed": 13,
+    "utc": "2026-07-31T11:01:37+00:00"
   }
 ]

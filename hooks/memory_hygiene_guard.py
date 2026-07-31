@@ -76,9 +76,53 @@ FOOTER = (
 )
 
 
+PROJECT_DIR_MAX = 200   # Claude Code truncates at 200, then appends "-" + a hash of the input
+
+
 def sanitize_cwd(cwd: str) -> str:
-    """Replicate Claude Code's project-dir sanitization: ':' '\\' '/' -> '-'."""
-    return cwd.replace(":", "-").replace("\\", "-").replace("/", "-")
+    """Replicate Claude Code's project-dir sanitization.
+
+    Ground truth from the shipped binary:
+        replace(/[^a-zA-Z0-9]/g, "-"); if len <= 200 return it; else slice(0,200)+"-"+hash
+
+    The previous version replaced only ':' '\\' and '/', and implemented no truncation at all.
+    Any project path containing an underscore, a dot, a space, or exceeding 200 sanitized
+    characters therefore resolved to a directory that does not exist, os.path.isdir failed,
+    and main() returned 0 on every Stop - permanently, silently, indistinguishable from
+    "this project's memory is clean". Reproduced: `my_project` returned 0 with seeded rot
+    while `Downloads\\Claude` returned 2 - which is exactly why it looked healthy on the
+    author's machine and did nothing for anyone whose path holds a `_`, `.` or space.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
+    return sanitized if len(sanitized) <= PROJECT_DIR_MAX else sanitized[:PROJECT_DIR_MAX]
+
+
+def resolve_memory_dir(projects_root: str, cwd: str):
+    """(memory_dir, reason) - reason is None on success, else why it could not be located.
+
+    The >200-char case appends "-<hash>" after the slice and that hash is not reproducible
+    here, so it is resolved by PREFIX MATCH and only when the candidate is unique. Returning a
+    reason instead of a path is what lets main() say "could not locate" rather than pass
+    silently: a directory that cannot be found is an unanswered question, not a clean tree.
+    """
+    exact = os.path.join(projects_root, sanitize_cwd(cwd), "memory")
+    if os.path.isdir(exact):
+        return exact, None
+    full = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
+    if len(full) <= PROJECT_DIR_MAX:
+        return None, f"no memory dir for this project at {exact}"
+    prefix = sanitize_cwd(cwd) + "-"
+    try:
+        names = [n for n in os.listdir(projects_root) if n.startswith(prefix)]
+    except OSError as exc:
+        return None, f"cannot read {projects_root} ({exc})"
+    if len(names) != 1:
+        return None, (f"{len(names)} candidate project dirs match the truncated name "
+                      f"{prefix!r}; refusing to guess")
+    candidate = os.path.join(projects_root, names[0], "memory")
+    if not os.path.isdir(candidate):
+        return None, f"no memory dir at {candidate}"
+    return candidate, None
 
 
 def _snippet(line: str) -> str:
@@ -175,8 +219,20 @@ def main() -> int:
     if not isinstance(cwd, str) or not cwd:
         return 0
     projects_root = os.environ.get("UNBLUFF_PROJECTS_ROOT") or DEFAULT_PROJECTS_ROOT
-    memory_dir = os.path.join(projects_root, sanitize_cwd(cwd), "memory")
-    if not os.path.isdir(memory_dir):
+    memory_dir, why = resolve_memory_dir(projects_root, cwd)
+    if memory_dir is None:
+        # INCONCLUSIVE, not clean - but still advisory (exit 0), and said once per session so
+        # it cannot nag. Silence here was the bug: a sanitization mismatch disabled the hook
+        # permanently and looked exactly like a healthy project.
+        if os.path.isdir(projects_root):
+            try:
+                os.makedirs(state_dir, exist_ok=True)
+                with open(marker, "w", encoding="utf-8") as fh:
+                    fh.write("inconclusive\n")
+            except OSError:
+                pass
+            sys.stderr.write(f"[memory-hygiene] could not check this project's memory: {why}. "
+                             f"Nothing was verified.\n")
         return 0
 
     findings = collect_findings(memory_dir)
@@ -259,6 +315,86 @@ def _selftest_collect(check) -> None:
         )
 
 
+def _selftest_main(check) -> None:
+    """[H5] END-TO-END coverage of main(). There was NONE.
+
+    selftest() called only the two pure-function helpers, and stop_dispatcher's own selftest
+    reaches main() but never sets UNBLUFF_PROJECTS_ROOT, so it bailed at the memory-dir check
+    before any logic ran. Three disabling mutations - `return 2` -> `return 0`,
+    `if not findings:` -> `if True:`, and dropping sanitize_cwd - each printed
+    "memory_hygiene_guard: OK" under the full run_selftests.py. The hook worked; nothing
+    verified that it kept working. It was the only Stop hook with no end-to-end path.
+    """
+    import io
+    import tempfile
+
+    def drive(cwd, projects_root, state_dir):
+        real_in, real_err = sys.stdin, sys.stderr
+        real_root = os.environ.get("UNBLUFF_PROJECTS_ROOT")
+        real_state = os.environ.get("UNBLUFF_STATE_DIR")
+        sys.stdin = io.StringIO(json.dumps({"session_id": "mh-test", "cwd": cwd}))
+        sys.stderr = io.StringIO()
+        os.environ["UNBLUFF_PROJECTS_ROOT"] = projects_root
+        os.environ["UNBLUFF_STATE_DIR"] = state_dir
+        try:
+            rc = main()
+            return rc, sys.stderr.getvalue()
+        finally:
+            sys.stdin, sys.stderr = real_in, real_err
+            for key, val in (("UNBLUFF_PROJECTS_ROOT", real_root),
+                             ("UNBLUFF_STATE_DIR", real_state)):
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+
+    with tempfile.TemporaryDirectory() as td:
+        # A path with an underscore, a dot and a space - each of which the old sanitizer got
+        # wrong, silently disabling the hook for every project whose path contains one.
+        cwd = os.path.join(td, "my_project.v2 beta")
+        os.makedirs(cwd, exist_ok=True)
+        root = os.path.join(td, "projects")
+        mem = os.path.join(root, sanitize_cwd(cwd), "memory")
+        os.makedirs(mem, exist_ok=True)
+        with open(os.path.join(mem, "MEMORY.md"), "w", encoding="utf-8") as fh:
+            # Real rot per INDEX_EVOLVING_RE: an index bullet carrying evolving state.
+            fh.write("# Memory Index\n\n- [Thing](thing.md) - NEXT: retry the vendor call; "
+                     "18 tests pass as of today\n")
+
+        state = os.path.join(td, "state1")
+        rc, err = drive(cwd, root, state)
+        check("main() fires on seeded rot in a path with _ . and space (rc 2)", rc == 2)
+        check("main() names itself in the message", "[memory-hygiene]" in err)
+        check("main() wrote the once-per-session marker",
+              os.path.exists(_marker_path(state, "mh-test")))
+        rc2, err2 = drive(cwd, root, state)
+        check("main() is silent on the second call in the same session",
+              rc2 == 0 and err2 == "")
+
+        # a clean memory dir must NOT fire
+        clean_cwd = os.path.join(td, "clean_project")
+        os.makedirs(clean_cwd, exist_ok=True)
+        clean_mem = os.path.join(root, sanitize_cwd(clean_cwd), "memory")
+        os.makedirs(clean_mem, exist_ok=True)
+        with open(os.path.join(clean_mem, "MEMORY.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Memory Index\n\n- [Thing](thing.md) - durable pointer\n")
+        rc3, err3 = drive(clean_cwd, root, os.path.join(td, "state2"))
+        check("main() stays silent on a clean memory dir", rc3 == 0 and err3 == "")
+
+        # [H4] a project whose memory dir cannot be located is INCONCLUSIVE, not clean
+        missing_cwd = os.path.join(td, "nonexistent_project")
+        os.makedirs(missing_cwd, exist_ok=True)
+        rc4, err4 = drive(missing_cwd, root, os.path.join(td, "state3"))
+        check("unlocatable memory dir reports inconclusive rather than passing silently",
+              rc4 == 0 and "could not check" in err4)
+
+    # sanitization must match Claude Code's rule, not a three-character approximation
+    check("sanitize_cwd replaces every non-alphanumeric",
+          sanitize_cwd("C:/a_b.c d/e") == "C--a-b-c-d-e")
+    check("sanitize_cwd truncates at 200",
+          len(sanitize_cwd("x" * 400)) == PROJECT_DIR_MAX)
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -271,6 +407,7 @@ def selftest() -> int:
 
     _selftest_scans(check)
     _selftest_collect(check)
+    _selftest_main(check)
     if failures:
         print(f"SELFTEST: FAILED ({len(failures)} failing check(s))")
         return 1
