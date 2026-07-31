@@ -809,3 +809,79 @@ Extraction into a shared module is not a neutral refactor: HIGH-3 and MEDIUM-1 b
 because `transcript_util` was created today. The rate is falling (7 then 4) but it is not zero,
 which is the argument for the review-freshness gate being a standing release blocker rather
 than a one-off.
+
+## P11 - OPEN: 9 findings the third pass produced but NEVER ADJUDICATED
+
+**How this happened, plainly.** The third-pass workflow script capped refutation at four
+findings per lens (`.slice(0, 4)`). The lens agents produced **28 raw findings; only 16 ever
+reached a refuter.** The other 12 were neither confirmed nor refuted - they were silently
+dropped by a cap I wrote into the harness and did not flag. Deduped, **9 unique findings have
+never been adjudicated**, one of them HIGH.
+
+This is the same class of defect the whole plan is about - a denominator nobody printed - and
+it was in the review harness itself, one round after the same lesson was recorded twice. The
+`.slice(0, 4)` cap must be removed or made loud before the next pass.
+
+Two of the nine are DIRECT consequences of fixes made in this session (marked ->).
+
+### HIGH
+
+- **`hooks/meta_audit_on_stop.py`:104 - `count_unpushed` is dead on the branch that matters.**
+  `git rev-list --count @{u}..HEAD` exits 128 with "no upstream configured" on any branch never
+  pushed, and that collapses to 0 - the same value as "everything is pushed". Reproduced in a
+  fresh repo with two commits and no remote: rc=128, `count_unpushed` -> 0, `collect_findings`
+  -> [] (silent exit 0), while `git rev-list --count HEAD --not --remotes` correctly reports 2.
+  A new feature branch with unpushed commits - exactly what the hook exists to surface -
+  produces byte-identical output to a fully-pushed tree. No test exercises it.
+  Fix: fall back to `HEAD --not --remotes` and return a distinguishable "no upstream, N commits
+  exist only here" rather than folding it into 0.
+
+### MEDIUM
+
+- -> **`hooks/pre_push_gate.py`:344 - the reference-transaction exclusion has the exact side
+  effect this file's own comment forbids.** `HIGH_FREQUENCY_HOOKS` (added today for the
+  CRITICAL perf fix) means `--install-global` writes 22 dispatchers and none is
+  `reference-transaction`, while the comment at :318 states the rule: "core.hooksPath REPLACES
+  .git/hooks wholesale: any name missing from the global dir would silently stop firing". A repo
+  using a ref-audit / mirror-sync hook loses it machine-wide, and the success message says the
+  opposite. Fix: install a FORK-FREE pure-delegation dispatcher for the excluded names, or at
+  minimum name them in the message and assert that in a selftest.
+- -> **`tools/check_review_freshness.py`:37 - the gate's denominator omits `tools/` and
+  `tests/`.** `units()` is `hooks/*.py` plus a hardcoded `("install.py", "run_selftests.py")`,
+  despite the docstring claiming "DETECTION, not a roster". VERIFIED: the ledger already holds
+  reviews for `tools/check_review_freshness.py`, `tools/mutation_check.py` and
+  `tests/test_integration.py` - `--record` accepts them and prints a confirmation - yet none
+  appears in the "5/17 units" denominator, so recording a review for them is a no-op and
+  `--release` can pass while they are unreviewed. The two tools the entire evidence base rests
+  on are outside the gate that is supposed to watch them. THIRD instance of the hardcoded-roster
+  class. Fix: glob `hooks/`, `tools/`, `tests/` and top-level with an explicit asserted
+  exclusion list, and WARN when the ledger names a unit `units()` does not produce.
+- **`hooks/hook_health_check.py`:350** - `stale_root_registrations` (added today) reuses
+  `_iter_hook_commands`, which does `(cfg.get("hooks") or {}).values()` with no isinstance
+  guard, while `check_config` was deliberately hardened against exactly this and pins it in a
+  selftest. `{"hooks": [1,2,3]}` raises AttributeError and discards the whole hook-health report.
+- **`hooks/numbers_match_on_write.py`:366** - the M1 lesson was applied at the resolve layer but
+  not the PARSE layer: `sources: results` (the natural YAML-ish spelling, and no template ships)
+  yields `cfg["sources"] == []` and returns `(0, "")` with no message at all - not even the M1
+  "NOTHING was verified" advisory, which only fires when sources parsed but the paths do not exist.
+- **`hooks/fast_test_on_stop.py`:449** - the two gates key the shared state file differently:
+  fast_test passes the session `cwd`, pre_push_gate passes the git toplevel. `_state_key`
+  normalises SPELLING (findings 28/34) but not a subdirectory to its root - and the D5 fix
+  deliberately made a subdirectory a valid work tree. So in a monorepo package the advertised
+  fast path never fires. Same "one source of truth" claim, a different half of it still false.
+- **`hooks/fast_test_on_stop.py`:102** - the turn-end clamp `timeout: (5, 600)` is imposed on
+  the PUSH gate, whose stated purpose (pre_push_gate.py:11-13) is to run a STRICTER gate than
+  turn end. `timeout=1800` silently becomes 600 with no stderr. The remedy the timeout message
+  prescribes ("raise timeout= in .claude/pre-push.cmd") is a no-op above 600.
+
+### LOW
+
+- **`run_selftests.py`:76** - five auxiliary gates are invoked only `if os.path.exists(...)`, so
+  renaming or omitting a tool silently removes the gate and `ran` drops by one with no expected
+  count to compare against - the same shrinking-sample failure this file's docstring claims to
+  have eliminated for hooks.
+- -> **`hooks/duplicate_registration_check.py`:390** - the D9 hermeticity work added
+  `os.chdir(noisy)` and restores it at the end, but the `if fails: return 1` sits between them,
+  so on the FAILURE path the cwd is still inside the TemporaryDirectory when it is torn down.
+  On Windows that raises PermissionError, replacing the failure report with a cleanup traceback.
+  A selftest that reports its failures as a crash is a selftest whose failures get misread.
