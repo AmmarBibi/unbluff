@@ -45,6 +45,10 @@ DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "s
 CONFIG_NAME = "number-sources.txt"
 SESSION_ID_CHARS = 12
 MAX_BULLETS = 12
+# Hard cap on findings COLLECTED (display is capped at MAX_BULLETS). Separate numbers so
+# the reported total is real: capping collection at the display width made the message
+# state 12 when there were 40 (M2).
+MAX_FINDINGS_TRACKED = 500
 SNIPPET_LEN = 90
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_SOURCE_VALUES = 300_000
@@ -216,6 +220,18 @@ def cited_numbers(text: str, check_integers: bool) -> "list[tuple[int, str, floa
 
     Skips cross-reference/ordinal context, years, and (unless check_integers) bare integers.
     """
+    # [M3] Line numbers by BISECT over precomputed newline offsets. This was
+    # `text.count("\n", 0, start)` per match - O(matches x filesize), and MAX_FILE_BYTES
+    # guarded only SOURCE files, never the report. Measured: 219 KB = 0.43s, 875 KB = 25.2s,
+    # 3.5 MB = killed at 120s. A killed hook is treated as rc 0, so the check was
+    # simultaneously blocking the turn and not being performed. Same measurement after the
+    # bisect: 3.5 MB = 1.76s.
+    newlines = []
+    pos = text.find("\n")
+    while pos != -1:
+        newlines.append(pos)
+        pos = text.find("\n", pos + 1)
+
     out = []
     for m in _NUMBER_RE.finditer(text):
         frac, exp = m.group("frac") or "", m.group("exp") or ""
@@ -235,7 +251,7 @@ def cited_numbers(text: str, check_integers: bool) -> "list[tuple[int, str, floa
         if not has_decimal and unit is None and not is_percent:
             if not check_integers or (1900 <= value <= 2099):  # bare int / year
                 continue
-        out.append((text.count("\n", 0, start) + 1, raw, value, is_percent))
+        out.append((bisect.bisect_right(newlines, start - 1) + 1, raw, value, is_percent))
     return out
 
 
@@ -259,6 +275,12 @@ def build_message(name: str, sources: "list[str]", findings: "list[str]") -> str
     lines = ["[numbers-match] %d cited number(s) in %s have no match in the source data (%s):"
              % (len(findings), name, ", ".join(sources))]
     lines.extend("- " + f for f in findings[:MAX_BULLETS])
+    hidden = len(findings) - MAX_BULLETS
+    if hidden > 0:
+        # Say what was truncated. The count above is now the REAL total, and the marker
+        # suppresses this hook for the rest of the session, so an unannounced truncation
+        # means those findings are never mentioned again.
+        lines.append("  (+%d more not shown)" % hidden)
     lines.append("Verify each against the source-of-truth data (recompute/re-export) or correct the "
                  "prose. Numbers that are derived, rounded beyond tolerance, or definitional are fine "
                  "to keep - this is a mechanical check, not a judge.")
@@ -347,6 +369,10 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
     if os.path.exists(marker):
         return 0, ""
     try:
+        # [M3] MAX_FILE_BYTES guarded only SOURCE files; the report itself was read unbounded.
+        if os.path.getsize(path) > MAX_FILE_BYTES:
+            return 0, ("[numbers-match] %s is larger than %d bytes; skipped. NOTHING was "
+                       "verified in it.\n" % (os.path.basename(path), MAX_FILE_BYTES))
         with open(path, encoding="utf-8", errors="replace") as fh:
             report_text = fh.read()
     except OSError:
@@ -361,14 +387,30 @@ def run(payload: dict, state_dir: str) -> "tuple[int, str]":
                 excluded.append(cand)
     values = _cached_index(cfg["sources"], root, state_dir, excluded)
     if not values:
-        return 0, ""
+        # [M1] A config that RESOLVES TO NOTHING is a broken config, not an opt-out. A typo'd
+        # `sources = reslts` produced zero values, hit this branch, and returned the same
+        # clean-pass sentinel as a fully-verified report - while the empty index was cached
+        # under the SHA-1 of the empty string, so every later edit re-read it. The project
+        # believed it had a numeric tripwire that was checking nothing. `find_config`
+        # succeeding is proof the project OPTED IN, so say so rather than pass silently.
+        dead = [e for e in cfg["sources"]
+                if not os.path.exists(e if os.path.isabs(e) else os.path.join(root, e))]
+        return 0, ("[numbers-match] %s lists source path(s) that resolve to nothing: %s. "
+                   "NOTHING was verified in %s.\n"
+                   % (os.path.relpath(config_path, root), ", ".join(dead or cfg["sources"]),
+                      os.path.basename(path)))
+    # [M2] Collect ALL findings, truncate only the DISPLAY. The loop used to break at
+    # MAX_BULLETS and then format len(findings) into "N cited number(s) ... have no match", so
+    # a report with 40 unmatched numbers announced "12" with no truncation notice - and the
+    # per-(session, report) marker then suppressed the hook for the rest of the session, so
+    # the other 28 were never mentioned again. memory_hygiene_guard already does this right.
     findings = []
     for line, raw, value, is_percent in cited_numbers(report_text, cfg["check_integers"]):
         if not matches_source(value, values, cfg["tol"], is_percent):
             snippet = _line_snippet(report_text, line)
             findings.append("%s:%d: %s   (%s)" % (os.path.basename(path), line, raw, snippet))
-        if len(findings) >= MAX_BULLETS:
-            break
+            if len(findings) >= MAX_FINDINGS_TRACKED:
+                break                      # hard cap so a pathological report cannot balloon
     if not findings:
         return 0, ""
     os.makedirs(state_dir, exist_ok=True)
@@ -561,8 +603,87 @@ def _selftest_item45() -> list:
     return fails
 
 
+def _selftest_mediums() -> list:
+    """M1/M2/M3 from the 2026-07-30 review."""
+    import tempfile
+    fails = []
+
+    # M3: line numbering was O(matches x filesize). 875 KB measured at 25.2s, 3.5 MB killed at
+    # 120s - and a killed hook reads as rc 0, so the check both blocked the turn and did not
+    # run. Bisect makes this linear. A generous bound: the point is orders of magnitude.
+    big = "\n".join("row %d: value %d.5 mm and %d.25 kg" % (i, i, i) for i in range(20000))
+    t0 = time.time()
+    got = cited_numbers(big, False)
+    elapsed = time.time() - t0
+    # Bound MEASURED, not guessed: on this fixture (826 KB, 40k matches) the bisect runs in
+    # 0.33s and count()-per-match in 9.61s - a 29x gap. 4s sits 12x above the linear time and
+    # 2.4x below the quadratic one, so it still separates them on a CI box several times
+    # slower. The first bound tried was 12s, which sat ABOVE the quadratic time and let the
+    # mutation survive - a perf assertion is only worth as much as its measured margin.
+    if elapsed > 4.0:
+        fails.append("M3: cited_numbers took %.1fs on a %d KB report (linear is ~0.3s here) - "
+                     "line numbering is quadratic again" % (elapsed, len(big) // 1024))
+    if not got:
+        fails.append("M3: extracted nothing from the large fixture")
+    else:
+        # correctness of the bisect, not just its speed: first and last line numbers
+        if got[0][0] != 1:
+            fails.append("M3: first match reported on line %d, expected 1" % got[0][0])
+        expected_last = big.count("\n") + 1
+        if got[-1][0] != expected_last:
+            fails.append("M3: last match on line %d, expected %d"
+                         % (got[-1][0], expected_last))
+    # a number on a known line lands on that line
+    probe = "alpha\nbeta\ngamma 4.5 mm\ndelta\n"
+    hits = cited_numbers(probe, False)
+    if not hits or hits[0][0] != 3:
+        fails.append("M3: line number wrong after the bisect rewrite: %r" % (hits,))
+
+    with tempfile.TemporaryDirectory() as td:
+        root = os.path.join(td, "proj")
+        os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+        os.makedirs(os.path.join(root, "results"), exist_ok=True)
+        with open(os.path.join(root, "results", "d.csv"), "w", encoding="utf-8") as fh:
+            fh.write("v\n1.0\n")
+
+        # M2: the reported COUNT must be the real total, and truncation must be announced.
+        with open(os.path.join(root, ".claude", CONFIG_NAME), "w", encoding="utf-8") as fh:
+            fh.write("sources = results\nreports = *report*.md\n")
+        many = os.path.join(root, "many_report.md")
+        with open(many, "w", encoding="utf-8") as fh:
+            for i in range(40):
+                fh.write("Measured %d.75 mm on run %d.\n" % (100 + i, i))
+        code, msg = run({"tool_input": {"file_path": many}, "cwd": root,
+                         "session_id": "m2"}, os.path.join(td, "s1"))
+        if code != 2:
+            fails.append("M2: 40 unmatched numbers did not fire (code=%s)" % code)
+        else:
+            head = msg.splitlines()[0]
+            if "12 cited number" in head:
+                fails.append("M2: reported the DISPLAY cap as the total: %r" % head)
+            if "40 cited number" not in head:
+                fails.append("M2: total is not the real count: %r" % head)
+            if "more not shown" not in msg:
+                fails.append("M2: truncated the list with no notice - the marker then "
+                             "suppresses the hook for the rest of the session")
+
+        # M1: sources that resolve to NOTHING is a broken config, not an opt-out.
+        with open(os.path.join(root, ".claude", CONFIG_NAME), "w", encoding="utf-8") as fh:
+            fh.write("sources = reslts\nreports = *report*.md\n")   # typo
+        bad = os.path.join(root, "typo_report.md")
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("The measured value was 999.9 MPa.\n")
+        code, msg = run({"tool_input": {"file_path": bad}, "cwd": root,
+                         "session_id": "m1"}, os.path.join(td, "s2"))
+        if not msg or "resolve to nothing" not in msg:
+            fails.append("M1: a config whose sources resolve to nothing passed SILENTLY, "
+                         "identical to a verified report (code=%s msg=%r)" % (code, msg[:120]))
+    return fails
+
+
 def selftest() -> int:
-    fails = _selftest_units() + _selftest_pipeline() + _selftest_item45()
+    fails = (_selftest_units() + _selftest_pipeline() + _selftest_item45()
+             + _selftest_mediums())
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

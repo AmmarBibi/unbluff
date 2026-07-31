@@ -679,28 +679,28 @@ defects across 5 files. The three dispatcher/health files came back CLEAN.
   and the production path must actually call it. Pinned by mutation `M6`, which the regex
   cannot see.
 
-### OPEN - scheduled, not deferred
+### M1-M5 - FIXED 2026-07-31
 
-- **M1 `numbers_match_on_write`** - a typo'd `sources = reslts` yields an empty index, hits
+- **M1 `numbers_match_on_write` - DONE.** - a typo'd `sources = reslts` yields an empty index, hits
   `if not values: return 0, ""`, and the EMPTY index is cached under the SHA-1 of the empty
   string, so later edits re-read it. A broken config is indistinguishable from opt-out. Fix:
   when `find_config` succeeds but sources resolve to nothing, say so once per session and do
   not cache an empty index.
-- **M2 `numbers_match_on_write`:234** - `run()` breaks at MAX_BULLETS then reports
+- **M2 `numbers_match_on_write`:234 - DONE.** - `run()` breaks at MAX_BULLETS then reports
   `len(findings)` as the total: 40 unmatched numbers are announced as "12", with no truncation
   notice, and the marker then suppresses the hook for the session. `memory_hygiene_guard`
   already does this correctly - copy it.
-- **M3 `numbers_match_on_write`:213** - line numbers via `text.count("\n", 0, start)` per match
+- **M3 `numbers_match_on_write`:213 - DONE.** - line numbers via `text.count("\n", 0, start)` per match
   is O(numbers x filesize), and MAX_FILE_BYTES guards only SOURCE files. Measured 875 KB =
   25.2 s, 3.5 MB = killed at 120 s; a killed hook reads as rc 0, so the check is both blocking
   and not performed. Fix: bisect over precomputed newline offsets (3.5 MB -> 1.76 s) and cap
   the report read.
-- **M4 `memory_hygiene_guard`:113** - the quarantine latch opens on ANY line containing
+- **M4 `memory_hygiene_guard`:113 - DONE.** - the quarantine latch opens on ANY line containing
   "historical" and re-arms only on a literal `## `. 53 of 63 real memory files have no `## `
   heading at all, so one ordinary bullet would suppress the rest of the file for 84% of them.
   Latent: 0/63 currently contain a trigger word. Fix: only consult QUARANTINE_RE on heading
   lines; re-arm on any heading of the same or shallower depth.
-- **M5 `plan_defer_guard`:157** - the once-per-session marker is keyed by session alone, but
+- **M5 `plan_defer_guard`:157 - DONE.** - the once-per-session marker is keyed by session alone, but
   unlike meta_audit this hook scans ONE file per invocation. After firing on MASTER_PLAN.md,
   editing ROADMAP.md with three optional-forever markers returns `(0, "")` without opening it.
   `numbers_match_on_write.marker_path` already keys by (session, report) with this exact
@@ -712,3 +712,21 @@ The first review found 34 defects in six units. This one found 13 in eight units
 never been reviewed - including one HIGH (H6) that is the exact twin of a finding already fixed
 in a sibling hook, and one (M6) in a guard written earlier the same day specifically to prevent
 twins. "Never reviewed" was doing a lot of quiet work in this repo's health story.
+
+### M1-M5 closing notes (2026-07-31)
+
+All five fixed, each pinned by a mutation that fails without it. Two things worth recording:
+
+- **M3's first perf assertion was itself decorative.** The bound was guessed at 12s; measured,
+  the bisect runs the fixture in 0.33s and `count()`-per-match in 9.61s, so 12s sat ABOVE the
+  quadratic time and the mutation survived. Retightened to 4.0s - 12x above linear, 2.4x below
+  quadratic, so it still separates them on a much slower CI box. A performance assertion is
+  worth exactly its measured margin; an unmeasured one is decoration with a number on it.
+- **M4's first fixtures could not fire.** They used `NEXT:` while `PLAIN_NEXT_RE` matches
+  `NEXT ORDER` or `NEXT=`, so all three latch cases returned empty and would have "passed" for
+  the wrong reason had the assertions been written the other way round. Caught because the
+  assertions were positive (this line MUST be found), not negative.
+
+With P9 closed, every numbered item in this file is either fixed with a mutation-verified
+regression test, or carries a written justification. `tools/check_review_freshness.py --release`
+is the standing gate for whether that stays true.

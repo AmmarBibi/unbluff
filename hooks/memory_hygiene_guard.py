@@ -152,13 +152,26 @@ def scan_index_lines(lines: list[str]) -> list[tuple[int, str]]:
 def scan_plain_lines(lines: list[str]) -> list[tuple[int, str]]:
     """Section-aware scan of a non-index memory file. Returns [(lineno, snippet)]."""
     findings: list[tuple[int, str]] = []
+    # [M4] The latch opens only on a HEADING and re-arms on any heading of the same or
+    # shallower depth. It used to open on ANY line containing "historical" and close only on a
+    # literal "## ", so one ordinary bullet mentioning the word suppressed the entire rest of
+    # the file - and 53 of 63 real memory files have no "## " heading at all, making the latch
+    # irreversible for 84% of them. `#` and `###` did not re-arm either. Latent rather than
+    # live (0/63 files currently contain a trigger word), and it contradicted this module's
+    # own docstring, which describes a section-scoped quarantine.
     in_quarantine = False
+    quarantine_depth = 0
     for lineno, line in enumerate(lines, 1):
-        if QUARANTINE_RE.search(line):
-            in_quarantine = True
-            continue
-        if line.startswith("## "):
-            in_quarantine = False
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            depth = len(stripped) - len(stripped.lstrip("#"))
+            if QUARANTINE_RE.search(line):
+                in_quarantine = True
+                quarantine_depth = depth
+                continue
+            # any heading at the same or shallower level ends the quarantined section
+            if in_quarantine and depth <= quarantine_depth:
+                in_quarantine = False
         if in_quarantine:
             continue
         if PLAIN_NEXT_RE.search(line) or PLAIN_TESTS_RE.search(line) or _has_commit_hash(line):
@@ -387,6 +400,30 @@ def _selftest_main(check) -> None:
         rc4, err4 = drive(missing_cwd, root, os.path.join(td, "state3"))
         check("unlocatable memory dir reports inconclusive rather than passing silently",
               rc4 == 0 and "could not check" in err4)
+
+    # [M4] the quarantine latch must open only on a HEADING and re-arm on any heading of the
+    # same or shallower depth. It opened on ANY line containing the word and closed only on a
+    # literal "## " - and 53 of 63 real memory files have no "## " heading at all, so one
+    # ordinary bullet would have suppressed the rest of the file for 84% of them.
+    prose_then_rot = ["# Title",
+                      "- a bullet about the historical background of this project",
+                      "- NEXT = ship the thing"]
+    check("M4: prose mentioning 'historical' does not quarantine the rest of the file",
+          any(ln == 3 for ln, _ in scan_plain_lines(prose_then_rot)))
+    quarantined = ["## HISTORICAL",
+                   "- NEXT = inside the quarantined section",
+                   "## Live",
+                   "- NEXT = this one counts"]
+    hits = [ln for ln, _ in scan_plain_lines(quarantined)]
+    check("M4: a quarantined SECTION is still skipped", 2 not in hits)
+    check("M4: a same-depth heading re-arms the scan", 4 in hits)
+    deeper = ["### HISTORICAL notes",
+              "- NEXT = inside quarantine",
+              "# Top",
+              "- NEXT = after a shallower heading"]
+    hits2 = [ln for ln, _ in scan_plain_lines(deeper)]
+    check("M4: '###' opens the latch and a shallower '#' re-arms it",
+          2 not in hits2 and 4 in hits2)
 
     # sanitization must match Claude Code's rule, not a three-character approximation
     check("sanitize_cwd replaces every non-alphanumeric",

@@ -188,6 +188,25 @@ MUTATIONS = [
        "    return False")], False),
     ("transcript_util", "H6b", "the shared classifier stops rejecting synthetic text",
      [("    if is_synthetic(content):\n        return False\n", "")], False),
+    # --- item 45 MEDIUMs ---
+    ("numbers_match_on_write", "M1", "an empty source index passes silently again",
+     [('        dead = [e for e in cfg["sources"]', '        return 0, ""\n        dead = [e for e in cfg["sources"]')],
+     False),
+    ("numbers_match_on_write", "M2", "the display cap is reported as the total again",
+     [("            if len(findings) >= MAX_FINDINGS_TRACKED:\n                break",
+       "            if len(findings) >= MAX_BULLETS:\n                break")], False),
+    ("numbers_match_on_write", "M3", "line numbers back to count() per match (quadratic)",
+     [("        out.append((bisect.bisect_right(newlines, start - 1) + 1, raw, value, "
+       "is_percent))",
+       '        out.append((text.count("\\n", 0, start) + 1, raw, value, is_percent))')], False),
+    ("memory_hygiene_guard", "M4", "quarantine latch opens on prose again",
+     [("        stripped = line.lstrip()\n        if stripped.startswith(\"#\"):",
+       "        if QUARANTINE_RE.search(line):\n            in_quarantine = True\n"
+       "            continue\n        stripped = line.lstrip()\n"
+       "        if stripped.startswith(\"## \"):")], False),
+    ("plan_defer_guard", "M5", "marker keyed by session only again (2nd plan file skipped)",
+     [('    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)',
+       '    marker = marker_path(state_dir, payload.get("session_id") or "nosession")')], False),
     ("hook_health_check", "18", "the weekly sweep goes back to a hardcoded roster",
      [('    d = hooks_dir or _HOOKS_DIR\n    return [p for p in sorted(glob.glob(os.path.join('
        'd, "*.py"))) if has_selftest(p)]',

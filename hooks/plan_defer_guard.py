@@ -22,6 +22,7 @@ Run with --selftest to verify the mechanics (uses tempfile, never the real state
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -154,9 +155,23 @@ def build_message(name: str, findings: list, claims: list = (), promises: list =
     return "\n".join(lines) + "\n"
 
 
-def marker_path(state_dir: str, session_id: str) -> str:
+def marker_path(state_dir: str, session_id: str, plan_path: str = "") -> str:
+    """Once-per-(session, PLAN FILE) marker.
+
+    [M5] Keyed by session alone, this hook fired on MASTER_PLAN.md and then returned (0, "")
+    for ROADMAP.md in the same session WITHOUT OPENING IT - byte-identical to "that plan is
+    clean". The session-only key is legitimate for meta_audit_on_stop because that hook
+    iterates EVERY plan file per invocation; this one scans exactly the single file the tool
+    just wrote, so a session-scoped marker silences whole files. numbers_match_on_write
+    already keys by (session, report) with this exact rationale in its docstring - the lesson
+    simply had not been carried across.
+    """
     sid = (str(session_id) if session_id else "nosession")[:SESSION_ID_CHARS]
-    return os.path.join(state_dir, f"{HOOK_NAME}-{sid}.done")
+    tag = "all"
+    if plan_path:
+        tag = hashlib.sha1(
+            os.path.abspath(plan_path).encode("utf-8", "replace")).hexdigest()[:12]
+    return os.path.join(state_dir, f"{HOOK_NAME}-{sid}-{tag}.done")
 
 
 def _tool_file(payload: dict) -> str:
@@ -171,8 +186,8 @@ def run(payload: dict, state_dir: str) -> tuple:
     path = _tool_file(payload)
     if not is_plan_file(path):
         return 0, ""
-    marker = marker_path(state_dir, payload.get("session_id") or "nosession")
-    if os.path.exists(marker):  # already fired this session
+    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)
+    if os.path.exists(marker):  # already fired for THIS plan file this session
         return 0, ""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -301,6 +316,32 @@ def _selftest_dangling() -> list:
         code, msg = run({"session_id": "sb", "tool_input": {"file_path": plan}}, state)
         if code != 2 or "DANGLING HOME" not in msg or "optional-forever language" not in msg:
             fails.append(f"combined case missing a section: {msg!r}")
+
+    # [M5] A SECOND plan file in the SAME session must still be scanned. The marker was keyed
+    # by session alone while this hook scans exactly one file per invocation, so firing on
+    # MASTER_PLAN.md returned (0, "") for ROADMAP.md without ever opening it - byte-identical
+    # to "that plan is clean". Both files here carry the same defect, so only the marker key
+    # can explain a silent second result.
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as state:
+        first = os.path.join(d, "MASTER_PLAN.md")
+        second = os.path.join(d, "ROADMAP.md")
+        for p in (first, second):
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("| 3 | build it -> park\n")
+        code1, _ = run({"session_id": "m5", "tool_input": {"file_path": first}}, state)
+        if code1 != 2:
+            fails.append(f"M5 setup: first plan did not fire (code={code1})")
+        code2, msg2 = run({"session_id": "m5", "tool_input": {"file_path": second}}, state)
+        if code2 != 2:
+            fails.append("M5: a SECOND plan file in the same session was never scanned - "
+                         "silent exit 0 is indistinguishable from 'that plan is clean' "
+                         f"(code={code2} msg={msg2!r})")
+        if "ROADMAP.md" not in msg2:
+            fails.append(f"M5: second fire does not name the second file: {msg2!r}")
+        # and the SAME file twice must still be suppressed - the marker still has a job
+        code3, msg3 = run({"session_id": "m5", "tool_input": {"file_path": second}}, state)
+        if code3 != 0 or msg3.strip():
+            fails.append(f"M5: same file re-fired in one session: code={code3} msg={msg3!r}")
     return fails
 
 
