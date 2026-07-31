@@ -73,9 +73,16 @@ def desired_groups() -> dict:
         },
         "SessionStart": {
             "matcher": "*",
-            "hooks": [{"type": "command", "command": _cmd("hook_health_check.py")},
-                      {"type": "command", "command": _cmd("duplicate_registration_check.py")},
-                      {"type": "command", "command": _cmd("usage_snip_prompt.py")}],
+            # EXPLICIT timeout. Without one these inherit the host's 60s default, and the
+            # weekly selftest sweep inside hook_health_check measured 34.7s warm on a fast
+            # box - 58% of a budget nobody had declared. The sweep now has its own 25s
+            # aggregate budget and is resumable, so this ceiling is headroom, not a target.
+            "hooks": [{"type": "command", "command": _cmd("hook_health_check.py"),
+                       "timeout": 90},
+                      {"type": "command", "command": _cmd("duplicate_registration_check.py"),
+                       "timeout": 30},
+                      {"type": "command", "command": _cmd("usage_snip_prompt.py"),
+                       "timeout": 10}],
             "id": ID_PREFIX + "hook-health",
             "description": "Validate configured hooks resolve; weekly-run each hook's selftest; "
                            "report any hook wired from more than one directory; ask for a usage "

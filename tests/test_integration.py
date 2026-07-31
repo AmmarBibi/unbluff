@@ -49,8 +49,13 @@ def child_env(home):
     return e
 
 
-def run(cmd, env, stdin=""):
-    p = subprocess.run(cmd, shell=True, input=stdin, capture_output=True, text=True, env=env)
+def run(cmd, env, stdin="", cwd=None):
+    """Run a hook command. `cwd` matters: duplicate_registration_check merges the PROJECT
+    layer (<cwd>/.claude/settings*.json), so a scenario launched from the repo root silently
+    audits unbluff's own config alongside the fixture - C2 could fail, or pass, for reasons
+    unrelated to the code under test (D9)."""
+    p = subprocess.run(cmd, shell=True, input=stdin, capture_output=True, text=True, env=env,
+                       cwd=cwd)
     return p.returncode, p.stdout or "", p.stderr or ""
 
 
@@ -123,7 +128,10 @@ def main():
         # A clean install must be silent. A hook wired from a SECOND directory must be reported on
         # STDOUT (stderr is not reliably surfaced at SessionStart) with exit 0 - advisory, never blocks.
         dup = s["hooks"]["SessionStart"][0]["hooks"][1]["command"]
-        rc, out, err = run(dup, env, "{}")
+        # Launch from a directory with NO .claude, so the project layer contributes nothing
+        # and the assertion is about the fixture alone (D9).
+        nocfg = tempfile.mkdtemp(prefix="unbluff-nocfg-")
+        rc, out, err = run(dup, env, "{}", cwd=nocfg)
         record("C2 duplicate-check silent on a clean install",
                rc == 0 and out.strip() == "", f"rc={rc} out={out[:150]!r}")
 
@@ -139,7 +147,7 @@ def main():
                  "command": f'"{PYEXE}" "{os.path.join(second_root, "rate_prompt.py")}"'}]})
             with open(spath, "w", encoding="utf-8") as f:
                 json.dump(s2, f, indent=2)
-            rc, out, err = run(dup, env, "{}")
+            rc, out, err = run(dup, env, "{}", cwd=nocfg)
             record("C3 duplicate-check reports a second registration on stdout",
                    rc == 0 and "rate_prompt.py" in out and "registered 2 times" in out,
                    f"rc={rc} out={out[:200]!r}")

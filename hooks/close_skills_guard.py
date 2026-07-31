@@ -121,14 +121,24 @@ def _is_genuine_user(entry) -> bool:
         return False
     content = msg.get("content")
 
-    origin = entry.get("origin")
-    if isinstance(origin, dict) and origin.get("kind"):
-        # Authoritative when written: 'human' is the user, every other kind is the harness.
-        # A future kind is therefore excluded by default, which is the safe direction.
-        return origin.get("kind") == "human"
-
+    # The synthetic filter runs FIRST, ahead of the origin shortcut. `origin.kind == "human"`
+    # is not proof that the USER typed this: the harness stamps it on injections a human
+    # indirectly caused, e.g. `<system-reminder>The user started your suggested background
+    # task task_...`. Five such entries exist in this user's own transcripts. With the origin
+    # check first, that returned True, ended the detection window, and made a CORRECT close
+    # (all four skills invoked) exit 2 demanding all four be re-run - the guard's original
+    # unsatisfiable failure mode, reintroduced through the field meant to prevent it. Every
+    # class-17 fixture paired synthetic text with a missing or non-human origin, so the suite
+    # reported OK throughout.
     if _is_synthetic(content):
         return False
+
+    origin = entry.get("origin")
+    if isinstance(origin, dict) and origin.get("kind"):
+        # Authoritative for entries that are not already known-synthetic: 'human' is the user,
+        # every other kind is the harness. A future kind is excluded by default - the safe way.
+        return origin.get("kind") == "human"
+
     # A tool_result or an image-only entry has no text at all and is not a prompt.
     return _first_text(content) is not None
 
@@ -287,6 +297,21 @@ def _compact_caveat():
                                    "conversation that ran out of context."}}
 
 
+def _human_system_reminder():
+    """A harness injection that ALSO carries origin.kind == 'human'.
+
+    Not hypothetical: a sweep of 138 transcripts / ~350k entries found 5 real entries of this
+    shape - `<system-reminder> The user started your suggested background task task_...`,
+    stamped origin=human because a human did trigger the underlying action. It is still the
+    harness talking, not a prompt, so it must not end the detection window.
+    """
+    return {"origin": {"kind": "human"}, "promptSource": "sdk",
+            "message": {"role": "user", "content": [
+                {"type": "text",
+                 "text": "<system-reminder>The user started your suggested background task "
+                         "task_abc123. Continue with your work.</system-reminder>"}]}}
+
+
 def selftest() -> int:
     import tempfile
     fails: list[str] = []
@@ -378,6 +403,12 @@ def selftest() -> int:
             ([_human("continue"), *all4, _task_notification()], "task-notification"),
             ([_human("continue"), *all4, _slash_command()], "slash-command wrapper"),
             ([_human("continue"), *all4, _compact_caveat()], "compact caveat"),
+            # [D8] The one that got through: a system-reminder stamped origin.kind=human.
+            # The origin shortcut returned BEFORE the synthetic-prefix filter, so that filter
+            # was unreachable for any entry carrying an origin - and every existing fixture
+            # paired synthetic text with a missing or non-human origin, so the suite said OK.
+            # Verified against 5 real entries in the user's own transcripts.
+            ([_human("continue"), *all4, _human_system_reminder()], "human-stamped reminder"),
         ):
             code, msg = _verdict(entries, label)
             if code != 0:

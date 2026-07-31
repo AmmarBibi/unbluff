@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 _HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -98,7 +99,16 @@ def floor_violations(hooks_dir: str = None) -> list:
 _STATE_DIR = os.environ.get("UNBLUFF_STATE_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "hooks", "state")
 _WEEKLY_MARKER = "hook-health-weekly-selftest.txt"
-_SELFTEST_TIMEOUT_S = 45
+_WEEKLY_PROGRESS = "hook-health-weekly-progress.json"
+_SELFTEST_TIMEOUT_S = 20
+# AGGREGATE budget for one session's slice of the sweep. There was none: a 45s per-hook cap
+# with 14 hooks and no total deadline, in a SessionStart hook that install.py registered with
+# no `timeout` and therefore inherited the 60s host default. Measured warm on this machine:
+# 34.7s total, 58% of that budget on a fast box, and the marker was written only AFTER the
+# whole loop - so one overrun meant the sweep was killed, nothing was recorded, and it started
+# from scratch next session, potentially never finishing. The sweep is now sliced and RESUMABLE:
+# each hook's result is persisted the moment it is known.
+_WEEKLY_BUDGET_S = 25
 _WEEK_DAYS = 7
 _SCRIPT_EXTS = (".py", ".js", ".ps1", ".sh")
 
@@ -111,7 +121,8 @@ def _days_since(datestr: str) -> int:
         return 10_000  # unparseable -> due
 
 
-def run_weekly_selftests(hook_paths: list[str], state_dir: str) -> tuple[list[str], int, int, int]:
+def run_weekly_selftests(hook_paths: list[str], state_dir: str,
+                         budget_s: int = _WEEKLY_BUDGET_S) -> tuple:
     """Run each hook's --selftest at most once per week.
 
     Returns (problems, n_run, n_passed, n_skipped). The pass-marker is written ONLY when every
@@ -124,33 +135,70 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str) -> tuple[list[st
     try:
         with open(marker, encoding="utf-8") as f:
             if _days_since(f.read()) < _WEEK_DAYS:
-                return [], 0, 0, 0
+                return [], 0, 0, 0, 0
     except OSError:
         pass  # no marker -> due
+
+    progress_path = os.path.join(state_dir, _WEEKLY_PROGRESS)
+    try:
+        with open(progress_path, encoding="utf-8") as f:
+            done = json.load(f)
+        if not isinstance(done, dict):
+            done = {}
+    except (OSError, ValueError):
+        done = {}
+
+    def _persist():
+        # After EVERY hook, not after the loop. The whole point is that a session killed
+        # mid-sweep keeps what it proved instead of starting over forever.
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+            with open(progress_path, "w", encoding="utf-8") as fh:
+                json.dump(done, fh)
+        except OSError:
+            pass
+
     problems: list[str] = []
-    n = 0
-    n_passed = 0
-    n_skipped = 0
+    deadline = time.monotonic() + budget_s
+    remaining = 0
     for path in hook_paths:
+        name = os.path.basename(path)
         if not os.path.exists(path):
-            problems.append(f"weekly selftest: missing hook {os.path.basename(path)}")
+            problems.append(f"weekly selftest: missing hook {name}")
             continue
-        n += 1
+        if name in done:
+            continue                      # already proved in an earlier slice
+        if time.monotonic() >= deadline:
+            remaining += 1                # out of budget: leave it for the next session
+            continue
         try:
             proc = subprocess.run([sys.executable, path, "--selftest"],
                                   capture_output=True, text=True,
                                   timeout=_SELFTEST_TIMEOUT_S, stdin=subprocess.DEVNULL,
                                   encoding="utf-8", errors="replace")
             if proc.returncode == 0:
-                n_passed += 1
+                done[name] = "pass"
             elif proc.returncode == SKIP_RC:
-                n_skipped += 1
+                done[name] = "skip"
             else:
                 tail = (proc.stdout or proc.stderr or "").strip().splitlines()
-                problems.append(f"weekly selftest FAILED: {os.path.basename(path)}"
+                done[name] = "fail"
+                problems.append(f"weekly selftest FAILED: {name}"
                                 f" ({tail[-1][:90] if tail else 'no output'})")
         except (OSError, subprocess.SubprocessError):
-            problems.append(f"weekly selftest ERRORED/timed out: {os.path.basename(path)}")
+            done[name] = "fail"
+            problems.append(f"weekly selftest ERRORED/timed out: {name}")
+        _persist()
+
+    n = len(done)
+    n_passed = sum(1 for v in done.values() if v == "pass")
+    n_skipped = sum(1 for v in done.values() if v == "skip")
+    if remaining:
+        # NOT a problem: a sliced sweep in progress is the normal, designed state. It must be
+        # VISIBLE though - main() prints it in the denominator - because "10/10 OK" while four
+        # hooks were never reached is exactly the shrinking-sample lie this file exists to stop.
+        return problems, n, n_passed, n_skipped, remaining
+
     # The marker suppresses the sweep for a week, so it may only be written when the sweep
     # actually VERIFIED everything. A skipped selftest verified nothing; treating it as a pass
     # would buy a week of silence for a hook nobody tested - the same trade this whole plan
@@ -160,9 +208,10 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str) -> tuple[list[st
             os.makedirs(state_dir, exist_ok=True)
             with open(marker, "w", encoding="utf-8") as f:
                 f.write(datetime.date.today().isoformat() + "\n")
+            os.remove(progress_path)
         except OSError:
             pass
-    return problems, n, n_passed, n_skipped
+    return problems, n, n_passed, n_skipped, 0
 
 
 def _tokens(command: str) -> list[str]:
@@ -340,7 +389,7 @@ def main() -> int:
     problems += stale_root_registrations(cfg)
     swept = selftestable_hooks()
     total_hooks = len(all_hook_files())
-    weekly_problems, n_run, n_passed, n_skipped = run_weekly_selftests(swept, _STATE_DIR)
+    weekly_problems, n_run, n_passed, n_skipped, n_left = run_weekly_selftests(swept, _STATE_DIR)
     problems += weekly_problems
     weekly_note = ""
     if n_run:
@@ -349,6 +398,8 @@ def main() -> int:
         weekly_note = f", weekly selftests {n_passed}/{n_run} OK"
         if n_skipped:
             weekly_note += f" ({n_skipped} could not run)"
+        if n_left:
+            weekly_note += f", {n_left} left for the next session"
         gap = total_hooks - len(swept)
         if gap:
             weekly_note += f"; {gap} of {total_hooks} hooks have NO selftest"
@@ -533,29 +584,77 @@ def selftest() -> int:
         skip_hook = os.path.join(td, "skip_hook.py")
         with open(skip_hook, "w", encoding="utf-8") as f:
             f.write("print('SELFTEST SKIP: git unavailable'); import sys; sys.exit(77)\n")
-        state = os.path.join(td, "state")
-        probs, n, n_passed, n_skipped = run_weekly_selftests([ok_hook, bad_hook], state)
+        # Each sub-case gets its OWN state dir: the sweep is now resumable, so `done` persists
+        # between calls sharing a state dir and the counts are cumulative by design.
+        def _state(tag):
+            return os.path.join(td, "state-" + tag)
+
+        probs, n, n_passed, n_skipped, _ = run_weekly_selftests(
+            [ok_hook, bad_hook], _state("a"))
         if n != 2 or n_passed != 1 or not any("bad_hook.py" in p for p in probs):
             fails.append(f"weekly runner counts wrong: n={n} passed={n_passed} probs={probs}")
-        if os.path.exists(os.path.join(state, _WEEKLY_MARKER)):
+        if os.path.exists(os.path.join(_state("a"), _WEEKLY_MARKER)):
             fails.append("weekly marker written despite a failure")
         # missing hook is reported but does not inflate the run count
-        probs_m, n_m, passed_m, _ = run_weekly_selftests(
-            [ok_hook, os.path.join(td, "gone.py")], state)
+        probs_m, n_m, passed_m, _, _ = run_weekly_selftests(
+            [ok_hook, os.path.join(td, "gone.py")], _state("b"))
         if n_m != 1 or passed_m != 1 or not any("missing hook" in p for p in probs_m):
             fails.append(f"missing-hook accounting wrong: n={n_m} passed={passed_m} probs={probs_m}")
         # [finding 32] a SKIP must never be counted as a pass - that is how a gate evaporates
-        probs_s, n_s, passed_s, skipped_s = run_weekly_selftests([ok_hook, skip_hook], state)
+        probs_s, n_s, passed_s, skipped_s, _ = run_weekly_selftests(
+            [ok_hook, skip_hook], _state("c"))
         if skipped_s != 1 or passed_s != 1 or n_s != 2:
             fails.append(f"skip accounting wrong: n={n_s} passed={passed_s} skipped={skipped_s}")
         if any("skip_hook" in p for p in probs_s):
             fails.append("a skip was reported as a failure rather than a skip")
-        probs2, n2, passed2, _ = run_weekly_selftests([ok_hook], state)
-        if probs2 or n2 != 1 or passed2 != 1 or not os.path.exists(os.path.join(state, _WEEKLY_MARKER)):
+        # [finding 32] and the CONSEQUENCE, not just the counts: the marker buys a week of
+        # silence, and a skipped selftest verified nothing. Asserting only the counts let a
+        # mutation that re-enabled the write survive - counts right, consequence wrong.
+        if os.path.exists(os.path.join(_state("c"), _WEEKLY_MARKER)):
+            fails.append("weekly marker written despite a SKIPPED selftest - a week of "
+                         "silence bought for a hook nobody actually tested")
+        probs2, n2, passed2, _, _ = run_weekly_selftests([ok_hook], _state("d"))
+        if probs2 or n2 != 1 or passed2 != 1 \
+                or not os.path.exists(os.path.join(_state("d"), _WEEKLY_MARKER)):
             fails.append(f"all-pass run did not write the marker: {probs2} n={n2} passed={passed2}")
-        probs3, n3, _, _ = run_weekly_selftests([ok_hook], state)  # within the week -> skip
+        probs3, n3, _, _, _ = run_weekly_selftests([ok_hook], _state("d"))  # within week -> skip
         if n3 != 0:
             fails.append(f"weekly skip not honored: n={n3}")
+
+        # [D11] AGGREGATE budget + RESUMABILITY. There was no total deadline: 14 hooks at a 45s
+        # per-hook cap inside a SessionStart hook that inherited the 60s host default, with the
+        # marker written only after the whole loop - so an overrun was killed having recorded
+        # NOTHING and started from scratch next session, potentially never completing.
+        if _SELFTEST_TIMEOUT_S >= _WEEKLY_BUDGET_S:
+            fails.append(f"per-hook cap ({_SELFTEST_TIMEOUT_S}s) >= aggregate budget "
+                         f"({_WEEKLY_BUDGET_S}s): one slow hook consumes the whole slice")
+        slow = os.path.join(td, "slow_hook.py")
+        with open(slow, "w", encoding="utf-8") as f:
+            f.write("import time; time.sleep(3); print('SELFTEST OK')\n")
+        slow2 = os.path.join(td, "slow2_hook.py")
+        with open(slow2, "w", encoding="utf-8") as f:
+            f.write("import time; time.sleep(3); print('SELFTEST OK')\n")
+        st = _state("budget")
+        p1, c1, ok1, _, left1 = run_weekly_selftests([slow, slow2, ok_hook], st, budget_s=1)
+        if c1 != 1:
+            fails.append(f"budget not enforced: ran {c1} hooks with a 1s aggregate budget")
+        if left1 != 2:
+            fails.append(f"incomplete sweep did not report what was LEFT: left={left1} - "
+                         f"a shrinking sample must never be invisible")
+        if os.path.exists(os.path.join(st, _WEEKLY_MARKER)):
+            fails.append("marker written for an INCOMPLETE sweep - a week of false silence")
+        if not os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
+            fails.append("no progress persisted - the next session restarts from scratch")
+        # resume: the already-proved hook must NOT be re-run, and the sweep must finish
+        p2, c2, ok2, _, left2 = run_weekly_selftests([slow, slow2, ok_hook], st, budget_s=60)
+        if c2 != 3 or ok2 != 3:
+            fails.append(f"resume did not complete the sweep: n={c2} passed={ok2} probs={p2}")
+        if p2 or left2:
+            fails.append(f"completed resume still reported problems: {p2} left={left2}")
+        if not os.path.exists(os.path.join(st, _WEEKLY_MARKER)):
+            fails.append("completed sweep did not write the marker")
+        if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
+            fails.append("progress file not cleared after a completed sweep")
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

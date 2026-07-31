@@ -175,18 +175,121 @@ def detect(cwd: str) -> tuple[str | None, int, int]:
     return None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
 
 
-def _kill_tree(proc) -> None:
-    """Kill the child AND everything it spawned. Killing only the child leaves grandchildren
-    holding the captured pipe, which is what hung the caller indefinitely."""
+def _win_job_kill_on_close():
+    """A Windows Job Object that kills every process in it when its handle closes, or None.
+
+    `taskkill /T` walks ParentProcessId, so it cannot reach a grandchild once the direct child
+    has been reaped - which is precisely the case cleanup is for. A job object is the OS-level
+    answer: anything the child spawns is in the job too (jobs are inherited), and closing the
+    handle terminates the lot regardless of who is still alive. Fail-safe: any error returns
+    None and the caller falls back to taskkill.
+    """
+    if os.name != "nt":
+        return None
     try:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                           capture_output=True, timeout=20)
-        else:
-            import signal
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        import ctypes
+        from ctypes import wintypes
+
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [("ReadOperationCount", ctypes.c_ulonglong),
+                        ("WriteOperationCount", ctypes.c_ulonglong),
+                        ("OtherOperationCount", ctypes.c_ulonglong),
+                        ("ReadTransferCount", ctypes.c_ulonglong),
+                        ("WriteTransferCount", ctypes.c_ulonglong),
+                        ("OtherTransferCount", ctypes.c_ulonglong)]
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _EXTENDED(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _BASIC),
+                        ("IoInfo", _IO_COUNTERS),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _EXTENDED()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9,  # ExtendedLimitInformation
+                                           ctypes.byref(info), ctypes.sizeof(info)):
+            k32.CloseHandle(job)
+            return None
+        return job
+    except Exception:
+        return None
+
+
+def _win_job_assign(job, pid) -> None:
+    if not job:
+        return
+    try:
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # PROCESS_SET_QUOTA | PROCESS_TERMINATE - not Popen._handle, which is private.
+        handle = k32.OpenProcess(0x0100 | 0x0001, False, int(pid))
+        if handle:
+            k32.AssignProcessToJobObject(job, handle)
+            k32.CloseHandle(handle)
     except Exception:
         pass
+
+
+def _win_job_close(job) -> None:
+    """Closing the last handle terminates every process still in the job."""
+    if not job:
+        return
+    try:
+        import ctypes
+        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(job)
+    except Exception:
+        pass
+
+
+def _kill_tree(proc, pgid=None, job=None) -> None:
+    """Kill the child AND everything it spawned.
+
+    `pgid` must be captured BEFORE the child is reaped. On the "command exited but a grandchild
+    still holds stdout" path - the exact case this cleanup exists for - `proc.wait()` has
+    already reaped it, so `os.getpgid(proc.pid)` raises ProcessLookupError straight into the
+    except and killpg never fires; on Windows `taskkill /T` reports "process not found" because
+    it cannot walk ParentProcessId from a dead parent. The hang was fixed, but the cleanup half
+    of the promise silently never ran, so a test command that starts a dev server or watcher
+    leaked it every turn and kept its port held.
+    """
+    if os.name == "nt":
+        # The job object is the one that actually reaches an orphaned grandchild; taskkill
+        # still runs first because it also handles the case where the job could not be created.
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=20)
+        except Exception:
+            pass
+        _win_job_close(job)
+    else:
+        import signal
+        # start_new_session makes pgid == the child's pid, so the saved value stays valid
+        # after the child is reaped; the whole group dies with it.
+        for target in (pgid, getattr(proc, "pid", None)):
+            if not target:
+                continue
+            try:
+                os.killpg(target, signal.SIGKILL)
+                break
+            except Exception:
+                continue
     try:
         proc.kill()
     except Exception:
@@ -219,9 +322,13 @@ def run_tests(cmd: str, cwd: str, timeout_s: int) -> tuple[int | None, str]:
         kw["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
         kw["start_new_session"] = True  # own process group, so killpg reaches the whole tree
+    job = _win_job_kill_on_close()
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                             universal_newlines=True, encoding="utf-8", errors="replace", **kw)
+    # Assign immediately: jobs are inherited, so anything the child spawns from here on is in
+    # the job too and dies with it - even after the child itself has been reaped.
+    _win_job_assign(job, proc.pid)
     box = {"out": ""}
 
     def reader():
@@ -239,6 +346,15 @@ def run_tests(cmd: str, cwd: str, timeout_s: int) -> tuple[int | None, str]:
     t.daemon = True   # can never keep this process alive, whatever the pipe does
     t.start()
 
+    # Capture the process group BEFORE waiting. proc.wait() reaps the child, after which
+    # os.getpgid(proc.pid) raises and the group can no longer be found (D10).
+    pgid = None
+    if os.name != "nt":
+        try:
+            pgid = os.getpgid(proc.pid)
+        except Exception:
+            pgid = proc.pid   # start_new_session guarantees pgid == pid
+
     timed_out = False
     try:
         proc.wait(timeout=timeout_s)
@@ -246,8 +362,10 @@ def run_tests(cmd: str, cwd: str, timeout_s: int) -> tuple[int | None, str]:
         timed_out = True
     t.join(0.5 if timed_out else 2.0)
     if timed_out or t.is_alive():
-        _kill_tree(proc)   # release the pipe; never leave what we spawned running
+        _kill_tree(proc, pgid, job)  # release the pipe; never leave what we spawned running
         t.join(5)
+    else:
+        _win_job_close(job)          # clean exit: still release the job handle
     return (None if timed_out else proc.returncode), box["out"]
 
 
@@ -452,6 +570,32 @@ def selftest() -> int:
         fails.append("run_tests returned %r for a command that overran its timeout" % rc_t)
     if time.time() - t1 > 30:
         fails.append("run_tests timeout is not bounded (%.0fs)" % (time.time() - t1))
+
+    # 5e. [D10] The grandchild must actually be DEAD, not merely stop blocking us. Nothing
+    # asserted that, and it was not true: on the "command exited, grandchild holds the pipe"
+    # path proc.wait() has already reaped the child, so os.getpgid() raised into a bare except
+    # (POSIX) and `taskkill /T` had no parent left to walk (Windows). The hang was fixed while
+    # the cleanup half silently never ran - a dev server or watcher started by a test leaked
+    # every single turn and kept its port. The survivor writes a marker AFTER sleeping, so the
+    # marker existing is proof it outlived the kill.
+    import tempfile as _tf5
+    _d5 = _tf5.mkdtemp()
+    try:
+        survived = os.path.join(_d5, "SURVIVED").replace("\\", "/")
+        grandchild = (
+            "import time,sys;"
+            "time.sleep(4);"
+            "open(r'%s','w').write('x')" % survived)
+        spawner = ('"%s" -c "import subprocess,sys; subprocess.Popen([sys.executable,\'-c\','
+                   '\'%s\'])"' % (_py, grandchild.replace("'", "\\'")))
+        run_tests(spawner, _d5, 5)
+        time.sleep(7)   # well past the grandchild's own sleep
+        if os.path.exists(survived):
+            fails.append("run_tests left the grandchild ALIVE - it outlived the kill and "
+                         "wrote its marker; a dev server started by a test leaks every turn")
+    finally:
+        _shutil_5 = __import__("shutil")
+        _shutil_5.rmtree(_d5, ignore_errors=True)
 
     # 6. no-gate notice: speaks once on changed source, then never; silent on non-source changes
     global STATE_DIR

@@ -244,7 +244,33 @@ def _selftest() -> int:
             ]}]}}, fh)
 
         fails = []
-        out = "\n".join(audit(settings))
+        # [D9] HERMETIC cwd. audit() merges <cwd>/.claude/settings*.json, and every fixture
+        # call left cwd defaulting to os.getcwd() - so each assertion ran against the fixture
+        # PLUS whatever real project config the process happened to sit in. Both directions
+        # were reproduced: a cwd whose own config wires one hook twice made a correct fixture
+        # FAIL, and a mutation that breaks the SAME-FILE/DIFFERENT-PROGRAMS classification
+        # still printed SELFTEST PASS from that cwd, because the checks are substring tests
+        # over the merged report. A test whose verdict depends on where it was launched is
+        # measuring the machine, not the code.
+        hermetic = os.path.join(td, "no_project_config")
+        os.makedirs(hermetic, exist_ok=True)
+        # An ambient project whose OWN config wires a hook twice, used as the process cwd for
+        # every fixture below. Without a genuinely noisy cwd the hermeticity fix is untestable
+        # on a tidy machine: removing it changes nothing and the mutation survives. Now any
+        # call that forgets a hermetic cwd picks up `ambient_hook.py` and gets caught.
+        noisy = os.path.join(td, "noisy_project")
+        os.makedirs(os.path.join(noisy, ".claude"), exist_ok=True)
+        loud = os.path.join(a, "ambient_hook.py")
+        with open(loud, "w", encoding="utf-8") as fh:
+            fh.write("amb = 1\n")
+        with open(os.path.join(noisy, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"command": loud}, {"command": loud}]}]}}, fh)
+        _real_cwd = os.getcwd()
+        os.chdir(noisy)
+        out = "\n".join(audit(settings, cwd=hermetic))
+        if "ambient_hook.py" in out:
+            fails.append("audit() leaked the invoking cwd's project config despite an "
+                         "explicit hermetic cwd")
         checks = [
             ("widget.py" in out and "DIFFERENT PROGRAMS" in out, "variant conflict not flagged"),
             ("twin.py" in out and "SAME FILE" in out, "args-style duplicate not detected"),
@@ -259,7 +285,12 @@ def _selftest() -> int:
             p = os.path.join(where or td, "s_%d.json" % len(os.listdir(where or td)))
             with open(p, "w", encoding="utf-8") as fh:
                 json.dump({"hooks": {"Stop": [{"hooks": entries}]}}, fh)
-            return "\n".join(audit(p, cwd=cwd)), p
+            # cwd defaults to a directory with NO .claude, never os.getcwd() - see D9 above.
+            out_ = "\n".join(audit(p, cwd=cwd or hermetic))
+            if "ambient_hook.py" in out_:
+                fails.append("_audit_of leaked the invoking cwd's project config - the "
+                             "fixture verdict depends on where the test was launched (D9)")
+            return out_, p
 
         # (4) [findings 20, 23] THE COMMONEST DUPLICATE: the SAME path registered twice.
         # Registrations were collapsed into a SET of directories, so two identical entries
@@ -331,6 +362,28 @@ def _selftest() -> int:
         elif "UNKNOWN" not in out7 and "could not be read" not in out7:
             fails.append("no explicit unknown verdict for an unreadable file: " + out7[:200])
 
+        # (8) [D9] HERMETICITY, asserted directly. Checking that the fixtures pass is not the
+        # same as checking they are isolated: on a machine whose cwd happens to hold a clean
+        # config, dropping the hermetic cwd changes nothing and the mutation survives. So build
+        # an ambient project that DOES wire a hook twice, run a CLEAN fixture from inside it,
+        # and require the report to stay clean. If the cwd layer leaks, this fails.
+        clean_p = os.path.join(td, "clean_fixture.json")
+        with open(clean_p, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"command": os.path.join(a, "solo.py")}]}]}},
+                      fh)
+        leaked = "\n".join(audit(clean_p, cwd=hermetic))
+        if leaked.strip():
+            fails.append("hermetic fixture was not clean: " + leaked[:160])
+        ambient = "\n".join(audit(clean_p, cwd=noisy))
+        if "ambient_hook.py" not in ambient:
+            fails.append("the ambient-project fixture is not actually noisy - this test "
+                         "cannot detect a cwd leak, so it proves nothing")
+        from_noisy = "\n".join(audit(clean_p, cwd=hermetic))   # cwd IS noisy for this block
+        if from_noisy.strip():
+            fails.append("selftest is NOT hermetic - launching from a project whose own "
+                         "config wires a hook twice contaminated a clean fixture: "
+                         + from_noisy[:160])
+
         if fails:
             for f in fails:
                 print("SELFTEST FAIL: " + f)
@@ -344,10 +397,17 @@ def _selftest() -> int:
         global SETTINGS
         real, SETTINGS = SETTINGS, settings
         buf = _io.StringIO()
+        # main() correctly resolves the project layer from os.getcwd() - that IS the production
+        # behaviour - so the TEST must control the cwd rather than the code. Without this the
+        # check merged the launching project's real .claude/settings.json (D9).
+        os.chdir(_real_cwd)          # end of the deliberately-noisy-cwd block
+        real_cwd = os.getcwd()
         try:
+            os.chdir(hermetic)
             with contextlib.redirect_stdout(buf):
                 rc = main()
         finally:
+            os.chdir(real_cwd)
             SETTINGS = real
         emitted = buf.getvalue()
         if rc != 0:

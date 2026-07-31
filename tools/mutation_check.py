@@ -132,6 +132,22 @@ MUTATIONS = [
      [("    hooks_dir, via_hooks_path = _hooks_dir_for(target)",
        "    hooks_dir, via_hooks_path = (os.path.join(_common_git_dir(target) or '', 'hooks'), "
        "False)")], False),
+    ("close_skills_guard", "D8", "origin shortcut jumps ahead of the synthetic filter again",
+     [("    if _is_synthetic(content):\n        return False\n\n    origin = entry.get(\"origin\")",
+       "    origin = entry.get(\"origin\")")], False),
+    ("duplicate_registration_check", "D9", "selftest reads the invoking cwd's real config again",
+     [('            out_ = "\\n".join(audit(p, cwd=cwd or hermetic))',
+       '            out_ = "\\n".join(audit(p, cwd=cwd))')], False),
+    ("fast_test_on_stop", "D10", "kill_tree loses the saved pgid / job (grandchild survives)",
+     [("        _kill_tree(proc, pgid, job)  # release the pipe; never leave what we spawned "
+       "running",
+       "        _kill_tree(proc)")], False),
+    ("fast_test_on_stop", "D10b", "the Windows job object is never created",
+     [("    job = _win_job_kill_on_close()", "    job = None")], False),
+    ("hook_health_check", "D11", "the weekly sweep loses its aggregate budget",
+     [("        if time.monotonic() >= deadline:", "        if False:")], False),
+    ("hook_health_check", "D11b", "sweep progress is no longer persisted per hook",
+     [("        _persist()\n\n    n = len(done)", "\n    n = len(done)")], False),
     ("hook_health_check", "18", "the weekly sweep goes back to a hardcoded roster",
      [('    d = hooks_dir or _HOOKS_DIR\n    return [p for p in sorted(glob.glob(os.path.join('
        'd, "*.py"))) if has_selftest(p)]',

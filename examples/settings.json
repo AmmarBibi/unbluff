@@ -19,15 +19,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/hook_health_check.py\""
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/hook_health_check.py\"",
+            "timeout": 90
           },
           {
             "type": "command",
-            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/duplicate_registration_check.py\""
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/duplicate_registration_check.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/usage_snip_prompt.py\""
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/usage_snip_prompt.py\"",
+            "timeout": 10
           }
         ],
         "id": "unbluff:hook-health",
