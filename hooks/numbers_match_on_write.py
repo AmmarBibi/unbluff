@@ -487,8 +487,25 @@ def _selftest_units() -> "list[str]":
     raws = [c[1] for c in cites]
     if "94.8%" not in raws or "2.85 s" not in raws:
         fails.append("measurement numbers missing: %r" % raws)
+    # [P13 D3] These two used to run with check_integers=False, where the bare-integer gate has
+    # ALREADY removed "3", "2" and "2021" - so the cross-reference gate and the year gate they
+    # name could not possibly be the reason, and neither assertion could fail for its stated
+    # property. Re-run them with check_integers=True, the only mode where those gates are
+    # reachable, and keep a decimal-bearing reference so the default mode is covered too.
     if "3" in raws or "2" in raws:
         fails.append("figure/table refs not skipped: %r" % raws)
+    int_cites = cited_numbers(
+        "Overshoot 94.8% at t=2.85 s; see Figure 3 and Table 2 in 2021.", True)
+    int_raws = [c[1] for c in int_cites]
+    if "3" in int_raws or "2" in int_raws:
+        fails.append("with check_integers=true, figure/table refs are no longer skipped by the "
+                     "cross-reference gate: %r" % int_raws)
+    if any(c[2] == 2021 for c in int_cites):
+        fails.append("with check_integers=true, the year gate no longer skips 2021: %r"
+                     % int_raws)
+    if not any(c[2] == 5 for c in cited_numbers("There are 5 modes.", True)):
+        fails.append("check_integers=true should include a bare integer that is not a "
+                     "reference or a year - otherwise the two gates above prove nothing")
     if any(c[2] == 2021 for c in cites):
         fails.append("year 2021 not skipped")
     if any(c[1] == "2" for c in cited_numbers("There are 2 modes.", False)):

@@ -115,6 +115,17 @@ def _is_user_role(entry) -> bool:
     return isinstance(message, dict) and message.get("role") == "user"
 
 
+USER_MEDIA_BLOCK_TYPES = ("image", "document")
+
+
+def has_user_media(content) -> bool:
+    """True if content carries a user-authored media block (a pasted image or document)."""
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") in USER_MEDIA_BLOCK_TYPES
+               for b in content)
+
+
 def is_genuine_user(entry) -> bool:
     """True iff this entry is the USER speaking - not a tool result, not a harness injection.
 
@@ -146,7 +157,11 @@ def is_genuine_user(entry) -> bool:
     origin = entry.get("origin")
     if isinstance(origin, dict) and origin.get("kind"):
         return origin.get("kind") == "human"
-    return first_text(content) is not None
+    # [P13 D4] An image-ONLY prompt carries no text block at all, so a text-only shape test
+    # read it as "not the user" and the turn boundary silently slid back to the PREVIOUS turn.
+    # Every injection check above still runs first, so tool results and harness entries are
+    # unaffected, and user([]) stays False.
+    return first_text(content) is not None or has_user_media(content)
 
 
 # ------------------------------------------------------------------ selftest
@@ -169,6 +184,11 @@ def selftest() -> int:
     check(user([{"type": "image", "source": {}}, {"type": "text", "text": "here"}]), True,
           "IMAGE-FIRST prompt (content[0] is not text)")
     check(user("continue", origin={"kind": "human"}), True, "origin=human")
+    # [P13 D4] image-ONLY and document-only prompts are still the user speaking
+    check(user([{"type": "image", "source": {}}]), True, "IMAGE-ONLY prompt (no text block)")
+    check(user([{"type": "document", "source": {}}]), True, "DOCUMENT-ONLY prompt")
+    check(user([{"type": "image", "source": {}}], isMeta=True), False,
+          "image-only but harness-injected is still NOT the user")
     check(user([{"type": "tool_result", "content": "out"}]), False, "tool_result")
     check(user("x", isMeta=True), False, "isMeta")
     check(user("x", sourceToolUseID="toolu_1"), False, "sourceToolUseID")

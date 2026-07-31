@@ -97,10 +97,10 @@ def load_ledger() -> list:
         return []
 
 
-def last_change(unit: str) -> str | None:
+def last_change(unit: str, repo: str = REPO) -> str | None:
     """ISO date of the newest commit touching this unit, or None if git cannot say."""
     try:
-        r = subprocess.run(["git", "-C", REPO, "log", "-1", "--format=%cI", "--", unit],
+        r = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%cI", "--", unit],
                            capture_output=True, text=True, timeout=30,
                            encoding="utf-8", errors="replace")
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -117,7 +117,7 @@ def _parse(ts: str):
         return None
 
 
-def dirty_units(unit_list: list) -> set:
+def dirty_units(unit_list: list, repo: str = REPO) -> set:
     """Units with UNCOMMITTED changes in the working tree.
 
     last_change() reads commit history only, but --record stamps now() against the WORKING
@@ -128,7 +128,7 @@ def dirty_units(unit_list: list) -> set:
     review -> record -> commit order would then flip every just-reviewed unit to STALE.
     """
     try:
-        r = subprocess.run(["git", "-C", REPO, "status", "--porcelain", "-z", "--"] + unit_list,
+        r = subprocess.run(["git", "-C", repo, "status", "--porcelain", "-z", "--"] + unit_list,
                            capture_output=True, text=True, timeout=30,
                            encoding="utf-8", errors="surrogateescape")
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -338,6 +338,34 @@ def _selftest_fixture() -> list:
     return fails
 
 
+def _selftest_third_state() -> list:
+    """[P13 E1/E2] D3 and D4 were FIXED but nothing pinned them - verified by the P11
+    adjudication, which found the code correct and no regression test that bites.
+
+    Both encode the same contract, and it is the contract this whole gate exists for: a
+    question git could not answer must not return the value that means "answered, and there is
+    nothing wrong". D3 gave dirty_units() its None third state (an empty set read as "nothing
+    is dirty", so --release exited 0 over uncommitted changes wherever git failed). D4 gave
+    last_change()/evaluate() the `unknown` bucket (folding it into `fresh` made the gate exit 0
+    having asked git nothing - reproduced against `git archive HEAD` into a scratch dir, where
+    all 8 correctly-STALE units flipped to FRESH).
+    """
+    fails = []
+    nowhere = os.path.join(REPO, "no_such_dir_here")
+    if dirty_units(["hooks/rate_prompt.py"], repo=nowhere) is not None:
+        fails.append("[D3] dirty_units() returned a SET for a repo git cannot read - an empty "
+                     "set means 'nothing is dirty', so --release passes over uncommitted "
+                     "changes wherever git fails")
+    if last_change("hooks/rate_prompt.py", repo=nowhere) is not None:
+        fails.append("[D4] last_change() returned a value for a repo git cannot read - an "
+                     "unanswerable freshness question is not a passing one")
+    # and the parse guard that keeps a junk timestamp out of the 'fresh' bucket
+    for junk in (None, 42, [], {}, "not-a-date", ""):
+        if _parse(junk) is not None:
+            fails.append("_parse(%r) produced a datetime" % (junk,))
+    return fails
+
+
 def selftest() -> int:
     fixture = _selftest_fixture()
     if fixture == [SKIP_RC]:
@@ -345,7 +373,7 @@ def selftest() -> int:
         return SKIP_RC
     # The ambient repo is checked too - it is the one that actually ships - but the fixture
     # above is what makes the assertion hold in a scratch tree.
-    fails = fixture + _scope_failures(REPO, load_ledger())
+    fails = fixture + _selftest_third_state() + _scope_failures(REPO, load_ledger())
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

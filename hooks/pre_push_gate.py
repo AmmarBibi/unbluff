@@ -101,7 +101,9 @@ def resolve_command(root: str) -> tuple[str | None, int]:
     """(command, timeout_s): a push-time override if the project has one, else fast_test_on_stop's own choice."""
     ov = os.path.join(root, ".claude", "pre-push.cmd")
     if os.path.exists(ov):
-        cmd, timeout_s, _ = fast_test._read_override(ov)
+        # PUSH_OPTIONS, not the turn-end table: a push may legitimately take longer than a
+        # turn end, and sharing one ceiling silently clamped `timeout = 1800` to 600 (P13 D5).
+        cmd, timeout_s, _ = fast_test._read_override(ov, fast_test.PUSH_OPTIONS)
         if cmd:
             return cmd, timeout_s
     cmd, timeout_s, _ = fast_test.detect(root)
@@ -344,6 +346,39 @@ SERVER_HOOKS = frozenset({"pre-receive", "update", "proc-receive", "post-receive
 HIGH_FREQUENCY_HOOKS = frozenset({"reference-transaction"})
 
 
+def all_client_hook_candidates() -> set:
+    """Every client-side hook name git knows, WITHOUT the cost-based exclusions subtracted.
+
+    [P13 D8] git_client_hook_names() subtracts HIGH_FREQUENCY_HOOKS, so the selftest guard
+    written to catch exactly this - `set(git_client_hook_names()) - set(CLIENT_HOOKS)` - was
+    structurally incapable of ever seeing an excluded name: the exclusion happens on the LEFT
+    of that difference. Reporting what was dropped has to start from the unsubtracted set.
+    """
+    names = set(CLIENT_HOOKS)
+    r = _git(["--exec-path"], timeout=10)
+    if r is None or r.returncode != 0 or not (r.stdout or "").strip():
+        return names - SERVER_HOOKS
+    exec_path = (r.stdout or "").strip()
+    for rel in ("../../share/git-core/templates/hooks", "templates/hooks",
+                "../../templates/hooks", "../../../share/git-core/templates/hooks"):
+        d = os.path.normpath(os.path.join(exec_path, rel))
+        if not os.path.isdir(d):
+            continue
+        try:
+            for fn in os.listdir(d):
+                if fn.endswith(".sample"):
+                    names.add(fn[:-len(".sample")])
+        except OSError:
+            pass
+        break
+    return names - SERVER_HOOKS
+
+
+def undispatched_hook_names() -> tuple:
+    """Client hook names --install-global deliberately does NOT dispatch. Derived, never listed."""
+    return tuple(sorted(all_client_hook_candidates() & HIGH_FREQUENCY_HOOKS))
+
+
 def git_client_hook_names() -> tuple:
     """Client-side hook names git ITSELF knows about (its template dir's *.sample files).
 
@@ -467,9 +502,23 @@ def install_global(remove: bool = False) -> int:
     print(f"installed {len(names)} dispatchers in {GLOBAL_HOOKS_DIR}\n"
           f"  global core.hooksPath -> {GLOBAL_HOOKS_DIR}\n"
           f"  every git repo on this machine is now gated, including ones not created yet,\n"
-          f"  and each repo's OWN .git/hooks/<name> still runs after the gate.\n"
+          f"  and each repo's OWN .git/hooks/<name> still runs after the gate, for the\n"
+          f"  {len(names)} names listed above.\n"
           f"  caveat: a repo setting its own core.hooksPath (husky/lefthook) overrides this -\n"
           f"          run `--install <repo>` there to restore the gate.")
+    # [P13 D8] Say what was DROPPED. core.hooksPath REPLACES .git/hooks wholesale, so a name
+    # with no dispatcher here stops a repo-local hook of that name firing at all - the exact
+    # effect the CLIENT_HOOKS comment above forbids. The exclusion itself is correct and stays
+    # (re-including reference-transaction measured a 200-tag `git fetch --tags` going from
+    # ~0.9s to over 100s). Making a change with a real functional consequence while printing
+    # an unqualified guarantee that it has none is the defect.
+    dropped = undispatched_hook_names()
+    if dropped:
+        print(f"  NOT DISPATCHED (git fires these once per ref; a global dispatcher measured\n"
+              f"  0.9s -> 100s+ on a 200-tag fetch): {', '.join(dropped)}\n"
+              f"    core.hooksPath REPLACES .git/hooks, so a repo-local hook of these names\n"
+              f"    WILL STOP FIRING while this is set. A repo that needs one must set that\n"
+              f"    repo's own core.hooksPath and run `--install <repo>` there.")
     return 0
 
 
@@ -500,6 +549,29 @@ def _tmpdir(stack) -> str:
     d = tempfile.mkdtemp()
     stack.callback(shutil.rmtree, d, True)
     return d
+
+
+def _selftest_undispatched_disclosure() -> list:
+    """[P13 D8] --install-global may drop a hook name for cost, but never in silence."""
+    fails = []
+    cand = all_client_hook_candidates()
+    dropped = set(undispatched_hook_names())
+    dispatched = set(git_client_hook_names())
+    # derived, not hardcoded: a name is either dispatched or disclosed as dropped
+    unaccounted = sorted(cand - dispatched - dropped)
+    if unaccounted:
+        fails.append("client hook(s) neither dispatched nor disclosed as dropped: %r"
+                     % (unaccounted,))
+    if dropped & dispatched:
+        fails.append("a name is both dispatched and reported dropped: %r"
+                     % (sorted(dropped & dispatched),))
+    # the guard that used to be blind: it diffed git_client_hook_names() - CLIENT_HOOKS, and
+    # the exclusion happens on the LEFT of that difference, so an excluded name was invisible
+    # to it by construction. This one starts from the UNSUBTRACTED set.
+    if HIGH_FREQUENCY_HOOKS & cand and not dropped:
+        fails.append("HIGH_FREQUENCY_HOOKS excludes a real client hook but "
+                     "undispatched_hook_names() reports nothing - the disclosure is blind")
+    return fails
 
 
 def selftest() -> int:
@@ -913,15 +985,17 @@ def selftest() -> int:
                 except Exception as e:
                     fails.append("install() in a linked worktree RAISED %r" % (e,))
                 if rc_i == 0:
-                    probe = subprocess.run(["git", "-C", wt_path, "rev-parse", "--git-path",
-                                            "hooks"], capture_output=True, text=True,
-                                           encoding="utf-8", errors="replace")
-                    hd = (probe.stdout or "").strip()
-                    if hd and not os.path.isabs(hd):
-                        hd = os.path.join(wt_path, hd)
-                    if not (hd and os.path.exists(os.path.join(hd, "pre-push"))):
-                        fails.append("install() in a worktree wrote where git never looks "
-                                     "(git-path hooks=%r)" % (hd,))
+                    # [P13 D7] Assert against the host repo's real hooks dir, computed
+                    # LITERALLY (hooks_common, already known 30 lines above). This used to
+                    # probe `git rev-parse --git-path hooks` - the one primitive finding P1
+                    # established is WRONG here, because it answers with core.hooksPath
+                    # whenever that is set, which is exactly the state of any machine that has
+                    # run --install-global. The test was asserting against the broken
+                    # primitive the production code was fixed to stop using, so on such a
+                    # machine it could pass while install() had written nowhere git looks.
+                    if not os.path.exists(os.path.join(hooks_common, "pre-push")):
+                        fails.append("install() in a linked worktree did not write pre-push "
+                                     "into the host repo's real hooks dir %r" % (hooks_common,))
                     install(wt_path, remove=True)
 
         # 19c. [D7] git honours core.hooksPath INSTEAD of $GIT_DIR/hooks, with no fallback.
@@ -1005,6 +1079,7 @@ def selftest() -> int:
             fails.append("git knows client hooks with no dispatcher: %s" % missing_names)
 
     fast_test.STATE_DIR = real_state
+    fails += _selftest_undispatched_disclosure()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

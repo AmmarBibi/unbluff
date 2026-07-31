@@ -99,10 +99,17 @@ def is_git_worktree(cwd: str) -> bool:
     return r.returncode == 0 and (r.stdout or "").strip() == "true"
 
 
-_OPTION_KEYS = {"timeout": (5, 600), "debounce": (0, 86400)}
+# [P13 D5] Two gates, two ceilings. The turn-end hook must never stall a turn, so 600s is
+# right for it - but pre_push_gate shared this table, so a project that set `timeout = 1800`
+# in .claude/pre-push.cmd had it silently clamped to 600, making the remedy the gate's own
+# error message prescribes ("raise the timeout") a no-op. A push may legitimately take longer
+# than a turn end; that is the whole difference between the two gates.
+TURN_END_OPTIONS = {"timeout": (5, 600), "debounce": (0, 86400)}
+PUSH_OPTIONS = {"timeout": (5, 7200), "debounce": (0, 86400)}
+_OPTION_KEYS = TURN_END_OPTIONS   # the turn-end default; kept as the name callers already use
 
 
-def _read_override(path: str) -> tuple[str | None, int, int]:
+def _read_override(path: str, options: dict | None = None) -> tuple[str | None, int, int]:
     """(command, timeout_s, debounce_s) from a .claude/fast-test.cmd file.
 
     A malformed OPTIONAL line must never discard the COMMAND. `timeout=5m` used to raise
@@ -116,6 +123,7 @@ def _read_override(path: str) -> tuple[str | None, int, int]:
     `key = value` with spaces is recognised too. Unrecognised, it fell through to the `elif`
     and became the COMMAND - so a typo'd option line was handed to a shell and executed.
     """
+    opts = options or _OPTION_KEYS
     cmd, timeout_s, debounce_s = None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
     name = os.path.basename(path)
     try:
@@ -130,8 +138,8 @@ def _read_override(path: str) -> tuple[str | None, int, int]:
             continue
         head, sep, val = line.partition("=")
         key = head.strip().lower()
-        if sep and key in _OPTION_KEYS:
-            lo, hi = _OPTION_KEYS[key]
+        if sep and key in opts:
+            lo, hi = opts[key]
             try:
                 parsed = int(val.strip())
             except ValueError:
@@ -369,6 +377,30 @@ def run_tests(cmd: str, cwd: str, timeout_s: int) -> tuple[int | None, str]:
     return (None if timed_out else proc.returncode), box["out"]
 
 
+def project_root(cwd: str) -> str:
+    """The repo TOPLEVEL - the same anchor pre_push_gate._repo_root() uses.
+
+    [P13 D6] The Stop payload's `cwd` is the SESSION directory, routinely a package
+    subdirectory in a monorepo. pre_push_gate keyed the shared state file by `git rev-parse
+    --show-toplevel` while this hook keyed it by the raw session cwd, so a pass recorded at
+    turn end from `repo/pkg/api` was invisible to the push gate keyed on `repo` - and the
+    advertised fast path (skip tests that just passed) could never fire from a subdirectory.
+    Finding 28/34 canonicalised the SPELLING of the key; the two gates were still keying
+    different DIRECTORIES. Falls back to cwd when git cannot answer, which just restores the
+    old behaviour rather than inventing a new key.
+    """
+    try:
+        r = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL, encoding="utf-8", errors="surrogateescape")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return cwd
+    if r.returncode != 0:
+        return cwd
+    top = (r.stdout or "").strip()
+    return top if top and os.path.isdir(top) else cwd
+
+
 def _state_key(cwd: str) -> str:
     """One canonical spelling of a project root, so every caller lands on the same state file.
 
@@ -441,6 +473,9 @@ def main() -> int:
     cwd = payload.get("cwd") or os.getcwd()
     if not is_git_worktree(cwd):
         return 0
+    # Anchor the SHARED state on the repo toplevel, exactly as pre_push_gate does, so a pass
+    # recorded from a package subdirectory is visible to the push gate (P13 D6).
+    cwd = project_root(cwd)
 
     cmd, timeout_s, debounce_s = detect(cwd)
     if not cmd:
@@ -492,6 +527,49 @@ def main() -> int:
         sys.stderr.write(f"[fast-test] FAILING at stop - fix before finishing (cmd: {cmd}):\n{tail}\n")
         return 2  # feed the failure back to Claude exactly once (stop_hook_active guards the loop)
     return 0
+
+
+def _selftest_gate_alignment() -> list:
+    """[P13 D5/D6] The two gates must share a CEILING policy and a state ANCHOR."""
+    import tempfile
+    fails = []
+
+    # D5: the push gate has its own, larger ceiling; the turn-end gate keeps 600.
+    if TURN_END_OPTIONS["timeout"][1] != 600:
+        fails.append("the turn-end timeout ceiling moved off 600 - a Stop hook must not stall "
+                     "a turn: %r" % (TURN_END_OPTIONS["timeout"],))
+    if PUSH_OPTIONS["timeout"][1] <= TURN_END_OPTIONS["timeout"][1]:
+        fails.append("the push ceiling is not above the turn-end ceiling, so `timeout = 1800` "
+                     "in .claude/pre-push.cmd is still clamped and the remedy the gate's own "
+                     "error message prescribes is a no-op: %r" % (PUSH_OPTIONS["timeout"],))
+    with tempfile.TemporaryDirectory() as td:
+        ov = os.path.join(td, "pre-push.cmd")
+        with open(ov, "w", encoding="utf-8") as fh:
+            fh.write("timeout = 1800" + chr(10) + "python -c \"pass\"" + chr(10))
+        _c, t_turn, _d = _read_override(ov)
+        _c, t_push, _d = _read_override(ov, PUSH_OPTIONS)
+        if t_turn != 600:
+            fails.append("turn-end clamp changed: %r" % (t_turn,))
+        if t_push != 1800:
+            fails.append("the push gate still clamps a configured 1800s to %r" % (t_push,))
+
+    # D6: a SUBDIRECTORY of a repo must key the shared state on the same root as the toplevel.
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            ok = subprocess.run(["git", "-C", td, "init", "-q"], capture_output=True,
+                                timeout=60).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        if not ok:
+            print("SELFTEST SKIP: git unavailable, state-anchor case untested")
+            return fails
+        sub = os.path.join(td, "pkg", "api")
+        os.makedirs(sub, exist_ok=True)
+        if _state_path(project_root(sub)) != _state_path(project_root(td)):
+            fails.append("a session in a package SUBDIRECTORY keys the shared state file "
+                         "differently from the repo toplevel, so the pass it records is "
+                         "invisible to the push gate and the fast path never fires")
+    return fails
 
 
 def selftest() -> int:
@@ -811,6 +889,7 @@ def selftest() -> int:
         for d in _trash:
             _shutil.rmtree(d, ignore_errors=True)
 
+    fails += _selftest_gate_alignment()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

@@ -225,6 +225,20 @@ def _image_then_text(text, origin=True):
     return e
 
 
+def _nonmedia_then_text(text):
+    """A NON-media block before the text, with no origin field.
+
+    [P13 D4] This fixture exists to keep finding 13 ("first_text scans EVERY block, not just
+    content[0]") provable. Adding has_user_media() gave the image-first fixture a second way to
+    be recognised, so slicing first_text back to content[:1] stopped failing there - the fix
+    for one finding quietly disarmed the test for another. A leading block that is neither text
+    nor user media can ONLY be classified correctly by scanning past index 0.
+    """
+    return {"message": {"role": "user", "content": [
+        {"type": "thinking", "thinking": "..."},
+        {"type": "text", "text": text}]}}
+
+
 def _task_notification():
     return {"origin": {"kind": "task-notification"},
             "message": {"role": "user", "content": [
@@ -345,6 +359,15 @@ def selftest() -> int:
                            "image-first prompt without origin")
         if code != 2:
             fails.append("image-first prompt with no origin field was not counted as the user")
+
+        # (8b) [finding 13, kept provable after P13 D4] a NON-media leading block. The
+        # image-first fixture above can now pass via has_user_media(), so only this one still
+        # proves first_text() scans past content[0].
+        code, _ = _verdict([_human("wrap up"), *all4, _nonmedia_then_text("continue")],
+                           "text-not-first prompt with no media block")
+        if code != 2:
+            fails.append("a user prompt whose text is not the FIRST content block was not "
+                         "counted as the user - first_text() is only looking at content[0]")
 
         # (9-12) [finding 17] harness-injected role=user entries must NOT end the window.
         # Each of these wrongly BLOCKED a correct close, telling Claude to re-run four

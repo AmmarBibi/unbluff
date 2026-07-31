@@ -21,7 +21,6 @@ Run with --selftest to verify the mechanics (uses tempfile, never the real state
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -66,7 +65,20 @@ _EXEMPT_RE = re.compile(
 )
 
 # Plan/roadmap file names this guard watches (basename, case-insensitive).
-_PLAN_GLOBS = ("*plan*.md", "*roadmap*.md")
+# TOKENS, not substrings. `*plan*.md` also claims "explanation.md" (ex-PLAN-ation), so an
+# ordinary docs page that happened to say "rendered on demand" was told to "reclassify into a
+# SCHEDULED build item" (P13 D1). meta_audit_on_stop imports THIS predicate rather than
+# carrying its own copy of the same glob - it had the identical defect, and two spellings of
+# one question is the twin failure this repo keeps re-finding.
+_PLAN_TOKENS = frozenset({"plan", "plans", "planning", "roadmap", "roadmaps"})
+
+
+def is_plan_file(name: str) -> bool:
+    """True iff a WORD token of the basename is plan/roadmap and it is a .md file."""
+    base = os.path.basename(name or "").lower()
+    if not base.endswith(".md"):
+        return False
+    return any(tok in _PLAN_TOKENS for tok in re.split(r"[^a-z0-9]+", base[:-3]) if tok)
 
 
 # A marker preceded by a negation within this many chars is the plan ASSERTING completeness
@@ -88,11 +100,6 @@ def is_soft_defer_line(line: str) -> bool:
     if _EXEMPT_RE.search(line):
         return False
     return any(not _negated(line, m.start()) for m in _MARKER_RE.finditer(line))
-
-
-def is_plan_file(path: str) -> bool:
-    base = os.path.basename(path or "").lower()
-    return any(fnmatch.fnmatch(base, g) for g in _PLAN_GLOBS)
 
 
 # --- dangling-home detection --------------------------------------------------------------------
@@ -233,9 +240,13 @@ def _selftest_line_cases() -> list:
         ("| 9.7 | wait for a concrete failing case before building", True),
         ("| 9.6 | only on real user demand", True),
         ("| 9.5 | deferred opportunistic; pick when value beats next bug", True),
-        ("| 9.4 | was parked; now scheduled 8.11", False),   # reclassified -> exempt
-        ("| 9.3 | FINALIZED justified exclusion: not in corpus", False),
-        ("| 9.2 | NO 'park' remains (completeness mandate)", False),
+        ("| 9.4 | -> park was the old call; was parked; now scheduled 8.11", False),   # reclassified -> exempt
+        ("| 9.3 | on-demand build: FINALIZED justified exclusion: not in corpus", False),
+        # [P13 D2] These three fixtures carried an exemption but NO marker, so they asserted
+        # False against a function that returns False for any unmarked line - they could not
+        # fail whatever _EXEMPT_RE did. Each now carries a real marker as well, so narrowing
+        # or deleting the exemption flips it to True and the suite goes red.
+        ("| 9.2 | someday-items: NO 'park' remains (completeness mandate)", False),
         ("| 9.15 | SCHEDULED as a real build item, NOT on-demand; ships next", False),  # negated
         ("| 9.12 | ships eagerly, never on demand", False),   # negated -> exempt
         ("| 9.1 | PARKED: uppercase is meta_audit's job, not ours", False),
@@ -365,8 +376,57 @@ def _selftest_cap_notice() -> list:
                      % (msg,))
     return fails
 
+def _selftest_plan_file_tokens() -> list:
+    """[P13 D1] TOKENS, not substrings - and meta_audit must use THIS predicate, not a copy."""
+    fails = []
+    for name in ("MASTER_PLAN.md", "plan.md", "docs/ROADMAP.md", "my-planning-notes.md",
+                 "PLANS.md", "roadmaps.md"):
+        if not is_plan_file(name):
+            fails.append("is_plan_file(%r) should be True" % name)
+    for name in ("explanation.md", "EXPLANATION.md", "deplaning.md", "PLAN.txt",
+                 "planetarium.md", "README.md", ""):
+        if is_plan_file(name):
+            fails.append("is_plan_file(%r) should be False - a substring match claims ordinary "
+                         "docs pages and nags them about SCHEDULED build items" % name)
+
+    # BEHAVIOURAL twin-guard, the same shape as meta_audit's shared-repo-probe check: swap the
+    # predicate for a recorder and require the sibling to actually call it. A textual check
+    # would have to contain the glob it forbids.
+    import importlib
+    try:
+        meta = importlib.import_module("meta_audit_on_stop")
+    except Exception as e:      # pragma: no cover - import problems surface elsewhere
+        return fails + ["could not import meta_audit_on_stop for the twin check: %r" % (e,)]
+    import tempfile
+    called = []
+
+    def _recorder(name):
+        called.append(name)
+        return False
+
+    # Patch the module object meta_audit actually holds. Run as `python plan_defer_guard.py`
+    # this file is __main__, so a separate `plan_defer_guard` module object exists - patching
+    # our own globals() would leave the real call site untouched and the guard would report a
+    # twin that is not there.
+    target = getattr(meta, "plan_defer_guard", None) or sys.modules["plan_defer_guard"]
+    real = target.is_plan_file
+    target.is_plan_file = _recorder
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "MASTER_PLAN.md"), "w", encoding="utf-8") as fh:
+                fh.write("x" + chr(10))
+            meta.find_plan_files(td)
+    finally:
+        target.is_plan_file = real
+    if not called:
+        fails.append("meta_audit_on_stop.find_plan_files does not call the SHARED plan-file "
+                     "predicate - it has grown its own again, which is the twin this check "
+                     "exists to prevent")
+    return fails
+
+
 def selftest() -> int:
-    fails = _selftest_cap_notice() + _selftest_line_cases() + _selftest_pipeline() + _selftest_dangling()
+    fails = _selftest_plan_file_tokens() + _selftest_cap_notice() + _selftest_line_cases() + _selftest_pipeline() + _selftest_dangling()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

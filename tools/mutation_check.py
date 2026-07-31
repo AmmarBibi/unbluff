@@ -255,6 +255,42 @@ MUTATIONS = [
      "when git cannot answer",
      [("    if r.returncode != 0:\n        return None\n    return {x.replace",
        "    if r.returncode != 0:\n        return set()\n    return {x.replace")], False),
+    # P13 E: D3/D4 were already FIXED, but the adjudication found NO test that bites. "Fixed"
+    # and "pinned" are different claims and only one of them was true. Both anchors target the
+    # returncode branch - git RUNS fine against a path that does not exist and simply exits
+    # non-zero, which is the ordinary shape of "git could not answer".
+    ("tools/check_review_freshness", "E1", "[D3] dirty_units returns an empty set when git "
+     "cannot answer",
+     [("    if r.returncode != 0:\n        return None\n    out = set()",
+       "    if r.returncode != 0:\n        return set()\n    out = set()")], False),
+    ("tools/check_review_freshness", "E2", "[D4] last_change reports a date when git could not "
+     "answer",
+     [('    if r.returncode != 0:\n        return None\n    return (r.stdout or "").strip() or None',
+       '    if r.returncode != 0:\n        return ""\n    return (r.stdout or "").strip() or None')],
+     False),
+    # ---- P13 D: the remaining never-adjudicated findings.
+    ("plan_defer_guard", "D1", "plan-file matching back to a `*plan*.md` SUBSTRING glob "
+     "(explanation.md becomes a plan)",
+     [("    return any(tok in _PLAN_TOKENS for tok in re.split(r\"[^a-z0-9]+\", base[:-3]) if tok)",
+       '    import fnmatch\n    return fnmatch.fnmatch(base, "*plan*.md")')], False),
+    ("meta_audit_on_stop", "D1b", "meta_audit grows its own plan-file glob again",
+     [("            if plan_defer_guard.is_plan_file(n) and os.path.isfile(os.path.join(cwd, n))]",
+       '            if "plan" in n.lower() and n.lower().endswith(".md")\n'
+       "            and os.path.isfile(os.path.join(cwd, n))]")], False, "plan_defer_guard"),
+    ("plan_defer_guard", "D2", "the exemption branch stops being load-bearing",
+     [("    if _EXEMPT_RE.search(line):\n        return False", "    if False:\n        return False")],
+     False),
+    ("transcript_util", "D4", "an image-only prompt is not a turn boundary again",
+     [("    return first_text(content) is not None or has_user_media(content)",
+       "    return first_text(content) is not None")], False),
+    ("fast_test_on_stop", "D5", "the push gate shares the turn-end 600s ceiling again",
+     [('PUSH_OPTIONS = {"timeout": (5, 7200), "debounce": (0, 86400)}',
+       'PUSH_OPTIONS = {"timeout": (5, 600), "debounce": (0, 86400)}')], False),
+    ("fast_test_on_stop", "D6", "the Stop gate keys shared state on the SESSION dir again",
+     [("    cwd = project_root(cwd)\n", "")], False),
+    ("pre_push_gate", "D8", "--install-global stops disclosing the hook names it drops",
+     [("    return tuple(sorted(all_client_hook_candidates() & HIGH_FREQUENCY_HOOKS))",
+       "    return ()")], False),
     # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
     # input is indistinguishable from one reporting a clean bill of health.
     ("stop_dispatcher", "C1", "a crashed hook is recorded as a clean rc=0 again",

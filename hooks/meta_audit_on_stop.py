@@ -18,7 +18,6 @@ Run with --selftest to verify the mechanics (uses tempfile, never the real state
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import os
 import re
@@ -36,6 +35,7 @@ if _HOOKS_DIR not in sys.path:
 # costs nothing new.
 import fast_test_on_stop as fast_test  # noqa: E402  (path set above)
 import capped_report  # noqa: E402  ONE way to cap a findings list, shared by five hooks
+import plan_defer_guard  # noqa: E402  ONE plan-file predicate; this module had a twin of it
 
 HOOK_NAME = "meta_audit_on_stop"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
@@ -105,7 +105,11 @@ def scan_plan_text(name: str, text: str) -> tuple[list[str], int]:
 
 
 def find_plan_files(cwd: str) -> list[str]:
-    """Repo-ROOT-only (no recursion) *PLAN*.md files, matched case-insensitively."""
+    """Repo-ROOT-only (no recursion) plan/roadmap .md files.
+
+    Uses plan_defer_guard.is_plan_file - the SHARED predicate. This module carried its own
+    `fnmatch(n, "*plan*.md")`, which is a substring match: "explanation.md" is a plan file to
+    it. Two spellings of one question, each wrong the same way (P13 D1)."""
     if not cwd or not os.path.isdir(cwd):
         return []
     try:
@@ -113,7 +117,7 @@ def find_plan_files(cwd: str) -> list[str]:
     except OSError:
         return []
     return [os.path.join(cwd, n) for n in names
-            if fnmatch.fnmatch(n.lower(), "*plan*.md") and os.path.isfile(os.path.join(cwd, n))]
+            if plan_defer_guard.is_plan_file(n) and os.path.isfile(os.path.join(cwd, n))]
 
 
 def _git(cwd: str, *args: str) -> str | None:

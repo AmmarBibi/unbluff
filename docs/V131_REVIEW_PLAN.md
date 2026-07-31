@@ -814,7 +814,12 @@ because `transcript_util` was created today. The rate is falling (7 then 4) but 
 which is the argument for the review-freshness gate being a standing release blocker rather
 than a one-off.
 
-## P11 - OPEN: 48 findings ACROSS ALL THREE PASSES that were NEVER ADJUDICATED
+## P11 - 48 findings ACROSS ALL THREE PASSES that were NEVER ADJUDICATED (CLOSED - see P13)
+
+> **Status 2026-07-31: CLOSED.** All 48 reached a verdict in run wf_1a60d178-df1 - 26
+> confirmed and fixed, 2 refuted, 7 already-fixed claims verified (2 of which had no test
+> that bites, now pinned). The adjudication is recorded in P13 below; this section is kept
+> as the record of what was open and why.
 
 **Corrected 2026-07-31 by the consistency-audit close skill.** The first write-up of this
 section blamed the third pass alone. Measured against all three journals, **every** review had
@@ -950,3 +955,121 @@ plus a fourth in `check_review_freshness.units()`. Each was fixed by converting 
 with the tuple kept as a floor. The general rule now has three independent enforcement points
 (the `KNOWN_NO_SELFTEST` floor, the twin-guards in `hook_health_check` and `transcript_util`,
 and the ledger denominator) - but `units()` shows the class is not yet extinct. Assume a fifth.
+
+## P13 - the P11 backlog, ADJUDICATED (run `wf_1a60d178-df1`, 2026-07-31)
+
+All 48 never-adjudicated findings reached a verdict. **35 claims, 35 verdicts, 0 dropped** -
+one independent refuter per claim, no cap, and the workflow's own coverage block reconciled
+findings produced against findings adjudicated before returning.
+
+| | count |
+|---|---|
+| candidates refuted | 2 |
+| candidates CONFIRMED and fixed | 26 |
+| "already fixed by a later pass" - verified fixed | 7 |
+| ...of those, with NO regression test that bites | **2** (now pinned, E1/E2) |
+| new findings this pass produced | 3 (the cap family, D1b, finding 13's disarming) |
+
+Refutation rate 2/28 = 7%, in line with the ~6% of earlier passes. The candidates were
+candidates, and refuting them properly was not wasted work.
+
+### Step 0 - the cap itself
+
+The `.slice(0, 4)` lived in three throwaway per-session scripts, so patching those would have
+been an instance fix to scripts that never run again. The durable home is the canonical harness
+they were copied from, `~/.claude/skills/adversarial-review`:
+
+- the template captures findings PRODUCED **before** any fan-out, reconciles that against
+  findings ADJUDICATED, and logs a loud `COVERAGE GAP` when they differ;
+- the returned `total` is the produced count, not the survivor count, so a caller reading one
+  number cannot mistake a partial run for a complete one;
+- `unadjudicated` is returned explicitly rather than being silently absent;
+- SKILL.md gained a hard rule ("every finding reaches a refuter; never cap the fan-out"), an
+  anti-pattern entry, and the incident table.
+
+### REFUTED, with reasons
+
+- **`check_review_freshness:83`** - "uncaught TypeError on a non-string ledger timestamp".
+  `_parse()` coerces with `str(ts)` before `fromisoformat` AND catches `TypeError`. Two
+  independent guards, neither stale. Corrected severity NONE.
+- **`selftest.yml:34`** - "the mutation harness is invoked by no automation". False in the
+  current tree: a top-level `mutations` job runs `tools/mutation_check.py` on ubuntu for every
+  push and PR. The claim was true when written and was fixed in P12. Corrected severity NONE.
+
+### CONFIRMED and fixed
+
+| id | file | what was actually wrong |
+|---|---|---|
+| A1 | `tools/check_review_freshness.py` | `units()` asked about 17 of 31 tracked .py files - omitting `tools/`, `tests/` **and itself**, so the gate could not detect its own sabotage. Proved by committing a backdoor into `tools/mutation_check.py` with `--release` still exiting 0. Now `UNIT_GLOBS` intersected with `git ls-files`, 31/31. |
+| A3 | `run_selftests.py` | five auxiliary gates invoked under a bare `if os.path.exists(...)`, so renaming a tool silently deleted its gate. A missing gate file is now a FAILURE, and every `tools/*.py` must be declared a gate or explicitly exempt. |
+| B1 | `meta_audit_on_stop.py` | `count_unpushed` mapped "no upstream" (rc=128) to 0, the value that means "clean". A never-pushed branch was byte-identical to a synced tree for its whole pre-first-push life. Three states now. |
+| B2 | `meta_audit_on_stop.py` | `PARKED?` requires the E: it matched the non-word "PARKE" and missed the bare "PARK". Rebuilt from a stem table; the selftest asserts every stem fires alone and no proper prefix does. |
+| B3 | `meta_audit_on_stop.py` | a decision tag was matched anywhere in the line, so "TODO: make sure the socket is closed" was suppressed as already-decided. Tag position (ALL-CAPS or bracketed) is what the hook's own message always asked for. |
+| B4 | `meta_audit_on_stop.py` | `_is_superseded` matched the word anywhere in the first 5 lines, so an ACTIVE plan saying "replaces PLAN_V2, which is superseded" was skipped whole. |
+| B5 | `meta_audit_on_stop.py` | the unpushed bullet was appended LAST, so the display cap discarded it first - it vanished exactly when there was other work to report. |
+| B6/B7/B8 | 4 hooks + `capped_report.py` | the cap was a family of five - see below. |
+| C1 | both dispatchers | a hook that CRASHED was recorded as rc=0 in the fire ledger, so "checked and found nothing" and "raised and verified nothing" were the same record. Fixed in both twins in one commit. |
+| C2/C3 | `rate_prompt.py` | a non-string `prompt` reached `.strip()` and raised (the only stdin hook with no payload guard); and the selftest's only two integration checks printed into the redirected StringIO, so both were invisible. |
+| C4/C5 | `hook_health_check.py` | a malformed `hooks` container or a non-string `command` raised past the already-computed problem list and discarded the ENTIRE report. |
+| C6/C7 | `duplicate_registration_check.py` | a non-string `command` silenced the whole audit; and the D9 `os.chdir` was restored only on the success path, so a FAILING selftest died in tempdir cleanup instead of printing why. |
+| C8 | `numbers_match_on_write.py` | a config whose `sources` KEY never parsed opted the project out in silence - M1's lesson applied at the resolve layer but never at the parse layer. |
+| D1/D1b | `plan_defer_guard.py`, `meta_audit_on_stop.py` | `*plan*.md` is a substring match, so `explanation.md` was a plan file. **Both** hooks had it. One predicate now, with a behavioural twin-guard. |
+| D2 | `plan_defer_guard.py` | three selftest fixtures carried an exemption but no marker, so they asserted False against a function that returns False for any unmarked line - unfailable. |
+| D3 | `numbers_match_on_write.py` | two assertions named the cross-reference and year gates while running in the mode where the bare-integer gate had already removed those numbers. |
+| D4 | `transcript_util.py` | an image-ONLY prompt carries no text block, so the turn boundary slid back to the previous turn. |
+| D5 | `fast_test_on_stop.py` | one option table for two gates silently clamped a push `timeout = 1800` to 600, making the remedy the gate's own error message prescribes a no-op. |
+| D6 | `fast_test_on_stop.py` | the Stop gate keyed shared state on the SESSION dir, the push gate on the repo toplevel, so the advertised fast path never fired from a subdirectory. 28/34 canonicalised the key's SPELLING; the two gates were still keying different DIRECTORIES. |
+| D7 | `pre_push_gate.py` | the worktree install test asserted against `git rev-parse --git-path hooks` - the primitive P1 established is wrong under a live `core.hooksPath`. The test used the broken primitive the production code was fixed to stop using. |
+| D8 | `pre_push_gate.py` | `--install-global` drops `reference-transaction` for cost (measured: 0.9s to 100s+ on a 200-tag fetch, so the exclusion is CORRECT) while printing an unqualified promise that every repo-local hook still fires. The guard written to catch this diffed on the wrong side of the subtraction and was blind by construction. The exclusion stays; the silence is fixed. |
+| E1/E2 | `tools/check_review_freshness.py` | D3/D4 were genuinely fixed, and **nothing pinned them**. Both third-state contracts now have a mutation that bites. |
+
+### The bullet cap was a family of five
+
+`meta_audit`, `plan_defer_guard`, `memory_hygiene_guard`, `numbers_match` and
+`hook_health_check` each grew their own bullet cap. Finding M2 fixed the "say what you dropped"
+rule in `numbers_match` **only**; the other four kept truncating - one with no notice at all,
+one by stopping the scan at 10, one with a "+N more" computed after a silent per-file cap so
+the number itself under-reported. The instance was fixed and the class was not, which is the
+same shape as the four hardcoded rosters.
+
+`hooks/capped_report.py` is now the single home, and it encodes the distinction that matters:
+a DISPLAY cap is fine if it names what it hid, but a COLLECTION cap that `break`s destroys the
+total - you cannot report what you dropped if you stopped counting.
+
+Its selftest walks every hook's **AST** for a list capped against a `MAX_*` constant outside
+the helper. Structural, not textual: a grep-based guard would have to contain the pattern it
+forbids, and this repo has already recorded one guard that could not fail for exactly that
+reason. It found all six offences across the four hooks, and it proves it can SEE a planted
+offender - a matcher that matches nothing is indistinguishable from a clean sweep.
+
+**Known scope limit, stated rather than implied:** the AST guard detects caps named `MAX_*`.
+A cap written as a bare integer literal (`problems[:12]`) is not detected, because the
+false-positive rate on `entry[:2]`-style slicing would make it useless. That one is caught by
+review, not by this gate.
+
+### Three findings this pass produced that P11 did not contain
+
+1. **The cap family.** Found by the twin-grep after fixing B5, not by any reviewer.
+2. **D1b** - `meta_audit` carried a twin of `plan_defer_guard`'s glob defect. Found by the same
+   twin-grep discipline. That is the FIFTH instance of the shared-rule-in-two-places class the
+   P12 note told us to assume.
+3. **Finding 13 was silently disarmed by the fix for D4.** Adding `has_user_media()` gave the
+   image-first fixture a second way to be recognised, so slicing `first_text` back to
+   `content[:1]` stopped failing. The mutation harness caught it; a reader would not have. A
+   non-media leading block now keeps 13 provable. **Fixing one finding can disarm the test for
+   another, and only a mutation run makes that visible.**
+
+Two other pre-existing mutations were broken by this session's own fixes and caught the same
+way: `D9` (the C7 cwd restore ran too early, so the later hermeticity checks no longer ran from
+the noisy directory) and the first draft of A1, whose selftest read the ambient tree and
+therefore asserted nothing inside a scratch copy - its own mutation came back SURVIVED.
+
+### The mutation harness could not reach its own directory
+
+Before this pass the harness copied only `hooks/` into each scratch tree and resolved every
+target as `hooks/<name>.py`. **No fix in `tools/` or in a top-level entry point could be
+mutation-tested at all** - so the tool that certifies every other fix as pinned had a blind
+spot covering itself, while the review-freshness gate that should have noticed omitted `tools/`
+for the same reason. Both halves of the evidence base were unwatched simultaneously. It now
+reaches any repo unit; A1/A1b/A3/A3b/E1/E2 are the first mutations ever applied outside
+`hooks/`.
