@@ -946,8 +946,8 @@ regex marker name inside P11, not a deferral.
   Both grew by absorbing regression tests and shared helpers. The split is behaviour-preserving
   with the selftests as the safety net: move each hook's `selftest()` into a sibling
   `*_selftest.py` imported by the `--selftest` dispatch, leaving the hook body under 800.
-  **Do this AFTER P11**, because P11 will move code in both files and a split first would
-  invalidate every mutation anchor pointing at them. Priority: after P11, before v1.3.1 ships.
+  **DONE 2026-07-31** (see the P12 section at the end): 1113 -> 561 and 900 -> 539. It was
+  not free - the move silently disarmed mutation #1b until the harness caught it.
 
 **The durability lesson this session actually taught.** Three separate hardcoded rosters were
 found (`run_selftests.SELFTESTABLE`, `hook_health_check._LOCAL_HOOKS`, `install.REQUIRED_HOOKS`)
@@ -1073,3 +1073,75 @@ spot covering itself, while the review-freshness gate that should have noticed o
 for the same reason. Both halves of the evidence base were unwatched simultaneously. It now
 reaches any repo unit; A1/A1b/A3/A3b/E1/E2 are the first mutations ever applied outside
 `hooks/`.
+
+### P13 F - what only CI could see (and the premise that was wrong)
+
+The handoff said "CI green". It was not: the `mutations` job added in P12 had **never
+passed**. Its first ubuntu run reported three SURVIVED mutations that Windows catches every
+time - which is exactly the reason that job was added, working as intended on its first
+outing.
+
+| mutation | why Windows caught it and Linux did not |
+|---|---|
+| `pre_push_gate #1` | dropping the explicit utf-8 codec is a literal no-op where the process locale is already UTF-8, so only a non-UTF-8 locale can fail. Fixed by asserting the INVARIANT (this module never falls back to the locale codec) alongside the behavioural case. |
+| `fast_test #D10b` | `_win_job_kill_on_close()` already returns None on POSIX, so the edit changes nothing there. SURVIVED was a statement about the platform, not about the test. Now marked windows-only. |
+| `fast_test #D10` | a timing race - see below. |
+
+**The skip rule needed splitting.** Marking a mutation windows-only immediately exposed that
+"CI must not skip" was written when every skip was runnable on *some* CI platform. An nt-only
+mutation never is, on ubuntu. Skips are now two buckets: genuinely-skipped (still fails CI)
+and not-runnable-on-this-platform (named in the denominator, never silent). A
+`mutations-windows` job now exists so those are proven SOMEWHERE. An ubuntu-only mutation job
+printing a clean summary over mutations it can never execute is this repo's own failure mode,
+reproduced inside the harness built to detect it.
+
+**D10 took three wrong guesses**, and all three were the same mistake: a blind sleep trying to
+out-guess process start latency. The case proves `_kill_tree` really kills an orphaned
+grandchild - the grandchild writes a marker AFTER sleeping, so the marker existing means it
+outlived the kill. That only works if the check looks AFTER the moment a genuine survivor
+would have written.
+
+- 4s sleep against a 5s timeout: the grandchild finished on its own before any kill mattered.
+  SURVIVED on ubuntu.
+- 6s/4s and 9s/8s: the check ran BEFORE a survivor would have written, because the grandchild
+  needs ~1.5s to start on Windows. SURVIVED there instead.
+
+Both directions are one defect: **a test that passes because it measured at the wrong moment.**
+It now polls, with the deadline anchored to the grandchild's own STARTED marker rather than to
+a guessed duration, and it still fails loudly if the fixture never started.
+
+The budget chase is worth recording too. Shaving the case to fit `hook_health_check`'s 20s
+per-hook cap is what pushed it into the too-early failure; raising that cap alone tripped
+hook_health's OWN invariant that the per-hook cap must stay below the aggregate slice - a good
+guard catching a bad fix. Cap and aggregate moved together: 25 < 40 < the 60s SessionStart host
+default, with the measurement written down rather than assumed.
+
+### P12 - the 800-line split, and why it was not free
+
+`pre_push_gate.py` 1113 -> 561, `fast_test_on_stop.py` 900 -> 539. Each `selftest()` now lives
+in a sibling `*_selftest.py`, listed in `KNOWN_NO_SELFTEST` because it IS the test - and the
+floor exists to make that an explicit statement rather than an omission nobody notices.
+
+The refactor was **not** behaviour-preserving on the first attempt, and only one of the two
+failures announced itself:
+
+- **Loud:** `pre_push_gate`'s `main()` sits after its selftest functions, so it moved out with
+  them. Immediate NameError.
+- **Silent:** the selftests monkeypatch module globals. After the move,
+  `globals()["_git"] = fake` rebinds a name in the SELFTEST module while `_repo_root` keeps
+  reading the parent's - so the fake was never reached. Mutation `#1b` went from CAUGHT to
+  SURVIVED: the test still passed, testing nothing. Same class for `global STATE_DIR` and
+  `global project_root`. Every rebind now goes through `_m.<name>`, and the sibling's docstring
+  states the rule as a rule.
+
+A "behaviour-preserving refactor" whose safety net is the selftests is only as safe as the
+proof that the selftests still bite. **That proof is the mutation run, not the green suite** -
+the suite was green in both broken states.
+
+### Final gate state
+
+- suite 21/21 (the two selftest siblings correctly exempted, not counted as run)
+- integration 30/30
+- mutations: 79 entries, 78 executed and ALL caught on Windows; 1 posix-only, named in the
+  denominator and proven by the ubuntu job
+- `check_review_freshness --release`: asks about **31/31** tracked .py files, up from 17
