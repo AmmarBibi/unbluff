@@ -49,9 +49,18 @@ _LOCAL_HOOKS_FLOOR = ("rate_prompt.py", "fast_test_on_stop.py", "show_your_proof
 # Requires the dispatch itself, so a docstring mentioning --selftest cannot false-positive.
 _DISPATCH_RE = re.compile(r"""["']--selftest["']\s+in\s+(?:sys\.)?argv\b""")
 
-# A hook that legitimately has no selftest goes here, explicitly. Empty today: every hook in
-# this suite is self-testable, so ADDING one without a selftest is what turns the gate red.
-KNOWN_NO_SELFTEST = frozenset()
+# A hook that legitimately has no selftest goes here, explicitly. A FLOOR, not a filter:
+# everything NOT listed here that lacks a --selftest turns the gate red rather than skipping
+# in silence, so each entry is a statement somebody had to write down.
+#
+# The two entries are the split-out selftest suites for the hooks whose bodies exceeded the
+# 800-line rule (P12). They ARE the tests - a module whose only job is testing another one does
+# not need one of its own - and giving them their own dispatch would make run_selftests execute
+# both suites twice, doubling the slowest job in the gate.
+KNOWN_NO_SELFTEST = frozenset({
+    "fast_test_on_stop_selftest.py",
+    "pre_push_gate_selftest.py",
+})
 
 SKIP_RC = 77  # a selftest that could not run (no git/sh). Not a pass, not a failure.
 
