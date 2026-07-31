@@ -200,23 +200,36 @@ def selftest() -> int:
         # marker never appeared, and this assertion passed for entirely the wrong reason - CI
         # reported the mutation as a decorative test for two runs (P13 F).
         gc_py = os.path.join(_d5, "gc.py")
+        # The grandchild must outlive the runner's timeout by a wide margin. It slept 4s
+        # against a 5s timeout, so on a fast Linux runner it finished on its own before any
+        # kill mattered and SURVIVED went unwritten whatever _kill_tree did - the mutation came
+        # back SURVIVED on ubuntu twice for exactly that reason (P13 F).
+        gc_sleep = 9
+        _f_txt = ("import time\n"
+                  "open(r'%s', 'w').write('x')\n"
+                  "time.sleep(%d)\n"
+                  "open(r'%s', 'w').write('x')\n" % (started, gc_sleep, survived))
         with open(gc_py, "w", encoding="utf-8") as _f:
-            # The grandchild must outlive the runner's timeout by a WIDE margin. It slept 4s
-            # against a 5s timeout, so on a fast Linux runner it simply finished on its own
-            # before any kill mattered, and SURVIVED went unwritten whatever _kill_tree did -
-            # the mutation came back SURVIVED on ubuntu twice for exactly that reason, while
-            # Windows caught it every time. With 20s against a 4s timeout, this marker can
-            # only appear if the kill genuinely failed (P13 F).
-            _f.write("import time\n"
-                     "open(r'%s', 'w').write('x')\n"
-                     "time.sleep(20)\n"
-                     "open(r'%s', 'w').write('x')\n" % (started, survived))
+            _f.write(_f_txt)
         sp_py = os.path.join(_d5, "spawn.py")
         with open(sp_py, "w", encoding="utf-8") as _f:
             _f.write("import subprocess, sys\n"
                      "subprocess.Popen([sys.executable, r'%s'])\n" % gc_py)
-        run_tests('"%s" "%s"' % (_py, sp_py.replace("\\", "/")), _d5, 4)
-        time.sleep(24)  # past the grandchild's 20s sleep: a survivor HAS written by now
+        run_tests('"%s" "%s"' % (_py, sp_py.replace("\\", "/")), _d5, 3)
+        # POLL against the grandchild's OWN start time rather than sleeping a guessed amount.
+        # A blind sleep has to out-guess the spawn latency, and it kept losing: at 4s and at
+        # 8s the check ran BEFORE a genuine survivor would have written, so the mutation came
+        # back SURVIVED on Windows - a test passing because it looked too early. Anchoring the
+        # deadline to the STARTED marker makes it correct on a fast Linux runner and a slow
+        # Windows one alike, and it costs only what it needs to.
+        _deadline = time.time() + gc_sleep + 20
+        while time.time() < _deadline:
+            if os.path.exists(survived):
+                break
+            if os.path.exists(started) and \
+                    time.time() - os.path.getmtime(started) > gc_sleep + 3:
+                break       # the survivor window has closed: it is genuinely dead
+            time.sleep(0.25)
         # A fixture that never RAN proves nothing. Without this the case degrades to a silent
         # pass wherever the spawn fails.
         if not os.path.exists(started):

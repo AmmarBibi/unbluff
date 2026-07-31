@@ -109,7 +109,13 @@ _STATE_DIR = os.environ.get("UNBLUFF_STATE_DIR") or os.path.join(
     os.path.expanduser("~"), ".claude", "hooks", "state")
 _WEEKLY_MARKER = "hook-health-weekly-selftest.txt"
 _WEEKLY_PROGRESS = "hook-health-weekly-progress.json"
-_SELFTEST_TIMEOUT_S = 20
+# Raised from 20 with the aggregate below, together. The suite legitimately grew: the D10
+# grandchild case must outlive the runner's own timeout to mean anything, and shaving it to
+# fit made the mutation survive on Windows - the test checked for the survivor marker before
+# a real survivor would have written it. A cap a HEALTHY selftest exceeds does not catch a
+# broken hook, it manufactures "ERRORED/timed out" for a passing one. Measured 2026-07-31:
+# slowest is fast_test_on_stop at ~19.7s warm.
+_SELFTEST_TIMEOUT_S = 25
 # AGGREGATE budget for one session's slice of the sweep. There was none: a 45s per-hook cap
 # with 14 hooks and no total deadline, in a SessionStart hook that install.py registered with
 # no `timeout` and therefore inherited the 60s host default. Measured warm on this machine:
@@ -117,7 +123,9 @@ _SELFTEST_TIMEOUT_S = 20
 # whole loop - so one overrun meant the sweep was killed, nothing was recorded, and it started
 # from scratch next session, potentially never finishing. The sweep is now sliced and RESUMABLE:
 # each hook's result is persisted the moment it is known.
-_WEEKLY_BUDGET_S = 25
+_WEEKLY_BUDGET_S = 40   # must stay ABOVE _SELFTEST_TIMEOUT_S (asserted) and well under the
+                        # 60s SessionStart host default; the sweep is sliced and resumable, so
+                        # a slice that runs out simply continues next session.
 _WEEK_DAYS = 7
 _SCRIPT_EXTS = (".py", ".js", ".ps1", ".sh")
 
