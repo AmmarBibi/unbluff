@@ -1199,7 +1199,7 @@ item ships. Every row must end as a mutation-verified fix or a written refutatio
 
 | # | unit | HIGH | total | why here |
 |---|---|---|---|---|
-| 1 | `hooks/capped_report.py` | 3 | 7 | the guard the whole 'assume a fifth' rule rests on; a live unrouted cap already slips past it, so every other cap claim is unverified until this is fixed |
+| 1 | `hooks/capped_report.py` | 4 | 8 | the guard the whole 'assume a fifth' rule rests on; a live unrouted cap already slips past it, so every other cap claim is unverified until this is fixed. **+1 HIGH from the adjudicated dropped candidate** - see `docs/audits/p14_triage.md` |
 | 2 | `tools/mutation_check.py` | 2 | 9 | the harness that certifies every other fix; its `executed` count contradicts its own error block |
 | 3 | `run_selftests.py` | 2 | 3 | mutation A3 targets a function main() never calls, so a P13 fix is pinned by a test that cannot reach it |
 | 4 | `hooks/pre_push_gate_selftest.py` | 2 | 2 | see docs/audits/p14_new_code_review.md |
@@ -1212,12 +1212,36 @@ item ships. Every row must end as a mutation-verified fix or a written refutatio
 | 11 | `hooks/transcript_util.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
 | 12 | `hooks/rate_prompt.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
 
-**Plus one item that is not in the table above and must not be lost:** the dropped
-candidate `verify:ast-guard-completeness:1`, whose refuter died on a usage limit. It
-is neither confirmed nor refuted. Adjudicate it FIRST, before any fix - it concerns
-the same AST guard as row 1, so its verdict may change that work.
+**The dropped candidate is CLOSED: adjudicated CONFIRMED, HIGH, latent** (2026-08-01).
+`verify:ast-guard-completeness:1` - a cap constant that is imported, annotated,
+tuple-assigned or attribute-qualified is invisible to `slicing_offenders`; 5 of 6 spellings
+blind, and `if not caps: continue` skips 13 of the 17 hook files. Evidence and the
+corrected causal account are in `docs/audits/p14_triage.md`. It folds into row 1, which
+is why row 1 now reads 4 HIGH / 8 total.
 
-**Exit condition for P14:** every row above closed, the dropped candidate
-adjudicated, full mutation suite re-run after EACH cluster (not just at the end -
-P13 proved three times that a fix here disarms another finding's test while the
-suite stays green), and CI green on all 14 jobs.
+**The recovered first-run set is TRIAGED and MERGED** (2026-08-01). Overlap with the main
+42 is **41 of 42 (97.6%)**, counted finding-by-finding rather than assumed. It yielded one
+finding with no twin, one twin of the dropped candidate, and two severity ESCALATIONS where
+the first run found live instances the main list called latent. **Merged backlog: 44 open -
+11 HIGH, 24 MEDIUM, 9 LOW.** Full reconciliation table: `docs/audits/p14_triage.md`.
+
+### P14 stopping rule - AGREED 2026-08-01, binding
+
+P13 reviewed P11's code and found 26. P14 reviewed P13's and found 42. A pass over P14's
+fixes will find more. "Review until a pass returns zero" is not a finish line, so P14
+terminates by CONSTRUCTION instead:
+
+1. **Severity bar.** v1.3.1 ships when **zero HIGH is open**. Every remaining MEDIUM and LOW
+   gets a written owner and a scheduled row in this plan - never "optional", never prose.
+2. **Recursion bound.** The P14 fix diff gets **exactly one** review pass, P15, scoped to
+   that diff and not to the repo. P15's HIGHs block the ship; P15's MEDIUM and LOW are
+   scheduled, not fixed. **There is no P16.** Termination does not depend on what P15 finds.
+
+This is the rule the release is measured against. Changing it is a decision to record here,
+not a judgement call to make mid-pass.
+
+**Exit condition for P14:** every row above closed to the severity bar, the dropped
+candidate adjudicated (done), the recovered set triaged and merged (done), full mutation
+suite re-run after EACH cluster (not just at the end - P13 proved three times that a fix
+here disarms another finding's test while the suite stays green), CI green on all 14 jobs,
+and `check_review_freshness --release` showing zero UNRESOLVED units.
