@@ -330,6 +330,9 @@ MUTATIONS = [
     ("numbers_match_on_write", "C8", "an unparsed `sources` key opts the project out silently",
      [('    if not cfg["sources"]:\n        # [P13 C8]', '    if not cfg["sources"]:\n'
        '        return 0, ""\n    if False:\n        # [P13 C8]')], False),
+    ("tools/check_review_freshness", "G2", "a reviewed unit with OPEN findings counts as "
+     "fresh again (the gate asks recency, never outcome)",
+     [("        elif _open_count(entry) > 0:", "        elif False:")], False),
     ("tools/check_readme_fresh", "G1", "an ABSENT selftest-count claim reads as a pass",
      [("    if not claims:\n        # An ABSENT claim is not a passing one.",
        "    if False:\n        # An ABSENT claim is not a passing one.")], False),

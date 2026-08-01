@@ -88,9 +88,9 @@ def units(repo: str = REPO) -> list:
     return sorted(found)
 
 
-def load_ledger() -> list:
+def load_ledger(path: str = None) -> list:
     try:
-        with open(LEDGER, encoding="utf-8") as f:
+        with open(path or LEDGER, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except (OSError, ValueError):
@@ -150,8 +150,16 @@ def dirty_units(unit_list: list, repo: str = REPO) -> set:
     return out
 
 
-def evaluate() -> tuple[list, list, list, list]:
-    """(stale, unreviewed, unknown, fresh) - each a list of (unit, detail) tuples.
+def _open_count(entry) -> int:
+    """UNRESOLVED findings recorded against a review, 0 when absent or unparseable."""
+    try:
+        return max(0, int(entry.get("open") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def evaluate(repo: str = REPO, ledger_path: str = None) -> tuple[list, list, list, list, list]:
+    """(stale, unreviewed, unknown, fresh, unresolved) - each a list of (unit, detail) tuples.
 
     `unknown` is its own bucket because an unanswerable freshness question is not a passing
     one. Folding it into `fresh` made the release gate exit 0 having asked git nothing -
@@ -160,7 +168,7 @@ def evaluate() -> tuple[list, list, list, list]:
     same fix round wrote into pre_push_gate.newest_source_mtime, broken in the tool built to
     enforce the lesson.
     """
-    ledger = load_ledger()
+    ledger = load_ledger(ledger_path)
     newest: dict = {}
     for entry in ledger:
         if not isinstance(entry, dict):
@@ -171,22 +179,22 @@ def evaluate() -> tuple[list, list, list, list]:
         if unit not in newest or when > newest[unit][0]:
             newest[unit] = (when, entry)
 
-    all_units = units()
+    all_units = units(repo)
     # [HIGH-7] `dirty_units` returns None when git could not answer - NOT an empty set. The
     # empty set meant "nothing is dirty", identical to a clean tree, so --release exited 0
     # over uncommitted changes wherever git failed. Its twin `last_change()` was given exactly
     # this third state; this one was not. An unanswerable question is not a passing one.
-    dirty = dirty_units(all_units)
+    dirty = dirty_units(all_units, repo)
     dirty_unknown = dirty is None
     if dirty_unknown:
         dirty = set()
-    stale, unreviewed, unknown, fresh = [], [], [], []
+    stale, unreviewed, unknown, fresh, unresolved = [], [], [], [], []
     for unit in all_units:
         if unit not in newest:
             unreviewed.append((unit, "never adversarially reviewed"))
             continue
         reviewed_at, entry = newest[unit]
-        raw = last_change(unit)
+        raw = last_change(unit, repo)
         changed = _parse(raw or "")
         if dirty_unknown:
             unknown.append((unit, "git could not report whether the working tree is dirty"))
@@ -201,9 +209,15 @@ def evaluate() -> tuple[list, list, list, list]:
         elif changed > reviewed_at:
             stale.append((unit, f"changed {changed.date()} but last reviewed "
                                 f"{reviewed_at.date()} (run {entry.get('run_id', '?')})"))
+        elif _open_count(entry) > 0:
+            # Reviewed, unchanged - and the review found defects nobody has fixed. Counting
+            # this as FRESH is how a gate ends up certifying known-broken code.
+            unresolved.append((unit, f"reviewed {reviewed_at.date()} with "
+                                     f"{_open_count(entry)} finding(s) still OPEN "
+                                     f"(run {entry.get('run_id', '?')})"))
         else:
             fresh.append((unit, f"reviewed {reviewed_at.date()}, unchanged since"))
-    return stale, unreviewed, unknown, fresh
+    return stale, unreviewed, unknown, fresh, unresolved
 
 
 def record(args) -> int:
@@ -219,6 +233,12 @@ def record(args) -> int:
             "agents": args.agents,
             "findings": args.findings,
             "confirmed": args.confirmed,
+            # [P14 meta-review] UNRESOLVED confirmed findings at the time of recording.
+            # The ledger used to record only that a review HAPPENED, so a unit could be
+            # "reviewed since it last changed" - fresh, green, releasable - with seven
+            # confirmed HIGH defects open against it. Recency and outcome are different
+            # questions and the gate only ever asked the first one.
+            "open": args.open_findings,
             "utc": stamp,
         })
     with open(LEDGER, "w", encoding="utf-8") as f:
@@ -327,6 +347,28 @@ def _selftest_fixture() -> list:
         if any("tools/t.py" in g for g in got):
             fails.append("an in-scope recorded unit was wrongly called an orphan: %r" % (got,))
 
+        # [P14 meta-review] the UNRESOLVED bucket. A unit reviewed since it last changed but
+        # carrying open findings must NOT be fresh - the gate asked recency and never outcome,
+        # so it would have certified code with seven confirmed HIGH defects against it.
+        led = os.path.join(repo, "ledger.json")
+        with open(led, "w", encoding="utf-8") as fh:
+            json.dump([{"unit": "hooks/h.py", "run_id": "wf_x",
+                        "utc": "2099-01-01T00:00:00+00:00", "open": 3},
+                       {"unit": "tools/t.py", "run_id": "wf_x",
+                        "utc": "2099-01-01T00:00:00+00:00", "open": 0}], fh)
+        _st, _un, _unk, fresh_u, unres = evaluate(repo, led)
+        fresh_names = {u for u, _ in fresh_u}
+        unres_names = {u for u, _ in unres}
+        if "hooks/h.py" in fresh_names or "hooks/h.py" not in unres_names:
+            fails.append("a unit reviewed WITH open findings was counted as fresh - the gate "
+                         "certifies known-broken code as releasable (fresh=%r unresolved=%r)"
+                         % (sorted(fresh_names), sorted(unres_names)))
+        if "tools/t.py" not in fresh_names:
+            fails.append("a unit reviewed with ZERO open findings was not fresh: %r"
+                         % (sorted(fresh_names),))
+        if _open_count({"open": "junk"}) != 0 or _open_count({}) != 0:
+            fails.append("_open_count did not degrade to 0 on a junk/absent value")
+
         # The THIRD STATE. A path git cannot even enter must yield None, not an empty set:
         # empty reads as "this repo contains no Python", which is a passing answer to a
         # question that was never asked, and it would make units() return the glob's full
@@ -391,6 +433,8 @@ def main() -> int:
     ap.add_argument("--agents", type=int, default=0)
     ap.add_argument("--findings", type=int, default=0)
     ap.add_argument("--confirmed", type=int, default=0)
+    ap.add_argument("--open", dest="open_findings", type=int, default=0,
+                    help="confirmed findings still UNRESOLVED; blocks --release")
     ap.add_argument("--utc", default="", help="override the timestamp (tests)")
     args = ap.parse_args()
 
@@ -399,8 +443,8 @@ def main() -> int:
             sys.exit("ERROR: --record needs --unit and --run-id")
         return record(args)
 
-    stale, unreviewed, unknown, fresh = evaluate()
-    total = len(stale) + len(unreviewed) + len(unknown) + len(fresh)
+    stale, unreviewed, unknown, fresh, unresolved = evaluate()
+    total = (len(stale) + len(unreviewed) + len(unknown) + len(fresh) + len(unresolved))
     # Always print the DENOMINATOR: "0 stale" is meaningless without knowing how many were asked.
     print(f"[review-freshness] {len(fresh)}/{total} units reviewed since their last change")
     for unit, why in stale:
@@ -409,11 +453,14 @@ def main() -> int:
         print(f"  UNREVIEWED: {unit} - {why}")
     for unit, why in unknown:
         print(f"  UNKNOWN:    {unit} - {why}")
-    if not stale and not unreviewed and not unknown:
-        print("  all units have an adversarial review newer than their last change")
-    if args.release and (stale or unreviewed or unknown):
+    for unit, why in unresolved:
+        print(f"  UNRESOLVED: {unit} - {why}")
+    if not stale and not unreviewed and not unknown and not unresolved:
+        print("  all units have an adversarial review newer than their last change, "
+              "with no findings left open")
+    if args.release and (stale or unreviewed or unknown or unresolved):
         print(f"\nRELEASE BLOCKED: {len(stale)} stale, {len(unreviewed)} unreviewed, "
-              f"{len(unknown)} unknown.")
+              f"{len(unknown)} unknown, {len(unresolved)} reviewed-but-unresolved.")
         print("An unanswerable freshness question is not a passing one.")
         print("Run the adversarial-review skill over them, then record it with --record.")
         return 1

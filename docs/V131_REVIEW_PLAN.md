@@ -1000,7 +1000,7 @@ they were copied from, `~/.claude/skills/adversarial-review`:
 
 | id | file | what was actually wrong |
 |---|---|---|
-| A1 | `tools/check_review_freshness.py` | `units()` asked about 17 of 31 tracked .py files - omitting `tools/`, `tests/` **and itself**, so the gate could not detect its own sabotage. Proved by committing a backdoor into `tools/mutation_check.py` with `--release` still exiting 0. Now `UNIT_GLOBS` intersected with `git ls-files`, 31/31. |
+| A1 | `tools/check_review_freshness.py` | `units()` asked about 17 of 31 tracked .py files - omitting `tools/`, `tests/` **and itself**, so the gate could not detect its own sabotage. Proved by committing a backdoor into `tools/mutation_check.py` with `--release` still exiting 0. Now `UNIT_GLOBS` intersected with `git ls-files` - 31/31 that day, 35 today as files were added. |
 | A3 | `run_selftests.py` | five auxiliary gates invoked under a bare `if os.path.exists(...)`, so renaming a tool silently deleted its gate. A missing gate file is now a FAILURE, and every `tools/*.py` must be declared a gate or explicitly exempt. |
 | B1 | `meta_audit_on_stop.py` | `count_unpushed` mapped "no upstream" (rc=128) to 0, the value that means "clean". A never-pushed branch was byte-identical to a synced tree for its whole pre-first-push life. Three states now. |
 | B2 | `meta_audit_on_stop.py` | `PARKED?` requires the E: it matched the non-word "PARKE" and missed the bare "PARK". Rebuilt from a stem table; the selftest asserts every stem fires alone and no proper prefix does. |
@@ -1140,11 +1140,17 @@ the suite was green in both broken states.
 
 ### Final gate state
 
+**Measured at commit 16c90bb, 2026-07-31 - point-in-time, not a standing claim.** These
+numbers move whenever a gate or a hook is added, and a hand-written count in prose rots
+exactly the way the README's did (it claimed 18 selftests while the suite ran 21). Run the
+gates for the live figures; what follows is the record of that day.
+
 - suite 21/21 (the two selftest siblings correctly exempted, not counted as run)
 - integration 30/30
 - mutations: 79 entries, 78 executed and ALL caught on Windows; 1 posix-only, named in the
   denominator and proven by the ubuntu job
-- `check_review_freshness --release`: asks about **31/31** tracked .py files, up from 17
+- `check_review_freshness --release`: asked about **31/31** tracked .py files that day, up
+  from 17. It has since grown to 35 as new files landed - which is the gate working.
 
 ## P14 - OPEN: the P13 session's own code, reviewed (run `wf_1b621b24-7ef`, 2026-08-01)
 
@@ -1185,3 +1191,33 @@ it is the absence of evidence, and this is the measurement that says so.
 of context, and starting a partial pass over 42 findings - with the P13 evidence that fixes
 here silently disarm each other's tests - would have been the wrong trade. Next session picks
 this up with the audit doc as its work-list, HIGH first.
+### P14 work order - SCHEDULED, not merely recorded
+
+The audit doc enumerates the findings; this table is their HOME and their ORDER, so
+that no cluster can be quietly skipped. Materiality decides sequence, never whether an
+item ships. Every row must end as a mutation-verified fix or a written refutation.
+
+| # | unit | HIGH | total | why here |
+|---|---|---|---|---|
+| 1 | `hooks/capped_report.py` | 3 | 7 | the guard the whole 'assume a fifth' rule rests on; a live unrouted cap already slips past it, so every other cap claim is unverified until this is fixed |
+| 2 | `tools/mutation_check.py` | 2 | 9 | the harness that certifies every other fix; its `executed` count contradicts its own error block |
+| 3 | `run_selftests.py` | 2 | 3 | mutation A3 targets a function main() never calls, so a P13 fix is pinned by a test that cannot reach it |
+| 4 | `hooks/pre_push_gate_selftest.py` | 2 | 2 | see docs/audits/p14_new_code_review.md |
+| 5 | `hooks/meta_audit_on_stop.py` | 1 | 6 | false negatives that REMOVE a hiding line from the reported total |
+| 6 | `tools/check_review_freshness.py` | 0 | 8 | the release gate itself |
+| 7 | `hooks/stop_dispatcher.py` | 0 | 2 | CRASH_RC is truthy and no test drives main() through a crash |
+| 8 | `hooks/numbers_match_on_write.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+| 9 | `hooks/plan_defer_guard.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+| 10 | `tools/check_readme_fresh.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+| 11 | `hooks/transcript_util.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+| 12 | `hooks/rate_prompt.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+
+**Plus one item that is not in the table above and must not be lost:** the dropped
+candidate `verify:ast-guard-completeness:1`, whose refuter died on a usage limit. It
+is neither confirmed nor refuted. Adjudicate it FIRST, before any fix - it concerns
+the same AST guard as row 1, so its verdict may change that work.
+
+**Exit condition for P14:** every row above closed, the dropped candidate
+adjudicated, full mutation suite re-run after EACH cluster (not just at the end -
+P13 proved three times that a fix here disarms another finding's test while the
+suite stays green), and CI green on all 14 jobs.

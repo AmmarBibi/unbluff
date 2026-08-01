@@ -628,5 +628,365 @@
     "findings": 16,
     "confirmed": 11,
     "utc": "2026-07-31T12:27:22+00:00"
+  },
+  {
+    "unit": "hooks/meta_audit_on_stop.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/stop_dispatcher.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/post_tooluse_dispatcher.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/rate_prompt.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/plan_defer_guard.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/numbers_match_on_write.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/memory_hygiene_guard.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/hook_health_check.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/duplicate_registration_check.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/show_your_proof.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/transcript_util.py",
+    "run_id": "wf_1a60d178-df1",
+    "lenses": [
+      "p11-adjudication"
+    ],
+    "agents": 35,
+    "findings": 35,
+    "confirmed": 26,
+    "open": 0,
+    "utc": "2026-07-31T16:00:00+00:00"
+  },
+  {
+    "unit": "hooks/capped_report.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 7,
+    "open": 7,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/meta_audit_on_stop.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 6,
+    "open": 6,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/numbers_match_on_write.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 1,
+    "open": 1,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/plan_defer_guard.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 1,
+    "open": 1,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/pre_push_gate_selftest.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 2,
+    "open": 2,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/rate_prompt.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 1,
+    "open": 1,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/stop_dispatcher.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 2,
+    "open": 2,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "hooks/transcript_util.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 1,
+    "open": 1,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "run_selftests.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 3,
+    "open": 3,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "tools/check_readme_fresh.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 1,
+    "open": 1,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "tools/check_review_freshness.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 8,
+    "open": 8,
+    "utc": "2026-08-01T11:00:00+00:00"
+  },
+  {
+    "unit": "tools/mutation_check.py",
+    "run_id": "wf_1b621b24-7ef",
+    "lenses": [
+      "capped-report",
+      "ast-guard",
+      "freshness",
+      "split-fidelity",
+      "mutation-harness",
+      "denominator",
+      "meta-audit",
+      "dispatcher"
+    ],
+    "agents": 55,
+    "findings": 47,
+    "confirmed": 9,
+    "open": 9,
+    "utc": "2026-08-01T11:00:00+00:00"
   }
 ]
