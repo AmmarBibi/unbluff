@@ -1145,3 +1145,43 @@ the suite was green in both broken states.
 - mutations: 79 entries, 78 executed and ALL caught on Windows; 1 posix-only, named in the
   denominator and proven by the ubuntu job
 - `check_review_freshness --release`: asks about **31/31** tracked .py files, up from 17
+
+## P14 - OPEN: the P13 session's own code, reviewed (run `wf_1b621b24-7ef`, 2026-08-01)
+
+P13 fixed 26 defects and shipped ~2,900 lines with the suite, integration and CI all green.
+Those lines had never been adversarially reviewed. They have now: **47 findings produced, 46
+adjudicated, 42 CONFIRMED (10 HIGH, 22 MEDIUM, 10 LOW), 4 refuted, 1 DROPPED.**
+
+Full record with per-finding evidence and fix sketches:
+`docs/audits/p14_new_code_review.md`.
+
+**The 1 dropped finding is OPEN, not absent.** The refuter for
+`verify:ast-guard-completeness:1` died on a session usage limit. The coverage block reported
+the gap rather than printing the survivor count as the total - the P13 Step 0 fix meeting a
+real interruption and behaving correctly. P14 is not closeable until that candidate is
+adjudicated.
+
+**The confirmation rate is the finding.** 42 of 46, against ~7% in the P13 pass over
+already-reviewed code. Every one of these landed while `run_selftests` said 22/22,
+`test_integration` said 30/30 and CI said 14/14. New code plus a green suite is not evidence;
+it is the absence of evidence, and this is the measurement that says so.
+
+**The densest clusters, and why they are not a surprise:**
+
+- `hooks/capped_report.py` (7 confirmed, incl. 2 HIGH) - the AST twin-guard written to
+  enforce "assume a fifth" is itself blind to most cap spellings, and there is already an
+  unrouted cap in `hook_health_check.py:470` that it reports as clean. The guard against
+  instance-fixes was itself an instance fix.
+- `tools/mutation_check.py` - the `executed` count omits `len(errors)`, and the SKIPPED-bucket
+  branch is unreachable because both skip messages contain the word it tests for. The harness
+  that proves every other test bites has arithmetic that contradicts its own error block.
+- `run_selftests.py` - mutation A3 mutates `missing_gates()`, which `main()` never calls, so
+  the missing-gate fix I added in P13 is pinned by a test that does not reach it.
+- `hooks/meta_audit_on_stop.py` - `has_decision_tag` accepts an allow-word inside any
+  parenthetical, markdown link, code span or URL, so a genuine hiding line is suppressed AND
+  removed from the total.
+
+**Not started.** No fix from this list has been applied. The session that produced it ran out
+of context, and starting a partial pass over 42 findings - with the P13 evidence that fixes
+here silently disarm each other's tests - would have been the wrong trade. Next session picks
+this up with the audit doc as its work-list, HIGH first.
