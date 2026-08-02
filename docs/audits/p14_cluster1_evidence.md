@@ -23,8 +23,117 @@ COMPLETED runs. A workflow result is not recorded until it is in the repo.
 - **taxonomy_spellings**: 47
 - **taxonomy_blind_before**: 30
 - **fp_files_swept**: 35
-- **fp_genuine** (2): ["skills/consistency-audit/scripts/audit.py:181", "skills/consistency-audit/scripts/extract.py:355"]
-- **fp_must_not_flag** (107): ["hooks/memory_hygiene_guard.py:147", "hooks/memory_hygiene_guard.py:318", "hooks/meta_audit_on_stop.py:298", "hooks/meta_audit_on_stop.py:312", "hooks/meta_audit_on_stop.py:531", "hooks/plan_defer_guard.py:371", "hooks/numbers_match_on_write.py:395", "hooks/capped_report.py:48", "hooks/capped_report.py:58", "hooks/capped_report.py:131", "hooks/close_skills_guard.py:354", "hooks/close_skills_guard.py:399", "hooks/close_skills_guard.py:426", "hooks/close_skills_guard.py:452", "hooks/close_skills_guard.py:460", "hooks/close_skills_guard.py:465", "hooks/close_skills_guard.py:471", "hooks/close_skills_guard.py:483", "hooks/duplicate_registration_check.py:147", "hooks/duplicate_registration_check.py:330", "hooks/duplicate_registration_check.py:354", "hooks/duplicate_registration_check.py:356", "hooks/duplicate_registration_check.py:370", "hooks/duplicate_registration_check.py:377", "hooks/duplicate_registration_check.py:380", "hooks/duplicate_registration_check.py:395", "hooks/duplicate_registration_check.py:407", "hooks/duplicate_registration_check.py:410", "hooks/duplicate_registration_check.py:412", "hooks/duplicate_registration_check.py:425", "hooks/duplicate_registration_check.py:434", "hooks/fast_test_on_stop.py:59", "hooks/fast_test_on_stop.py:422", "hooks/fast_test_on_stop.py:427", "hooks/fast_test_on_stop_selftest.py:390", "hooks/fast_test_on_stop_selftest.py:432", "hooks/h
+- **fp_genuine** (2 items, all shown):
+  - `skills/consistency-audit/scripts/audit.py:181`
+  - `skills/consistency-audit/scripts/extract.py:355`
+- **fp_must_not_flag** (107 items, all shown):
+  - `hooks/memory_hygiene_guard.py:147`
+  - `hooks/memory_hygiene_guard.py:318`
+  - `hooks/meta_audit_on_stop.py:298`
+  - `hooks/meta_audit_on_stop.py:312`
+  - `hooks/meta_audit_on_stop.py:531`
+  - `hooks/plan_defer_guard.py:371`
+  - `hooks/numbers_match_on_write.py:395`
+  - `hooks/capped_report.py:48`
+  - `hooks/capped_report.py:58`
+  - `hooks/capped_report.py:131`
+  - `hooks/close_skills_guard.py:354`
+  - `hooks/close_skills_guard.py:399`
+  - `hooks/close_skills_guard.py:426`
+  - `hooks/close_skills_guard.py:452`
+  - `hooks/close_skills_guard.py:460`
+  - `hooks/close_skills_guard.py:465`
+  - `hooks/close_skills_guard.py:471`
+  - `hooks/close_skills_guard.py:483`
+  - `hooks/duplicate_registration_check.py:147`
+  - `hooks/duplicate_registration_check.py:330`
+  - `hooks/duplicate_registration_check.py:354`
+  - `hooks/duplicate_registration_check.py:356`
+  - `hooks/duplicate_registration_check.py:370`
+  - `hooks/duplicate_registration_check.py:377`
+  - `hooks/duplicate_registration_check.py:380`
+  - `hooks/duplicate_registration_check.py:395`
+  - `hooks/duplicate_registration_check.py:407`
+  - `hooks/duplicate_registration_check.py:410`
+  - `hooks/duplicate_registration_check.py:412`
+  - `hooks/duplicate_registration_check.py:425`
+  - `hooks/duplicate_registration_check.py:434`
+  - `hooks/fast_test_on_stop.py:59`
+  - `hooks/fast_test_on_stop.py:422`
+  - `hooks/fast_test_on_stop.py:427`
+  - `hooks/fast_test_on_stop_selftest.py:390`
+  - `hooks/fast_test_on_stop_selftest.py:432`
+  - `hooks/hook_health_check.py:223`
+  - `hooks/memory_hygiene_guard.py:103`
+  - `hooks/memory_hygiene_guard.py:118`
+  - `hooks/memory_hygiene_guard.py:136`
+  - `hooks/memory_hygiene_guard.py:223`
+  - `hooks/meta_audit_on_stop.py:102`
+  - `hooks/meta_audit_on_stop.py:216`
+  - `hooks/meta_audit_on_stop.py:294`
+  - `hooks/meta_audit_on_stop.py:400`
+  - `hooks/meta_audit_on_stop.py:535`
+  - `hooks/numbers_match_on_write.py:255`
+  - `hooks/numbers_match_on_write.py:297`
+  - `hooks/numbers_match_on_write.py:300`
+  - `hooks/numbers_match_on_write.py:329`
+  - `hooks/numbers_match_on_write.py:445`
+  - `hooks/numbers_match_on_write.py:635`
+  - `hooks/numbers_match_on_write.py:644`
+  - `hooks/numbers_match_on_write.py:712`
+  - `hooks/numbers_match_on_write.py:727`
+  - `hooks/numbers_match_on_write.py:750`
+  - `hooks/plan_defer_guard.py:81`
+  - `hooks/plan_defer_guard.py:134`
+  - `hooks/plan_defer_guard.py:136`
+  - `hooks/plan_defer_guard.py:143`
+  - `hooks/plan_defer_guard.py:179`
+  - `hooks/plan_defer_guard.py:182`
+  - `hooks/pre_push_gate_selftest.py:234`
+  - `hooks/pre_push_gate_selftest.py:350`
+  - `hooks/pre_push_gate_selftest.py:362`
+  - `hooks/pre_push_gate_selftest.py:372`
+  - `hooks/pre_push_gate_selftest.py:378`
+  - `hooks/pre_push_gate_selftest.py:382`
+  - `hooks/pre_push_gate_selftest.py:390`
+  - `hooks/pre_push_gate_selftest.py:417`
+  - `hooks/pre_push_gate_selftest.py:424`
+  - `hooks/show_your_proof.py:224`
+  - `hooks/show_your_proof.py:260`
+  - `hooks/transcript_util.py:208`
+  - `hooks/transcript_util.py:210`
+  - `hooks/transcript_util.py:213`
+  - `hooks/transcript_util.py:223`
+  - `hooks/transcript_util.py:225`
+  - `hooks/transcript_util.py:228`
+  - `hooks/usage_snip_prompt.py:81`
+  - `hooks/usage_snip_prompt.py:101`
+  - `scripts/make_demos.py:122`
+  - `skills/consistency-audit/scripts/audit.py:188`
+  - `skills/consistency-audit/scripts/audit.py:190`
+  - `skills/consistency-audit/scripts/audit.py:227`
+  - `skills/consistency-audit/scripts/audit.py:265`
+  - `skills/consistency-audit/scripts/extract.py:195`
+  - `tests/test_integration.py:83`
+  - `tests/test_integration.py:118`
+  - `tests/test_integration.py:125`
+  - `tests/test_integration.py:136`
+  - `tests/test_integration.py:153`
+  - `tests/test_integration.py:170`
+  - `tests/test_integration.py:191`
+  - `tests/test_integration.py:200`
+  - `tests/test_integration.py:209`
+  - `tests/test_integration.py:225`
+  - `tools/check_review_freshness.py:146`
+  - `tools/compare_delivery_gate.py:117`
+  - `tools/hook_divergence_report.py:62`
+  - `tools/hook_divergence_report.py:68`
+  - `tools/hook_divergence_report.py:164`
+  - `tools/measure_dispatcher_cost.py:75`
+  - `tools/mutation_check.py:398`
+  - `tools/mutation_check.py:443`
+  - `tools/mutation_check.py:499`
+  - `tools/mutation_check.py:515`
 - **exemption_design**: Adopt design (b) - a central roster - but with neither of the two keys the finding proposed. The surviving key is (module, const, ENCLOSING FUNCTION, EXACT SITE COUNT), applied to the collection branch ONLY, plus an exemption_problems() liveness pass that prints "N exemptions, M load-bearing" and appends a FAIL for every non-load-bearing entry.
 
 Measured, not argued (10/10 scenarios in exp9_verify_final.py against the real hooks/ tree; 8/8 in the exp6 head-to-head):
@@ -190,7 +299,7 @@ COLLECTION clauses - NO magnitude floor, but a hard ACCUMULATOR gate:
   C3  takewhile whose predicate bounds against N > 5 under an ordering operator
 
 POSITIONAL_FLOOR = 5 is MEASURED, not chosen: across the 84 int-literal head-slice bounds in this tree the values are bimodal with an EMPTY BAND from 6 to 29 - {2,3,5} are positional destructuring (entry[:2], kept[:3], entry[:5]) and {30..240} are character truncation (msg[:120], err[:160], out[:200]). Any floor in [5,11] is equally supported by the data; 5
-- **int_literal_fps** (0): []
+- **int_literal_fps** (0 items, all shown):
 - **scalar_replacement**: SCALAR_SUFFIXES is DELETED from is_cap_name(); is_cap_name() is now name-only (CAP_PREFIXES/CAP_SUFFIXES/CAP_EXACT) and says nothing about scalar-ness. Scalar-ness is decided AT THE SITE by two structural predicates over what the code measures, and a site so classified is emitted as a THIRD branch "size" - never dropped.
 
 (1) COLLECTION position - _is_size_measure(measured_operand, per_item_names): the operand paired against the bound in the comparison is a per-item SIZE when it is a call to getsize(...), an attribute .st_size, len(<read-like call>) (read/read_text/read_bytes/readline/decode/encode/str/repr/join/format/getvalue), or len(<name>) where <name> is a per-item binding. A per-item binding is structurally defined: a for-target (the loop re-binds it every iteration, so its length CANNOT accumulate across items) or a name provably bound to str/bytes. Anything else - len(out) where out outlives the loop, a bare counter, an enumerate index - is a count of survivors and stays "collection".
@@ -199,7 +308,14 @@ POSITIONAL_FLOOR = 5 is MEASURED, not chosen: across the 84 int-literal head-sli
 
 The suppression itself moved from the detector into an auditable roster: SIZE_EXEMPTIONS, keyed identically to BOUND_EXEMPTIONS by (repo-relative path, constant, ENCLOSING FUNCTION, exact site count). sweep() reports every "size" site as an offender unless a SIZE_EXEMPTIONS entry with a matching site count covers it; exemption_problems() liveness-checks BOTH rosters (an inert entry fails, a site-count drift fails); the selftest prints every suppression by name with a denominator ("5 cap site(s) in scope: 0 display, 3 collection, 2 size; 5 suppressed by a roster entry, 0 by a name"). A guard-rail assertion fails the selftest if is_cap_name() ever returns False for MAX_LEN / MAX_BYTES / MAX_CHARS / MAX_SECONDS / MAX_FILE_BYTES, and mutation entry R2-H1 re-introduces the ban and is CAUGHT.
 - **scalar_restores**: 10
-- **scalar_residual** (7): ["[NEW, from this rule] SIZE_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_FILE_BYTES', 'index_sources', 1) - the site at line 180, `os.path.getsize(fpath) > MAX_FILE_BYTES -> continue`. Classified [size] structurally by the getsize call, not by the constant's spelling. Liveness-checked by exemption_problems(); printed by the selftest; drop it and an offender appears (verified by the shield check).", "[NEW, from this rule] SIZE_EXEMPTIONS ('skills/consistency-audit/scripts/sources.py', 'MAX_FILE_BYTES', 'index_sources', 1) - the site at line 87, same shape. Same liveness contract, same shield check.", "[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_FINDINGS_TRACKED', 'run', 1) - unchanged by this round.", "[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_SOURCE_VALUES', 'index_sources', 1) - unchanged by this round.", "[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('skills/consistency-audit/scripts/sources.py', 'MAX_VALUES', 'index_sources', 1) - unchanged by this round.", "[ZERO suppressions needed] hooks/memory_hygiene_guard.py MAX_INDEX_BULLET_LEN - is_cap_name() now returns True (it returned False at HEAD), and the name produces NO cap site at all, because the `if line.lstrip().startswith('- [') and len(line) > MAX_INDEX_BULLET_LEN:` only appends and stops no scan. Proven b
+- **scalar_residual** (7 items, all shown):
+  - `[NEW, from this rule] SIZE_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_FILE_BYTES', 'index_sources', 1) - the site at line 180, `os.path.getsize(fpath) > MAX_FILE_BYTES -> continue`. Classified [size] structurally by the getsize call, not by the constant's spelling. Liveness-checked by exemption_problems(); printed by the selftest; drop it and an offender appears (verified by the shield check).`
+  - `[NEW, from this rule] SIZE_EXEMPTIONS ('skills/consistency-audit/scripts/sources.py', 'MAX_FILE_BYTES', 'index_sources', 1) - the site at line 87, same shape. Same liveness contract, same shield check.`
+  - `[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_FINDINGS_TRACKED', 'run', 1) - unchanged by this round.`
+  - `[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('hooks/numbers_match_on_write.py', 'MAX_SOURCE_VALUES', 'index_sources', 1) - unchanged by this round.`
+  - `[PRE-EXISTING, not from this rule] BOUND_EXEMPTIONS ('skills/consistency-audit/scripts/sources.py', 'MAX_VALUES', 'index_sources', 1) - unchanged by this round.`
+  - `[ZERO suppressions needed] hooks/memory_hygiene_guard.py MAX_INDEX_BULLET_LEN - is_cap_name() now returns True (it returned False at HEAD), and the name produces NO cap site at all, because the `if line.lstrip().startswith('- [') and len(line) > MAX_INDEX_BULLET_LEN:` only appends and stops no scan. Proven by injecting a `continue` at that exact line in the real source: the site then appears as ('size', 'MAX_INDEX_BULLET_LEN', 'scan_index_lines', 147), i.e. a RECORDED site that would demand its own roster entry. So it is invisible for a structural reason, not a naming one.`
+  - `TOTAL: 2 suppressions introduced by the new rule (both in SIZE_EXEMPTIONS), 3 pre-existing collection entries, 5 roster entries in all, 5 of 5 load-bearing, 0 suppressed by a name anywhere in the detector.`
 - **while_discriminator**: container = _container_of_len(measured) and _body_changes_length(node.body, container) - i.e. the operand compared against the cap must be len(<name>) (Name or Attribute, ast.NamedExpr unwrapped first, so a walrus `(n := len(out))` resolves; len() of a CALL such as len(text.encode()) yields None and is quiet), AND the loop body must change how many items that container holds. _body_changes_length walks the body (stopping at nested scopes) for: a method call <name>.M(...) with M in _LEN_CHANGING = {append, appendleft, extend, extendleft, add, insert, update, pop, popleft, popitem, remove, discard, clear, setdefault}; `del <name>[...]`; `<name> += ...`; `<name> = <name> + ...`; `<name>[k] = v`; or <name> passed as an argument to any call in the body (conservative catch-all so a callee that fills in place still fires). `pop` is in the set for the same reason `append` is - pop_until_under_cap shrinks a list to a bound and that IS a collection cap.
 
 This is NOT _has_exit, and cannot be: pop_until_under_cap has no exit statement at all and while_test_cap's only statement is an append, so an exit test blinds both positives - which is exactly what mutation C1-M1 already pins. Verified structurally rather than by reading: an AST probe of the shipped module found exactly 1 while-branch If node, and the functions it calls are ['_body_changes_length', '_cap_label', '_compare_pairs', '_container_of_len', 'add', 'isinstance'] - _has_exit is absent.

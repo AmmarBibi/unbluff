@@ -1210,7 +1210,7 @@ item ships. Every row must end as a mutation-verified fix or a written refutatio
 | 8 | `hooks/numbers_match_on_write.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
 | 9 | `hooks/plan_defer_guard.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
 | 10 | `tools/check_readme_fresh.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
-| 11 | `hooks/transcript_util.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
+| 11 | `hooks/transcript_util.py` | 0 | 2 | the twin-guard, plus **F-L8** - added 2026-08-02 by the consistency audit, which found the table summed to 43 against a stated backlog of 44. `p14_triage.md` said "add as LOW against `hooks/transcript_util.py`" and nobody did. The table built to stop a quiet skip was short by exactly the finding triage had added |
 | 12 | `hooks/rate_prompt.py` | 0 | 1 | see docs/audits/p14_new_code_review.md |
 
 **The dropped candidate is CLOSED: adjudicated CONFIRMED, HIGH, latent** (2026-08-01).
@@ -1356,6 +1356,30 @@ is derived from what is now true.
 
 **Release decision, 2026-08-02:** no interim version is cut. v1.3.1 ships once the fixes are
 done, so users never see an intermediate guard. Recorded here rather than left in chat.
+
+#### Consistency audit - 71 claims tested, corrections applied 2026-08-02
+
+The audit extracted and mechanically tested 71 checkable claims across the README, the plan
+and the audit docs. Fixed in this commit:
+
+| where | the claim | the measurement | action |
+|---|---|---|---|
+| `README.md:171` | "==== 26/26 scenarios passed ====" | the suite runs **30** | **fixed to 30/30.** It rotted 4 behind because `check_readme_fresh` regexes only `all (\\d+) selftests passed` - its own OK line says "README's 22 matches the 22 selftests", never mentioning scenarios. That is P14 finding M-M5, live, and the general fix stays scheduled in phase 3 |
+| `README.md:149`, `:274` | "this is exactly what CI runs on Linux, macOS, and Windows" / "CI runs the self-tests + the integration test on Linux, macOS, and Windows across Python 3.8-3.12" | the `integration` job is `runs-on: ubuntu-latest`, ONE of 14 jobs. Python **3.10 runs on no platform at all**; macOS skips 3.8 | **both rewritten** to state the real matrix. Public-facing false claims about what the gates do, in a tool whose pitch is catching gates that lie |
+| `docs/audits/p14_cluster1_evidence.md` | `fp_must_not_flag` declared **(107)** | the line is 1431 chars, JSON unterminated at char 1393, **at most 37 entries present**, no truncation notice | **generator fixed, doc regenerated: 107 declared, 107 emitted, verified equal.** I wrote a silent `[:1400]` slice that printed the full count beside a truncated body - the exact defect `capped_report` exists to abolish, inside the document written to stop evidence loss |
+| work-order table | "Merged backlog: **44** open" | the table's own columns sum to **43** | **row 11 corrected to 2.** The missing item was F-L8, which `p14_triage.md` explicitly said to add and nobody did |
+
+Recorded, not yet fixed (each has a home below or in the phase order):
+
+| where | correction |
+|---|---|
+| plan `:949`, `:1121` | "`pre_push_gate.py` 1113 -> **561**". Swept every commit in history: **561 was never its line count**, as total or non-blank. It was 584 at the split commit and is 584 now. The other three numbers in that pair (1113, 900, 539) all check out |
+| plan `:1178` | "there is already an unrouted cap in `hook_health_check.py:470` that it reports as clean" - present tense, but routed in `d641da7`. The same section's "Kept from those two rounds" paragraph says the opposite |
+| plan `:1272` | "the **123**-hit false-positive budget" - the string "123" appears **zero** times in the evidence file, which records 107 |
+| N3 | "the **five** flat `hooks/` rosters" cites **six** anchors, two of which are the opening and closing lines of one docstring on `selftestable_hooks` - a DETECTOR, not a roster - while the file's only real roster, `KNOWN_NO_SELFTEST`, is not cited at all |
+| `p14_triage.md:39` | "skips **13 of the 17** hook files" was EXACT for `1dcf430` and is **11 of 17** at HEAD, because the retained live-cap fixes pulled two files into the examined set. Stale as a present-tense claim |
+| `p14_new_code_review.md:235` | still reads "Status: TRIAGE REQUIRED, not merged". Triage completed 2026-08-01. Needs a visible correction note, as the plan carries |
+| B6 | "CI has never run on any of this session's work" is now **false**: run `30733812757` on `d641da7` went **green on all 14 jobs**, which also means the 2 posix-only mutations Windows cannot run are proven by the ubuntu/macos jobs rather than proven nowhere |
 
 #### Findings with NO home until now - found by the completeness audit (denominator 56)
 
