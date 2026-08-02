@@ -1161,7 +1161,8 @@ adjudicated, 42 CONFIRMED (10 HIGH, 22 MEDIUM, 10 LOW), 4 refuted, 1 DROPPED.**
 Full record with per-finding evidence and fix sketches:
 `docs/audits/p14_new_code_review.md`.
 
-**The 1 dropped finding is OPEN, not absent.** The refuter for
+**The 1 dropped finding WAS open; it is now adjudicated CONFIRMED (see below).**
+At the time this section was written it was open. The refuter for
 `verify:ast-guard-completeness:1` died on a session usage limit. The coverage block reported
 the gap rather than printing the survivor count as the total - the P13 Step 0 fix meeting a
 real interruption and behaving correctly. P14 is not closeable until that candidate is
@@ -1272,8 +1273,13 @@ round 2's own acceptance test exposed. Full evidence - the 111-spelling taxonomy
 123-hit false-positive budget, the exemption design, the measured int-literal policy and all
 16 verifier verdicts - is in `docs/audits/p14_cluster1_evidence.md`.
 
-**All 8 original findings closed, plus 7 round-2 findings and 1 round-3 finding.** Verified
-by re-running every gate directly rather than accepting the agents' reports.
+**All 8 original findings were closed at the time, plus 7 round-2 findings and 1 round-3
+finding** - then the detector carrying those fixes was REVERTED, so **all 8 are OPEN again**
+and only the 5 live-cap fixes survive (commit `d641da7`). The original sentence here read
+"All 8 original findings closed" with no qualifier; the P14 completeness audit flagged it as
+false post-revert and directly contradicted by the correction box above. Corrected in place,
+because a plan that quietly rewrites its own history is the same defect as a gate that
+quietly narrows.
 
 **What this cluster actually proved, and it is the most important result of P14.**
 Round 1 closed 8 findings, passed 22/22 selftests, 30/30 integration and 92-of-94 mutations
@@ -1291,89 +1297,94 @@ explicit no-regression-versus-predecessor check as a named requirement.
 | 2 | 7 | 7 new defects (below) | the adversarial verifiers, not the gates |
 | 3 | 1 (installed-layout crash) | 0 | round 2's own acceptance test |
 
-#### OPEN against cluster 1 - scheduled, owned, none optional
+#### Cluster-1 residuals - RETIRED as rows, kept as acceptance criteria
 
-Severity bar for the v1.3.1 ship is zero HIGH. **None of the below is HIGH**, so cluster 1
-meets the bar; every item still has a home here.
+> **CORRECTION, from the P14 completeness audit.** Rows `C1-R1..R8` named
+> `_body_changes_length`, `_callee_aliases`, `_cap_names`, `_BASELINE_FLOOR_NAMES`,
+> `_is_size_measure`, `exemption_problems`, `_TAXONOMY` and `int_cap_sites`. **Every one has
+> 0 hits repo-wide** and every line number cited is out of range for a 180-line file. They
+> described the reverted detector. Two further claims in this section were FALSE: "All 8
+> original findings closed" (contradicted by the correction box above) and "None of the below
+> is HIGH, so cluster 1 meets the bar" (work-order row 1 carries 4 open HIGH). Retired rather
+> than deleted, because the CLASSES they name are the acceptance criteria the rebuild must
+> meet.
+
+**Acceptance criteria for C1-NEW** (each was a real defect in the reverted detector; the
+rebuild must not reintroduce it): a drop-until-under-cap loop must not go blind when the drop
+is a rebind-slice; a callee renamed by assignment must still resolve; no branch may be dead
+the day it lands; the no-regression floor must be DERIVED, not a roster of names; a
+size-vs-collection split must not mis-branch a scan-truncating exit; `caps` must not be
+module-scoped such that one function's default promotes a name file-wide; exemption keys must
+separate scopes that share a name; and no docstring may state a coverage boundary it does not
+have.
+
+#### The fail-open premise is REPO-WIDE, not a `capped_report` mistake - B5 ANSWERED
+
+Three guards audited, **three fail open**, each demonstrated with live controls:
+
+| guard | shapes enumerated | novel shapes silent | controls caught | verdict |
+|---|---|---|---|---|
+| `capped_report` slicing_offenders | 47 -> 111 and still growing | many | yes | reverted |
+| `transcript_util` twin-guard | **4** names, 3 line-anchored regexes, 1 non-recursive dir | **6 of 6** | 5 of 5 | rebuild fail-closed |
+| `duplicate_registration_check` | **11** literals | **6 of 6** | 3 of 3 + in-fixture controls | rebuild fail-closed |
+
+The `transcript_util` case is the sharpest argument in this whole pass: it enumerates
+**identifier choices**, and the scenario it guards against is *an author who did not know
+`transcript_util.py` existed* - who therefore had no reason to pick its names. The guard is
+blind precisely in the case it was written for.
+
+`duplicate_registration_check` is blind to `.js`, `.ps1` and `.sh` hooks wired twice - while
+the repo's OWN sibling guard already declares `_SCRIPT_EXTS = (".py", ".js", ".ps1", ".sh")`
+at `hook_health_check.py:137`. It is also blind to `python -m` module form, to any dispatcher
+whose filename lacks the substring "dispatcher", to any dispatcher whose module list is not
+literally named `HOOKS`, and to **7 plugin `hooks.json` files that exist on this machine right
+now** and declare `PreToolUse`/`PostToolUse`/`Stop`/`UserPromptSubmit`.
+
+#### RE-BASED PHASE ORDER - supersedes the 12-cluster table above
+
+The old order put `capped_report` first because "a live unrouted cap already slips past it".
+That rationale is spent: all 5 live caps are fixed and pushed in `d641da7`. The order below
+is derived from what is now true.
+
+| phase | contents | why it is here |
+|---|---|---|
+| **0 - FOUNDATION** | C1 gate ledger; B6 CI; D1; D2 | Nothing downstream is provable until gates leave traces and CI runs. D1/D2 are what stop the next cluster repeating cluster 1 |
+| **1 - THE CLASS FIX** | the fail-open family: C1-NEW, `transcript_util` twin-guard, `duplicate_registration_check`, plus the roster-shaped checks (`run_selftests` `_DISPATCH_RE` + aux-gate-exit-0, `check_review_freshness` EXEMPT floor + narrowing fixture, `mutation_check` prose-substring bucket, N3) | ~15 findings, ONE principle. Fixing them separately is 15 chances to reintroduce the premise |
+| **2 - VERIFIER OF VERIFIERS** | `mutation_check` remainder | it certifies every other fix and nothing verifies it |
+| **3 - THE RELEASE GATE** | `check_review_freshness` (8 findings) | it decides whether v1.3.1 can ship, and sat at position 6 |
+| **4 - INDEPENDENT BUGS** | the genuine one-offs, by severity | |
+
+**Release decision, 2026-08-02:** no interim version is cut. v1.3.1 ships once the fixes are
+done, so users never see an intermediate guard. Recorded here rather than left in chat.
+
+#### Findings with NO home until now - found by the completeness audit (denominator 56)
 
 | id | sev | owner | item |
 |---|---|---|---|
-| C1-R1 | MEDIUM | next cluster-1 touch | **R2-H2 residual - a NEW false negative the fix caused.** The drop-until-under-cap loop is invisible when the drop is a rebind-slice: change `out.pop()` to `out = out[1:]` in the repo's own shipped `pop_until_under_cap` fixture and the site disappears. Cause: `_body_changes_length`'s `ast.Assign` clause. Needs 3 negative fixtures (retry-counted-with-a-list, fill/pad-to-target, while-ending-only-in-raise) and a positive rebind-slice fixture |
-| C1-R2 | MEDIUM | next cluster-1 touch | **R2-M3 residual.** `_callee_aliases` reads only Import/ImportFrom, so `take = itertools.islice` and the two-hop `T = take` hide the cap in both the named and int paths. Extend it to plain `Assign` bindings whose value is a Name |
-| C1-R3 | MEDIUM | next cluster-1 touch | **Two dead branches in `_cap_names`** (`:333-335` Assign target, `:355-357` parameter-name). Widening `is_cap_expr` hollowed them; a regression test against either would be decorative the day it lands. One instance was found (mutation C1-H1 went SURVIVED) and repaired without sweeping the rest |
-| C1-R4 | MEDIUM | next cluster-1 touch | **The no-regression floor is a ROSTER OF 7 NAMES, not a guard on the class** - `_BASELINE_FLOOR_NAMES` x 2 branches = 14, and the `is_cap_name` guard rail tests 5 string literals. Planting a novel suffix ban (`_KB`, `_MS`) leaves every gate green while 6 spellings go dark. This is the repo's own detect-don't-list rule broken in the check written to enforce it. Derive the floor from a generator over the baseline, keep the 7 as a floor |
-| C1-R5 | MEDIUM | next cluster-1 touch | **`R2-H1` size mis-branch:** `_is_size_measure` calls `len(<for-target>)` a size measure - true about accumulation, silent about the exit, so `for x in xs: if len(x) >= MAX_FILE_BYTES: break` branches `size` and is roster-silenceable when it truncates a scan |
-| C1-R6 | MEDIUM | next cluster-1 touch | **`R2-H3` new false-positive surface:** `caps` is MODULE-scoped, so one function's cap-valued default promotes its lowercase parameter name file-wide (`head_pair(row, n)` fires). 0 live occurrences; no negative fixture covers it. Half the shipped R2-H3 fix is also unpinned - deleting the kwonly lines leaves the gate fully green |
-| C1-R7 | MEDIUM | next cluster-1 touch | **`R2-M1` qualname ceiling:** two defs sharing a qualname remain one exemption bucket, and `exemption_problems()` now prints the roster fully healthy while an unrouted cap sits in the same module (`sweep()` still fires, which is the channel `--selftest` gates on) |
-| C1-R8 | LOW | next cluster-1 touch | **`R2-H4` documentation overclaim, in the artifact whose job is to not overclaim.** `capped_report.py:54-55` reads as a complete coverage boundary and is not one: `if len(out) == 10: break`, `problems[:6 * 2]` and `shown = 12; problems[:shown]` are in neither `_TAXONOMY` nor the declared blind spots |
+| F-L8 | LOW | phase 4 | The `transcript_util` X6 residual. The main P14 run refuted the X5+X6 finding WHOLESALE; the first run's refuter agreed about the composition but kept a residual - X6 alone is a real surviving mutation, with two killing fixtures supplied. Recorded in `p14_triage.md` section 2a and never given a plan row |
+| F-RB | MEDIUM | phase 0, with C1 | **The resume-boundary reconciliation gap.** A resumed Workflow re-ran its lenses instead of replaying them and returned only the second run's results, so a complete-looking denominator silently excluded 42 independent findings. `p14_triage.md` section 4 states it and explicitly says "no row above closes" it - and none did. Belongs with C1 (the gate ledger) because both are "the process left no trace" |
 
-#### NEW findings surfaced by this cluster, outside it - scheduled here so they are not lost
+#### Rows that had a severity but no owner - now homed
 
-| id | sev | unit | item |
-|---|---|---|---|
-| N1 | MEDIUM | `tests/test_integration.py` | The C1 `hook_health reports OK` scenario is ENVIRONMENT-DEPENDENT: 30/30 for me twice, 29/30 for the round-1 implementer on a clone of the same commit, and the dropped P14 refuter saw it fail on a PRISTINE tree after a preceding selftest run. **A flaky gate is a gate whose green means less than it claims**, and it is in the number the README pastes |
-| N2 | MEDIUM | `skills/consistency-audit/scripts/sources.py:87` | Silently `continue`s past an oversized file AND skips `idx.files += 1`, shrinking the denominator with no notice. Its twin at `numbers_match_on_write.py:393` prints an explicit "NOTHING was verified in it" |
-| N3 | **HIGH** | repo-wide | **The 800-line rule is enforced by NOBODY and the plan recorded it DONE.** `capped_report.py` is now **2101 lines**, 2.6x the limit and the worst violator in the repo. The P12 entry above marks the rule satisfied because the two files it NAMED were split - a roster, not a detector, exactly the class this repo exists to kill. Build a line-count gate that derives its file list, then split the ~1200-line fixture corpus into `capped_report_selftest.py` per the `pre_push_gate_selftest.py` precedent, registering it in the five flat `hooks/` rosters (`hook_health_check:85/90/558`, `transcript_util:243`, `install.py:256`, `run_selftests:87`) |
-| N4 | LOW | `hooks/capped_report.py` | Cap-name convention is asymmetric on one shape: lowercase `cap`/`limit` are cap names; `max_lines`, `TOP_N`, `BULLET_COUNT`, `N_BULLETS` are not. Widening measured to cost zero today (0 of 197 in-scope UPPER_SNAKE constants newly match) |
-| N5 | LOW | `hooks/capped_report.py` | `_cap_names` models 12 of Python's 24 name-binding forms. The two with live or demonstrated impact are closed; the rest are unmodelled and unenumerated |
-| N6 | MEDIUM | process, not the repo | **A COMPLETED workflow's evidence is not recorded until it is in the repo.** Rounds 1 and 2 - taxonomy, FP budget, design rationale, 16 verdicts, 15 residual defects - existed ONLY in OS temp task files and a session scratchpad, and were found by the completeness audit, not by any gate. This is `p14_triage.md` section 4's failure recurring one layer up, in the session that wrote the warning. Now persisted to `docs/audits/p14_cluster1_evidence.md`; the durable fix belongs in the adversarial-review skill |
-
-**N3 is HIGH and therefore blocks the v1.3.1 ship under the agreed stopping rule.** It is a
-repo-wide gate gap, not a cluster-1 defect, and is scheduled as its own row rather than
-folded into cluster 1. (The 2101-line INSTANCE is gone with the revert; the CLASS - no gate
-enforces the rule, so it re-breaks silently - is untouched and still HIGH.)
-
-### P14 meta-review, 2026-08-02 - everything raised this session and then dropped
-
-Run because the pattern being eliminated is "flag a problem, then move on". Each row below was
-raised in this session and had NO home until now. This list is the deliverable; the absence of
-these rows was the defect.
-
-#### A. Rows the revert made false or moot - corrected above, plus:
-
-| id | action |
+| id | owner |
 |---|---|
-| A1 | The "CLOSED to the severity bar" claim - **corrected in place** with the correction left visible |
-| A2 | `C1-R1..R8` describe the reverted r2 detector. They are NOT deleted: each names a real CLASS the rebuild must not reintroduce (rebind-slice blindness, callee-alias renaming, dead branches, roster-shaped floors, size mis-branching, module-scoped `caps`, qualname collisions, doc overclaim). **Re-scoped as acceptance criteria for C1-NEW**, not as live bugs |
-| A3 | The review ledger records `capped_report.py` as "reviewed 2026-08-01, 7 open" against code that no longer exists. **Re-record after the rebuild**, not before - a ledger entry for deleted code is worse than none |
+| B3 two-round rule | phase 0, alongside D1/D2 - it is a process gate, not a code fix |
+| B4 fixture-coverage gate + evidence persistence | phase 0, alongside D1/D2 |
+| D1 self-budgeting selftests | phase 0, FIRST - cheapest, and it catches a class already demonstrated twice |
+| D2 no-regression-vs-predecessor gate | phase 0, second - the class NOTHING here catches |
+| B7 escaping trap | **RESOLVED, not optional.** The audit flagged the "OR accept it as a judgement call" disjunction as the one genuine optional-forever row in P14. Decision: WIDEN the rule to any generated-code path (it has now fired twice - once in a heredoc, once in a Python string literal). Owner: phase 0 with B3/B4 |
 
-#### B. Raised by me, then dropped - now scheduled
+#### Corrections to rows written against the reverted code
 
-| id | sev | item |
-|---|---|---|
-| B1 | **HIGH** | **False-positive aversion as a design failure - "the mistake worth naming", previously NARRATED ONLY.** Round 1's probe found a simple fail-closed rule produced 6 false positives on the clean tree and treated that as disqualifying. Six false positives means six roster entries, each a reviewed decision with a written reason. Avoiding that bookkeeping cost 2000 lines, 35 seconds, two workflow rounds and 14 new defects. **Encode the principle as a standing rule: a guard should FAIL CLOSED and be boundedly noisy, never FAIL OPEN and be quietly blind; N recorded exemptions is a healthy design, not a smell.** Owner: rules + the adversarial-review skill brief |
-| B2 | MEDIUM | **I asserted a cause without a control** - blamed a subprocess probe for a 36s runtime, "fixed" it twice, introduced a backslash bug, then measured 36.1s with and 36.1s without. Rule: no performance or behaviour cause may be stated, and no fix applied to it, before an A/B with a control |
-| B3 | MEDIUM | **Two-round rule.** After 2 fix rounds on one unit, STOP and escalate to a premise review; do not attempt a third patch. This session is the proof case. NOT DECLINED by the user - left unticked, explicitly kept open |
-| B4 | MEDIUM | **Fixture-coverage gate + evidence persistence.** Every new test/fixture in a diff must be covered by >=1 mutation entry or exempted with a reason, printing its denominator; `adversarial-review` persists results to `docs/audits/` before returning. NOT DECLINED - left unticked, kept open |
-| B5 | **HIGH** | **The same fail-open premise may exist in other guards.** `transcript_util`'s twin-guard and `duplicate_registration_check` both enumerate shapes. If enumeration fails open here it fails open there. Never scheduled until now; audit both before the rebuild, because the answer changes what gets built |
-| B6 | **HIGH** | **CI has never run on any of this session's work.** Every green claim is from one Windows machine. The repo's own rule says CI is the only Unix check. Nothing may be called done until 14/14 CI is green |
-| B7 | LOW | The documented backslash/escaping trap was hit again (in a Python string literal rather than a heredoc). The existing lesson covers heredocs only; widen it to any generated-code path, or accept it as a judgement call |
-| B8 | MEDIUM | **N1 is UNPROVEN and I recorded it as MEDIUM on confounded evidence.** Integration is 30/30 at baseline and 30/30 after the revert; it was 29/30 only with the round-2 code. My "environment-dependent flaky scenario" claim may be entirely my own bug. **Re-test deliberately** (repeat runs, and a run after a preceding selftest, which is the order the dropped P14 refuter blamed) and either substantiate N1 or withdraw it in writing |
-
-#### C. Found by this meta-review, not previously raised at all
-
-| id | sev | item |
-|---|---|---|
-| C1 | **HIGH** | **The gate ledger records ONE gate.** `docs/audits/gate_runs.json` has 102 entries, all `run_selftests`. `tools/mutation_check.py`, `tests/test_integration.py`, `check_review_freshness` and CI leave NO trace. So the single most important gate in this repo - the mutation harness - cannot be shown to have run, and every "92 of 94 all CAUGHT" claim this session exists only in chat and OS temp. Meta-review check 4 exists for exactly this. Make every gate write the ledger, and have the ledger report any gate whose last run predates the newest change |
-| C2 | MEDIUM | **I kept changes to never-reviewed code.** Of the 5 live-cap fixes retained, `tools/measure_dispatcher_cost.py`, `audit.py` and `extract.py` are UNREVIEWED and `show_your_proof.py` / `hook_health_check.py` are STALE. Green gates on never-reviewed code is the session's own thesis. Schedule an adversarial pass over the retained diff specifically |
-| C3 | - | Freshness is **5/35 units reviewed since last change, 10 UNRESOLVED**. `--release` is correctly red. No action; recorded so the denominator is visible |
-
-#### D. Approved by the user, not yet built
-
-| id | item |
+| id | correction |
 |---|---|
-| D1 | **Self-budgeting selftests** - every `--selftest` asserts its own wall clock against the timeout governing it (`_SELFTEST_TIMEOUT_S`), failing above 50%. Would have caught the 36s bug instantly |
-| D2 | **No-regression-vs-predecessor gate** - for any unit with a selftest, run the previous committed version and the new one over the union of both fixture corpora; fail if any case passed before and fails now. This is the class NOTHING in this repo currently catches, and it is what let round 1 ship 10-of-14 blind with every gate green |
+| N3 | Said `capped_report.py` is "**2101 lines**, 2.6x the limit and the worst violator". It is **180**. MEASURED: **0 of 36 tracked .py files exceed 800 lines**, so the class has NO live instance today. The row stays HIGH anyway and stays in phase 1 - because the defect was never the line count, it was that **the rule is a roster with no detector**, so it re-breaks silently. The prescribed "split the fixture corpus" fix is withdrawn as moot |
+| N4 | Moot as written. Baseline `_max_names` recognises exactly ONE form (module-level `ast.Assign` to a bare `ast.Name` starting `MAX_`), so the asymmetry it describes does not exist. Folded into C1-NEW |
+| N5 | Said "`_cap_names` models 12 of Python's 24 binding forms". `_cap_names` does not exist; baseline `_max_names` models **ONE**. The row understated the gap by an order of magnitude in the direction that matters. Folded into C1-NEW |
+| N1 | **WITHDRAWN.** Claimed the C1 integration scenario is environment-dependent. Re-tested deliberately: **6 of 6 runs at 30/30**, including the after-a-selftest ordering the dropped refuter blamed. The 29/30 was fully explained by two of my own defects (a `ModuleNotFoundError` in the installed layout, then a 36s selftest against a 25s timeout). Recorded honestly: the round-1 implementer claimed 29/30 on a clone of baseline `1dcf430` and **I could not reproduce it**; most likely that clone inherited an already-modified file |
+| "Not started" | Now imprecise. `d641da7` applied two live instances named inside P14 findings (`hook_health_check.py:470`, and the `show_your_proof` tail-window cap) |
+| show_your_proof docstring | **Was FALSE and is fixed in this commit.** It claimed the judgement was "written down in `capped_report.SIZE_EXEMPTIONS`" and that the site "is visible" to the guard. Neither is true post-revert. Found by the completeness audit; no gate caught it |
 
-#### C1-NEW - the fail-closed rebuild, not started
-
-Replace the enumerate-the-syntaxes detector with the inverse rule: **flag every load of a
-cap-named constant that is not an argument to `capped_report.keep()` or `render()`, minus a
-liveness-checked exemption roster with a written reason per entry.** Bounded by the number of
-real cap sites in the repo (~6-14), not by Python's grammar. Fails CLOSED. Graded against
-`tests/cap_spelling_corpus.py` - all 111 entries must be SEEN; the 29 negative controls become
-"seen then exempted with a reason" rather than "not seen". Blocked on B5 (the same premise may
-be wrong elsewhere) and informed by A2's acceptance criteria.
 
 **Exit condition for P14:** every row above closed to the severity bar, the dropped
 candidate adjudicated (done), the recovered set triaged and merged (done), full mutation

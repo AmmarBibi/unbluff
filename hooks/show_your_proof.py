@@ -234,12 +234,21 @@ def read_tail_lines(path, max_lines=MAX_TAIL_LINES):
 
     [R2-H3] This was a live, unrouted cap that capped_report's guard reported as clean, for
     two independent reasons: the bound was spelled TAIL_LINE_COUNT, which reads as a quantity
-    rather than a bound, and it is bound by a PARAMETER DEFAULT, a form the guard resolved
-    for parameter NAMES but never for parameter VALUES. Both are fixed; the constant is now
-    MAX_TAIL_LINES and the site is visible.
+    rather than a bound, and it is bound by a PARAMETER DEFAULT, which the guard does not
+    resolve. The rename to MAX_TAIL_LINES is real and kept.
 
-    The judgement about what it bounds is written down in capped_report.SIZE_EXEMPTIONS
-    rather than left implicit: this is a bound on the INPUT WINDOW, not a display cap.
+    [P14 CORRECTION] An earlier version of this docstring went on to say the judgement "is
+    written down in capped_report.SIZE_EXEMPTIONS" and that the site "is visible" to the
+    guard. BOTH ARE FALSE: the detector rebuild that would have provided them was reverted,
+    SIZE_EXEMPTIONS does not exist anywhere in this repo, and the baseline guard never
+    inspects parameter defaults - so this site is still INVISIBLE to it. Found by the P14
+    completeness audit, not by any gate. Left as prose until the fail-closed rebuild (plan
+    item C1-NEW) gives it a real home: a comment claiming a guarantee that no code provides
+    is the exact defect this repo exists to catch, and deleting the sentence quietly would
+    have hidden that this cap is currently unguarded.
+
+    The judgement itself, stated here rather than delegated to a roster that is not there:
+    this is a bound on the INPUT WINDOW, not a display cap.
     Nothing here reports a count, and evaluate_lines() returns (False, "") when the window
     holds no real user prompt - so a window that is too small can cost a firing, never an
     under-reported total, which is the defect display caps cause and the reason they are
