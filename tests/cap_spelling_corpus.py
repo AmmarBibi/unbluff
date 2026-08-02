@@ -473,6 +473,74 @@ MUST_FLAG = tuple(e for e in ENTRIES if e[2])
 NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
 
 
+# --- APPENDED 2026-08-02: the scalar-suffix families ------------------------
+# The D2 no-regression gate MEASURED that without these the round-1 regression
+# scores 1 lost of 18; with them it scores 14 of 67. The corpus could not see the
+# regression it exists to catch. must_flag=True was verified by running the
+# 1dcf430 baseline guard over each planted entry, not assumed from the name.
+_SCALAR_SUFFIX_ENTRIES = (
+    ('max_len_display',
+     'hooks/max_len_display.py',
+     True,
+     'MAX_LEN = 12\n\n\ndef report(xs):\n    return xs[:MAX_LEN]\n'),
+    ('max_len_collection',
+     'hooks/max_len_collection.py',
+     True,
+     'MAX_LEN = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_LEN:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_bytes_display',
+     'hooks/max_bytes_display.py',
+     True,
+     'MAX_BYTES = 12\n\n\ndef report(xs):\n    return xs[:MAX_BYTES]\n'),
+    ('max_bytes_collection',
+     'hooks/max_bytes_collection.py',
+     True,
+     'MAX_BYTES = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_BYTES:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_chars_display',
+     'hooks/max_chars_display.py',
+     True,
+     'MAX_CHARS = 12\n\n\ndef report(xs):\n    return xs[:MAX_CHARS]\n'),
+    ('max_chars_collection',
+     'hooks/max_chars_collection.py',
+     True,
+     'MAX_CHARS = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_CHARS:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_seconds_display',
+     'hooks/max_seconds_display.py',
+     True,
+     'MAX_SECONDS = 12\n\n\ndef report(xs):\n    return xs[:MAX_SECONDS]\n'),
+    ('max_seconds_collection',
+     'hooks/max_seconds_collection.py',
+     True,
+     'MAX_SECONDS = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_SECONDS:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_file_bytes_display',
+     'hooks/max_file_bytes_display.py',
+     True,
+     'MAX_FILE_BYTES = 12\n\n\ndef report(xs):\n    return xs[:MAX_FILE_BYTES]\n'),
+    ('max_file_bytes_collection',
+     'hooks/max_file_bytes_collection.py',
+     True,
+     'MAX_FILE_BYTES = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_FILE_BYTES:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_line_chars_display',
+     'hooks/max_line_chars_display.py',
+     True,
+     'MAX_LINE_CHARS = 12\n\n\ndef report(xs):\n    return xs[:MAX_LINE_CHARS]\n'),
+    ('max_line_chars_collection',
+     'hooks/max_line_chars_collection.py',
+     True,
+     'MAX_LINE_CHARS = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_LINE_CHARS:\n            break\n        out.append(x)\n    return out\n'),
+    ('max_total_bytes_display',
+     'hooks/max_total_bytes_display.py',
+     True,
+     'MAX_TOTAL_BYTES = 12\n\n\ndef report(xs):\n    return xs[:MAX_TOTAL_BYTES]\n'),
+    ('max_total_bytes_collection',
+     'hooks/max_total_bytes_collection.py',
+     True,
+     'MAX_TOTAL_BYTES = 12\n\n\ndef scan(xs):\n    out = []\n    for x in xs:\n        if len(out) >= MAX_TOTAL_BYTES:\n            break\n        out.append(x)\n    return out\n'),
+)
+
+ENTRIES = ENTRIES + _SCALAR_SUFFIX_ENTRIES
+MUST_FLAG = tuple(e for e in ENTRIES if e[2])
+NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
+
 def selftest() -> int:
     """The corpus checks ITSELF: unique names, non-empty sources, both classes populated."""
     fails = []
