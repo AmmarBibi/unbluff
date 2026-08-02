@@ -241,9 +241,26 @@ def gate(root: str) -> int:
         return 0
 
     if rc is None:
-        sys.stderr.write(f"[pre-push] WARNING: tests exceeded {timeout_s}s and were killed. "
-                         f"This push is NOT verified. Raise timeout= in .claude/pre-push.cmd.\n")
-        return 0
+        # [P14 D1-FIND-2] This BLOCKS now. It used to print "This push is NOT verified" and
+        # then return 0, allowing the push anyway - "didn't run" treated as "passed", which
+        # is the one thing this repo exists to catch, sitting in the gate that guards it.
+        #
+        # Note the asymmetry that produced it: rc != 0 (tests FAILED) blocked correctly,
+        # while rc is None (tests did not FINISH) was waved through. A skip is never a pass.
+        #
+        # Not hypothetical: it fired on the push of commit 8aec982, which reached origin
+        # unverified. The suite legitimately grew to 23 gates, so the timeout is now exceeded
+        # routinely rather than rarely - the gate had become fail-open in the COMMON case,
+        # and a warning that arrives after the push has already happened warns nobody.
+        #
+        # The escape hatch stays but must be TYPED: `git push --no-verify` is an explicit
+        # decision recorded in a person's shell history. A warning nobody must acknowledge
+        # is not a decision.
+        sys.stderr.write(f"\n[pre-push] BLOCKED - tests exceeded {timeout_s}s and were "
+                         f"killed, so this push is NOT verified.\n"
+                         f"[pre-push] Raise timeout= in .claude/pre-push.cmd, or push anyway "
+                         f"with: git push --no-verify\n")
+        return 1
     if rc != 0:
         tail = "\n".join(ln for ln in (output or "").splitlines() if ln.strip())[-2000:]
         sys.stderr.write(f"\n[pre-push] BLOCKED - tests are failing:\n{tail}\n"

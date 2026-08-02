@@ -385,9 +385,15 @@ def selftest() -> int:
             with open(os.path.join(msgdir, "app.py"), "a", encoding="utf-8") as f:
                 f.write("y = 2\n")
             rc_m, err_m = _capture_gate(msgdir)
-            if rc_m != 0 or "NOT verified" not in err_m:
-                fails.append("timeout outcome message missing: rc=%r err=%r"
-                             % (rc_m, err_m[:120]))
+            # [P14 D1-FIND-2] This assertion USED TO READ `rc_m != 0 or "NOT verified" not in
+            # err_m` - it REQUIRED the gate to ALLOW a push whose tests never finished, and
+            # named the case "timeout outcome message missing" as though only the wording were
+            # at stake. The test encoded the fail-open as the contract, which is why the defect
+            # survived every review of this file. A timeout is "didn't run", and "didn't run"
+            # is not "passed". It BLOCKS now, and this pins that.
+            if rc_m != 1 or "BLOCKED" not in err_m or "--no-verify" not in err_m:
+                fails.append("a timed-out run must BLOCK and name the typed escape, not warn "
+                             "and allow: rc=%r err=%r" % (rc_m, err_m[:160]))
 
         # 16. [finding 7] the GLOBAL_SHIM's pre-push branch - the ONE line that runs the gate
         # in every repo on the machine - was covered by nothing. Deleting it stayed green.

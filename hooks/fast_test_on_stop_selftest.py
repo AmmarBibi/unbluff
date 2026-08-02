@@ -205,10 +205,25 @@ def selftest() -> int:
         # kill mattered and SURVIVED went unwritten whatever _kill_tree did - the mutation came
         # back SURVIVED on ubuntu twice for exactly that reason (P13 F).
         gc_sleep = 9
+        # [P14 D1-FIND] The grandchild now HEARTBEATS while it is alive instead of sleeping
+        # opaquely. gc_sleep and the runner timeout are UNCHANGED - they are the margin that
+        # makes SURVIVED mean something, and the two previous attempts to shave them each
+        # produced a decorative test (4s vs 5s finished on its own on fast Linux; an 8s blind
+        # poll ran before a genuine survivor could write, on Windows). What changed is only
+        # how DEATH is observed: waiting for the survivor window to CLOSE cost ~gc_sleep+3s
+        # on the healthy path, which is most of why this selftest measured 25.05-25.51s
+        # against the 25s cap that governs it - a PASSING hook reported as "ERRORED/timed
+        # out" in the weekly sweep. A stalled heartbeat proves the kill directly and
+        # positively, which is strictly better evidence than an absence.
+        beat = os.path.join(_d5, "BEAT")
         _f_txt = ("import time\n"
                   "open(r'%s', 'w').write('x')\n"
-                  "time.sleep(%d)\n"
-                  "open(r'%s', 'w').write('x')\n" % (started, gc_sleep, survived))
+                  "_end = time.time() + %d\n"
+                  "while time.time() < _end:\n"
+                  "    open(r'%s', 'w').write('x')\n"
+                  "    time.sleep(0.2)\n"
+                  "open(r'%s', 'w').write('x')\n"
+                  % (started, gc_sleep, beat, survived))
         with open(gc_py, "w", encoding="utf-8") as _f:
             _f.write(_f_txt)
         sp_py = os.path.join(_d5, "spawn.py")
@@ -223,9 +238,20 @@ def selftest() -> int:
         # deadline to the STARTED marker makes it correct on a fast Linux runner and a slow
         # Windows one alike, and it costs only what it needs to.
         _deadline = time.time() + gc_sleep + 20
+        _BEAT_STALL_S = 2.0     # > 10x the 0.2s beat interval, so a slow box cannot fake death
         while time.time() < _deadline:
             if os.path.exists(survived):
                 break
+            # A STALLED heartbeat is positive evidence the grandchild is gone. This is the
+            # fast path and the common one: the kill lands ~3s in, the beat stops, and we
+            # conclude ~2s later instead of waiting out the whole survivor window.
+            if os.path.exists(beat) and time.time() - os.path.getmtime(beat) > _BEAT_STALL_S:
+                break
+            # BACKSTOP, unchanged: if the heartbeat never appeared at all (a spawn so slow
+            # the grandchild never wrote one), fall back to the original absence rule rather
+            # than looping to the deadline. Removing this would make a never-started
+            # grandchild look identical to a killed one - the STARTED check below is what
+            # separates them, and it must still be reachable.
             if os.path.exists(started) and \
                     time.time() - os.path.getmtime(started) > gc_sleep + 3:
                 break       # the survivor window has closed: it is genuinely dead
