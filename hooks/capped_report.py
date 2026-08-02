@@ -27,6 +27,11 @@ import glob
 import os
 import sys
 
+_HOOKS_DIR_SB = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR_SB not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR_SB)
+import selftest_budget  # noqa: E402  ONE declaration of the per-hook selftest cap
+
 # (module, constant) pairs that are resource BOUNDS, not display caps: they exist to stop a
 # pathological input ballooning memory, and the code that owns them reports its own totals
 # separately. A FLOOR that forces a decision - a new cap that is neither routed through this
@@ -170,6 +175,9 @@ def selftest() -> int:
         if not any(o.startswith("planted2:") for o in planted):
             fails.append("slicing_offenders cannot see a planted collection cap")
 
+    # [P14 D1] default share. Measured 2026-08-02: 0.20s, under 1% of the cap. This is the
+    # hook the 36s regression happened in, which is why it is wired first.
+    fails += selftest_budget.report(name="capped_report")
     for f_ in fails:
         print("SELFTEST FAIL:", f_)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

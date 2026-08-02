@@ -154,12 +154,13 @@ $ python run_selftests.py
 capped_report: OK  close_skills_guard: OK  duplicate_registration_check: OK
 fast_test_on_stop: OK  hook_health_check: OK  memory_hygiene_guard: OK
 meta_audit_on_stop: OK  numbers_match_on_write: OK  plan_defer_guard: OK
-post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  show_your_proof: OK
+post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  selftest_budget: OK
+show_your_proof: OK
 stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
 skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK
-all 23 selftests passed
+all 24 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

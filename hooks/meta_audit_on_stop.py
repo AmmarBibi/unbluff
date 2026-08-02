@@ -36,6 +36,7 @@ if _HOOKS_DIR not in sys.path:
 import fast_test_on_stop as fast_test  # noqa: E402  (path set above)
 import capped_report  # noqa: E402  ONE way to cap a findings list, shared by five hooks
 import plan_defer_guard  # noqa: E402  ONE plan-file predicate; this module had a twin of it
+import selftest_budget  # noqa: E402  ONE declaration of the per-hook selftest cap
 
 HOOK_NAME = "meta_audit_on_stop"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
@@ -545,6 +546,8 @@ def _selftest_unpushed() -> list:
 def selftest() -> int:
     fails = (_selftest_line_cases() + _selftest_bullet_cap() + _selftest_pipeline()
              + _selftest_repo_probe() + _selftest_unpushed())
+    # [P14 D1] share 0.70 = 17.5s. Measured 2026-08-02: 13.30s, 53% of the cap.
+    fails += selftest_budget.report(0.70, "meta_audit_on_stop")
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

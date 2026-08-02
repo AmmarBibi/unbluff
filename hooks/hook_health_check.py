@@ -33,6 +33,7 @@ if _HOOKS_DIR not in sys.path:
     sys.path.insert(0, _HOOKS_DIR)
 
 import capped_report  # noqa: E402  ONE way to cap a findings list, shared by six hooks
+import selftest_budget  # noqa: E402  ONE declaration of the per-hook selftest cap
 
 # How many problems the one-line health report prints before it says how many it held back.
 MAX_PROBLEM_BULLETS = 12
@@ -122,7 +123,11 @@ _WEEKLY_PROGRESS = "hook-health-weekly-progress.json"
 # a real survivor would have written it. A cap a HEALTHY selftest exceeds does not catch a
 # broken hook, it manufactures "ERRORED/timed out" for a passing one. Measured 2026-07-31:
 # slowest is fast_test_on_stop at ~19.7s warm.
-_SELFTEST_TIMEOUT_S = 25
+# [P14 D1] READ, never re-declared. This is the number passed as `timeout=` to the subprocess
+# below, so the number every hook budgets against IS the number that kills it - they cannot
+# drift apart, because they are one object. The literal that used to live here drifted from
+# reality by 2 days and 5 seconds, and fast_test_on_stop quietly grew past it.
+_SELFTEST_TIMEOUT_S = selftest_budget.SELFTEST_TIMEOUT_S
 # AGGREGATE budget for one session's slice of the sweep. There was none: a 45s per-hook cap
 # with 14 hooks and no total deadline, in a SessionStart hook that install.py registered with
 # no `timeout` and therefore inherited the 60s host default. Measured warm on this machine:
@@ -763,6 +768,10 @@ def selftest() -> int:
         if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
             fails.append("progress file not cleared after a completed sweep")
     fails += _selftest_malformed_config()
+    # [P14 D1] share 0.40 = 10.0s. Measured 2026-08-02: 6.53s, 26% of the cap. It runs OTHER
+    # hooks' selftests inside its own, so it is legitimately heavier than a leaf hook and
+    # carries a recorded share rather than the 0.50 default.
+    fails += selftest_budget.report(0.40, "hook_health_check")
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")
