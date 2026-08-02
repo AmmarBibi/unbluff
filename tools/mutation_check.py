@@ -107,8 +107,16 @@ MUTATIONS = [
     # applies THERE and is verified through close_skills_guard - the consumer whose suite must
     # go red. That split is the point: a shared rule needs a test in a hook that uses it.
     ("transcript_util", "13", "genuine-user detection back to content[0] only",
-     [("    if isinstance(content, list):\n        for block in content:",
-       "    if isinstance(content, list):\n        for block in content[:1]:")], False,
+     # [P14 M-M12] The anchor carries the `type == "text"` line because the two-line version
+     # matched BOTH first_text() and has_tool_result() - MEASURED: 2 occurrences. Since
+     # .replace(..., 1) edits the first hit, re-ordering those two functions would silently
+     # have re-pointed this entry at a fix it was never written for, while it went on
+     # reporting CAUGHT. This harness validates anchors by PRESENCE, not uniqueness; the
+     # general fix (fail on any anchor matching != 1) is scheduled as M-M12 in cluster 2.
+     [('    if isinstance(content, list):\n        for block in content:\n'
+       '            if isinstance(block, dict) and block.get("type") == "text":',
+       '    if isinstance(content, list):\n        for block in content[:1]:\n'
+       '            if isinstance(block, dict) and block.get("type") == "text":')], False,
      "close_skills_guard"),
     ("transcript_util", "17", "harness-injected entries counted as the user again",
      [('    return bool(entry.get("isMeta") or entry.get("sourceToolUseID"))',

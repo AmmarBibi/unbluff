@@ -29,6 +29,13 @@ import tempfile
 import time
 
 _HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+
+import capped_report  # noqa: E402  ONE way to cap a findings list, shared by six hooks
+
+# How many problems the one-line health report prints before it says how many it held back.
+MAX_PROBLEM_BULLETS = 12
 
 # FLOOR, not a roster. These names must REMAIN self-testable; losing a --selftest dispatch is
 # an error rather than a silent skip. Which hooks actually get swept is DETECTED below.
@@ -467,10 +474,14 @@ def main() -> int:
             weekly_note += f"; {gap} of {total_hooks} hooks have NO selftest"
     if problems:
         print(f"[hook-health] {len(problems)} problem(s) across {n_cmd} hook commands{weekly_note}:")
-        for p in problems[:12]:
-            print(f"  - {p}")
-        if len(problems) > 12:
-            print(f"  ... and {len(problems) - 12} more")
+        # [C1] Was a hand-rolled display cap: `for p in problems[:12]` plus a separately
+        # computed "... and N more". The literal 12 sat on three different lines, so an edit to
+        # one of them would make the notice lie, and the cap guard was blind to the whole
+        # shape. Routed through the ONE cap helper: identical output below the cap, same line
+        # count above it, and the notice now names the total and the shown count too.
+        for line in capped_report.render(problems, MAX_PROBLEM_BULLETS,
+                                         prefix="  - ", noun="problem"):
+            print(line)
     else:
         print(f"[hook-health] OK - {n_cmd} hook commands verified{weekly_note}")
     return 0

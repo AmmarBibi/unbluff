@@ -342,18 +342,24 @@ def table_structure_ranges(text: str) -> List[Tuple[int, int]]:
     return ranges
 
 
-def find_placeholders(text: str, cap: int = 40) -> List[Tuple[int, str]]:
-    """Unfilled placeholders left in the deliverable as (line, matched text).
+def find_placeholders(text: str) -> List[Tuple[int, str]]:
+    """EVERY unfilled placeholder left in the deliverable as (line, matched text).
 
     Skips markdown links `[label](url)` - the label is not a placeholder.
+
+    [C1] This used to stop at `cap=40`, which is the COLLECTION cap the shared capped_report
+    module exists to end: the scan stopped, so the real total was gone, and section [E] of the
+    report printed "-> 40" with no marker. Measured on a 60-placeholder fixture it returned 40
+    and under-reported by 20 in silence. It now scans to the end; "-> N" is the true N. There
+    is no display cap to route through capped_report.render() because a skill script installed
+    under ~/.claude/skills cannot import a hook that stays in this repo, and an unbounded list
+    of real defects is the honest answer for a tool whose whole job is completeness.
     """
     out: List[Tuple[int, str]] = []
     for m in _PLACEHOLDER_RE.finditer(text):
         if m.group(0).startswith("[") and m.end() < len(text) and text[m.end()] == "(":
             continue  # [label](url) markdown link, not a placeholder
         out.append((_line_of(text, m.start()), m.group(0).strip()))
-        if len(out) >= cap:
-            break
     return out
 
 

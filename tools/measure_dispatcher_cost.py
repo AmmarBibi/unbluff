@@ -20,6 +20,10 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "hooks"))
+import capped_report  # noqa: E402
+
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
 DISPATCHER = os.path.expanduser("~/.claude/scripts/hooks/posttooluse-dispatcher.js")
 PAYLOAD = json.dumps({
@@ -88,8 +92,14 @@ def main() -> int:
     print(f"  parallel lower bound (slowest single hook):               {slowest * 1000:.0f} ms")
     print("  NOTE: matchers gate which hooks fire for a given tool, so the real figure for any")
     print("        one tool call is at or below these; both bounds are measured, not modelled.")
-    for t, label in sorted(per_hook, reverse=True)[:8]:
-        print(f"    {t * 1000:7.0f} ms  {label}")
+    # [R2-H4] This was `sorted(per_hook, reverse=True)[:8]` - a real, live, unrouted display
+    # cap that printed the 8 slowest of len(per_hook) commands with no "+N more". It was
+    # invisible to the cap guard for one reason only: the bound was an integer literal.
+    # Routed through render() so the line names what it hid.
+    for line in capped_report.render(
+            [f"{t * 1000:7.0f} ms  {label}" for t, label in sorted(per_hook, reverse=True)],
+            8, prefix="    ", noun="command"):
+        print(line)
 
     node_total = sum(t for t, label in per_hook if "node -e" in label)
     node_max = max([t for t, label in per_hook if "node -e" in label] or [0])

@@ -61,7 +61,7 @@ HOOK_NAME = "show_your_proof"
 STATE_DIR_ENV = "UNBLUFF_STATE_DIR"
 DEFAULT_STATE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "state")
 SESSION_ID_PREFIX_LEN = 12
-TAIL_LINE_COUNT = 120
+MAX_TAIL_LINES = 120
 TAIL_READ_BYTES = 512 * 1024
 
 # Tight, word-boundary success-claim phrases (case-insensitive).
@@ -229,8 +229,22 @@ def evaluate_lines(lines):
     return (True, phrase)
 
 
-def read_tail_lines(path, max_lines=TAIL_LINE_COUNT):
-    """Read the last ~max_lines of a potentially huge file, cheaply."""
+def read_tail_lines(path, max_lines=MAX_TAIL_LINES):
+    """Read the last ~max_lines of a potentially huge file, cheaply.
+
+    [R2-H3] This was a live, unrouted cap that capped_report's guard reported as clean, for
+    two independent reasons: the bound was spelled TAIL_LINE_COUNT, which reads as a quantity
+    rather than a bound, and it is bound by a PARAMETER DEFAULT, a form the guard resolved
+    for parameter NAMES but never for parameter VALUES. Both are fixed; the constant is now
+    MAX_TAIL_LINES and the site is visible.
+
+    The judgement about what it bounds is written down in capped_report.SIZE_EXEMPTIONS
+    rather than left implicit: this is a bound on the INPUT WINDOW, not a display cap.
+    Nothing here reports a count, and evaluate_lines() returns (False, "") when the window
+    holds no real user prompt - so a window that is too small can cost a firing, never an
+    under-reported total, which is the defect display caps cause and the reason they are
+    never exemptible.
+    """
     with open(path, "rb") as handle:
         handle.seek(0, os.SEEK_END)
         size = handle.tell()

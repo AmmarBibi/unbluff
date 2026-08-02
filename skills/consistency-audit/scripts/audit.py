@@ -174,12 +174,18 @@ def _table_findings(text: str):
     return {"structures": len(ranges), "dangling": dangling, "missing": missing}
 
 
-def _claim_candidates(text: str, unmatched_values, cap: int = 15):
-    """Comparative/superlative sentences whose number is unmatched or absent."""
+def _claim_candidates(text: str, unmatched_values):
+    """EVERY comparative/superlative sentence whose number is unmatched or absent.
+
+    [C1] This used to stop the scan at `cap=15`. Section [D] then printed
+    "CLAIM SENTENCES TO VERIFY BY REASONING -> 15" with no truncation marker, which reads as
+    the complete list of sentences a human still has to check. Measured on a 30-claim fixture
+    it returned 15 and under-reported by 15 in silence - the exact defect capped_report.keep()
+    was written to end, surviving in the one directory the guard never scanned. It now scans to
+    the end, so "-> N" is the true N.
+    """
     out = []
     for lineno, line in enumerate(text.splitlines(), 1):
-        if len(out) >= cap:
-            break
         if not _CLAIM_RE.search(line):
             continue
         nums = extract.find_numbers(line)
