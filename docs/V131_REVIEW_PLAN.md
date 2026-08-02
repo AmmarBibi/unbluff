@@ -1357,6 +1357,20 @@ is derived from what is now true.
 **Release decision, 2026-08-02:** no interim version is cut. v1.3.1 ships once the fixes are
 done, so users never see an intermediate guard. Recorded here rather than left in chat.
 
+#### D1/D2 built - and D1 found a LIVE shipping defect while being designed
+
+| id | sev | owner | item |
+|---|---|---|---|
+| D2 | - | **BUILT 2026-08-02** | `tools/no_regression.py`, wired as AUX gate 23. Blocks a change that stops detecting what its predecessor detected - the class NOTHING here caught. Acceptance proven both ways: the repaired round-2 detector passes (`rc=0`), a faithfully reconstructed regression **blocks with 31 of 31 lost**. 0.42s, so per-stop not CI-only. Two mutations, both CAUGHT |
+| D1 | - | designed, **not yet wired** | `hooks/selftest_budget.py`. Inverts the dependency so the number a hook budgets against IS the number that kills it, enforced by AST (a textual guard must contain the pattern it forbids), mutation-tested 4/4 killed with a green control |
+| **D1-FIND** | **HIGH** | phase 0, with D1 | **`fast_test_on_stop.py --selftest` already exceeds the 25s cap that governs it, on every installed machine.** MEASURED by me directly: 25.05s / 25.26s / 25.51s, three of three over, on an idle box; the design agent measured 24.36-25.43s over 7 runs. `hook_health_check` runs it with `timeout=_SELFTEST_TIMEOUT_S` and on timeout appends `weekly selftest ERRORED/timed out`, so a **passing** hook is intermittently reported as broken in the weekly sweep users actually run. The comment justifying the cap (`hook_health_check.py:118-124`) states the failure mode exactly - "A cap a HEALTHY selftest exceeds does not catch a broken hook, it manufactures 'ERRORED/timed out' for a passing one" - and rests on "Measured 2026-07-31: slowest is fast_test_on_stop at ~19.7s warm", which is stale. The code documented the trap and fell into it. Straddling 25s makes it non-deterministic, which is why nobody noticed. **Adopting D1 turns the suite RED on this until it is fixed - that is correct, not a blocker to route around.** Fix is its own decision: shrink the selftest's deliberate sleeps (`gc_sleep=9`, a 3s timeout against a 60s sleeper) or raise the cap and `_WEEKLY_BUDGET_S` together, and the sleeps are load-bearing (the D10 grandchild case must outlive the runner's own timeout to mean anything) |
+
+Two findings from BUILDING D2, both worth more than the code:
+
+- **The regressing artifact was never preserved.** The first acceptance test failed correctly: `capped_report_r2_full.py` is the REPAIRED detector (round 2 fixed R2-H1 before ending), so it detects 96 of 96 where the baseline detects 31 - more, not less. The version measured at 10-of-14 blind exists nowhere, and the regression had to be RECONSTRUCTED via the exact edit R2-H1 describes. Labelled reconstructed, never presented as the original. **Preserve the failing artifact, not only the fix**, or the mechanism built to catch a defect cannot be tested against it.
+- **The corpus is biased toward its author.** Predecessor scores 31 of 96 on a corpus the successor scores 96 of 96 on, because the successor wrote most of it. Only the 14 scalar-suffix entries are baseline-verified. This is the trap already named in this plan - "the taxonomy was written by the same agent that wrote the detector" - walked into anyway. The corpus needs entries derived from the PREDECESSOR's capabilities, not only the successor's.
+- **My own new test was decorative and the mutation harness caught it in under a minute.** `no_regression` assertion D checked that an unusable predecessor raises `Broken`; mutation D2b SURVIVED, because with the guard deleted `compare()` still raises `Broken` from a different check and `except Broken: pass` swallowed it. Fixed to assert on the reason string; both mutations now CAUGHT.
+
 #### Consistency audit - 71 claims tested, corrections applied 2026-08-02
 
 The audit extracted and mechanically tested 71 checkable claims across the README, the plan

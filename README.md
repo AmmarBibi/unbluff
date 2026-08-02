@@ -158,7 +158,8 @@ post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  show_your_proof
 stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
 skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
-all 22 selftests passed
+no-regression: OK
+all 23 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

@@ -383,6 +383,17 @@ MUTATIONS = [
      [("    return (sorted(present - gate_basenames - set(not_a_gate)),\n"
        "            sorted(set(not_a_gate) - present))",
        "    return ([], sorted(set(not_a_gate) - present))")], False),
+    # [P14 D2] The no-regression gate is itself a gate, and finding M-M4 records that 4 of 6
+    # aux gates were re-run by NO mutation - a check nothing mutation-tests is decorative by
+    # default. These two pin the halves that carry the whole design.
+    ("tools/no_regression", "D2a", "the predecessor stops walking PAST identical blobs, so "
+     "a unit whose only commit matches the working tree compares a file to itself and passes",
+     [("            if _norm(blob) != current:\n                return blob, sha, None",
+       "            return blob, sha, None")], False),
+    ("tools/no_regression", "D2b", "a predecessor that detects nothing is treated as a clean "
+     "tree instead of an unusable yardstick, so a broken probe reads as no regression",
+     [('        if prev_score == 0:\n            raise Broken(',
+       '        if False:\n            raise Broken(')], False),
 ]
 
 

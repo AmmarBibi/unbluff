@@ -52,6 +52,12 @@ AUX_GATES = (
     # the README pastes a run_selftests transcript as EVIDENCE; it claimed 18 while the suite
     # ran 21. A stale paste reads exactly like a fresh one.
     ("readme-fresh", ("tools", "check_readme_fresh.py"), ()),
+    # [P14 D2] Mutation entries pin what a fix ADDS. NOTHING in this repo pinned what a fix
+    # TOOK AWAY. A rewrite of capped_report.py went blind to 10 of 14 cap spellings its own
+    # predecessor caught while this suite printed 22/22, integration printed 30/30, and 92
+    # of 94 mutations reported ALL CAUGHT. Measured at ~0.4s, so it belongs in the per-stop
+    # path rather than CI-only.
+    ("no-regression", ("tools", "no_regression.py"), ()),
 )
 
 # tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification
