@@ -1232,11 +1232,22 @@ P13 reviewed P11's code and found 26. P14 reviewed P13's and found 42. A pass ov
 fixes will find more. "Review until a pass returns zero" is not a finish line, so P14
 terminates by CONSTRUCTION instead:
 
-1. **Severity bar.** v1.3.1 ships when **zero HIGH is open**. Every remaining MEDIUM and LOW
-   gets a written owner and a scheduled row in this plan - never "optional", never prose.
+1. **Severity bar - a SHIP gate, NOT a DONE gate.** v1.3.1 ships when **zero HIGH is open**.
+   Every remaining MEDIUM and LOW gets a written owner and a scheduled row here, and is
+   **STILL BUILT** - after the ship, in materiality order, but built. Materiality decides
+   WHEN an item ships, never WHETHER it does. Nothing is closed by being logged.
 2. **Recursion bound.** The P14 fix diff gets **exactly one** review pass, P15, scoped to
    that diff and not to the repo. P15's HIGHs block the ship; P15's MEDIUM and LOW are
-   scheduled, not fixed. **There is no P16.** Termination does not depend on what P15 finds.
+   scheduled - which under rule 1 means scheduled TO BE BUILT, not parked. **There is no
+   P16.** Termination does not depend on what P15 finds.
+
+> **CLARIFICATION 2026-08-02, after the owner had to ask.** Earlier wording throughout this
+> plan and in session summaries repeatedly said MEDIUM and LOW are "recorded with owners",
+> which reads as logged-and-left. That is the optional-forever framing `plan_defer_guard`
+> exists to catch, and it appeared in the stopping rule itself. **Zero HIGH is when the
+> release goes out; it is not when the work stops.** A non-HIGH finding is not permission to
+> stop - it is a position in the queue. The only way an item leaves this plan unbuilt is as
+> an explicit FINALIZED EXCLUSION with a written justification, and there are currently none.
 
 This is the rule the release is measured against. Changing it is a decision to record here,
 not a judgement call to make mid-pass.
