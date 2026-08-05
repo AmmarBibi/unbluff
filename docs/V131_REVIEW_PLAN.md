@@ -1360,10 +1360,10 @@ is derived from what is now true.
 | phase | contents | why it is here |
 |---|---|---|
 | **0 - FOUNDATION** | C1 gate ledger; B6 CI; D1; D2. **M1 anchor-drift gate DONE 2026-08-06 (`6807121`).** STILL OPEN: **A8** - promoted here, because a loaded box turns wall-clock budget failures into 14-of-98 HARNESS ERRORs and so blocks the verification loop itself | Nothing downstream is provable until gates leave traces and CI runs. D1/D2 are what stop the next cluster repeating cluster 1. M1 belongs here for the same reason: it makes a disarmed mutation cost 0.087s to find instead of a full sweep |
-| **1 - THE CLASS FIX** | the fail-open family. **`transcript_util` twin-guard DONE and `duplicate_registration_check` DONE (2026-08-05, commit `0c0dfb9`).** STILL OPEN: C1-NEW (4 HIGH, design brief below), plus the roster-shaped checks (`run_selftests` `_DISPATCH_RE` + aux-gate-exit-0, `check_review_freshness` EXEMPT floor + narrowing fixture, `mutation_check` prose-substring bucket, N3) | ~15 findings, ONE principle. Fixing them separately is 15 chances to reintroduce the premise |
-| **2 - VERIFIER OF VERIFIERS** | `mutation_check` remainder (9 findings, incl. **M-M12** now explicitly rowed), plus **SC1** - the measurement-tool exemption hole, of which `score_corpus` was only the first instance | it certifies every other fix and nothing verifies it. SC1 sits here because a tool that produces numbers quoted in this plan is a verifier in everything but name |
+| **1 - THE CLASS FIX** | the fail-open family. **`transcript_util` twin-guard DONE, `duplicate_registration_check` DONE (`0c0dfb9`), and C1-NEW BUILT 2026-08-06 (`f77eefd`, `3dd82f4`) - its 4 HIGH remain OPEN pending the adversarial pass.** STILL OPEN: the roster-shaped checks (`run_selftests` `_DISPATCH_RE` + aux-gate-exit-0, `check_review_freshness` EXEMPT floor + narrowing fixture, `mutation_check` prose-substring bucket, N3) | ~15 findings, ONE principle. Fixing them separately is 15 chances to reintroduce the premise |
+| **2 - VERIFIER OF VERIFIERS** | `mutation_check` remainder (9 findings, incl. **M-M12** now explicitly rowed); **SC1** - the measurement-tool exemption hole; and from the 2026-08-06 B1 build: **B1-AC3** (acceptance criterion 3 unverified for the two new modules), **B1-SCOPE** (`tools/` unswept), **B1-C2FLOW** (clause 2 does not follow flow through an assignment - the blocker for B1-SCOPE), and **MR-c** (six uncontrolled timing claims, no mechanism) | it certifies every other fix and nothing verifies it. SC1 sits here because a tool that produces numbers quoted in this plan is a verifier in everything but name |
 | **3 - THE RELEASE GATE** | `check_review_freshness` (8 findings) | it decides whether v1.3.1 can ship, and sat at position 6 |
-| **4 - INDEPENDENT BUGS** | the genuine one-offs, by severity: M2, M3, A4-narrow, A9, F-L8, C2, N2, plus **SC2** (mutation scratch-tree leak - 22 dirs / 16 MB, `rmtree(ignore_errors=True)` swallowing the reason) | |
+| **4 - INDEPENDENT BUGS** | the genuine one-offs, by severity: M2, M3, A4-narrow, A9, F-L8, C2, N2, **SC2** (mutation scratch-tree leak), and from 2026-08-06: **SC4** (`F-H3`'s unstated fix ORDER), **N3-DUP** (nothing notices a module defining a top-level name twice), **MR-d** (audit artifacts dated a day ahead of the system clock) | |
 
 **Release decision, 2026-08-02:** no interim version is cut. v1.3.1 ships once the fixes are
 done, so users never see an intermediate guard. Recorded here rather than left in chat.
@@ -1807,3 +1807,63 @@ in its own last four lines.
 |---|---|---|---|
 | **B1-AC3** | **MEDIUM** | **phase 2, with the verifier-of-verifiers** | **Acceptance criterion 3, "no branch may be dead the day it lands", is UNVERIFIED for `cap_types` and `cap_shapes`.** It was a real defect in the reverted detector (two dead branches in `_cap_names`), and this build has 24 + 19 top-level definitions with no coverage measurement over any of them. Every rule has at least one fixture, which is necessary and not sufficient - a fixture proves a branch is reachable, not that every branch is. Fix: run a coverage pass over both modules driven by their own selftests plus the 135-entry corpus, and either exercise or delete each unreached branch. Sits in phase 2 because it is a verifier-of-verifiers question: the guard's own untested code is exactly the class this plan keeps finding |
 | **N3-DUP** | LOW | **phase 4, with N3** | **No check anywhere notices a module defining the same top-level name twice.** MEASURED: the split that produced `cap_types.py` emitted `_contains_exit` and `_import_aliases` twice; the file imported, ran, passed its own selftest, passed all 30 suite gates and the python-floor parse check. Found by an incidental AST count while editing, not by any gate. Belongs with N3 because it is the same shape as the 800-line rule - a property everyone assumes is enforced and nothing enforces. Cheap: one AST pass over the derived unit roster, printing its denominator |
+
+#### Source-coverage audit, 2026-08-06 (second pass) - 2 real gaps in 81 source ids
+
+Method: every finding id named in the six source audit docs was extracted MECHANICALLY and
+reconciled against this plan. A defer-grep over the plan cannot find what the plan never
+mentions; enumerating ids out of the SOURCES and checking each against the plan can.
+**81 distinct ids; 37 the plan never names; 35 adjudicated as not-gaps; 2 real.**
+
+The 35: control labels from experiments (`C0`, `C1-C4`, `N7`, `M0`), fragments of the
+`git diff -M05` / `-M50` flags, Q-section headings (`Q1`-`Q5`), a line reference (`L6`),
+and range forms the plan carries as ranges rather than as individual ids (`C1-R2`..`C1-R8`
+retired as `C1-R1..R8`; `N1-N4`; `R2-H2`/`R2-M3`, which ARE the union those 8 retired rows
+cover). `F-M8` is explicitly dispositioned in `p14_triage.md` as "twin of the dropped
+candidate; folds into row 1; no separate row" - and its content (`_max_names` sees only
+`ast.Assign`, so imports, annotated assignments and attribute bounds are invisible) is
+precisely what C1-NEW fixed, so it is now **BUILT**.
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **SC3** | **MEDIUM** | **BUILT 2026-08-06** | **A mutation the source RESERVED and nobody built, guarding the rule that every component of an exemption key must be load-bearing.** `p14_new_code_review.md` reproduced it in an isolated scratch tree: a two-line widening of the `BOUND_EXEMPTIONS` membership test blinds `slicing_offenders` to real offenders while `capped_report --selftest`, the whole suite and all three `capped_report` mutations stay green - "because nothing anywhere pins the (module, constant) pair". It named the fix (plant a fixture, add mutation `B9`) and **the plan never carried a row for it**, so it survived the revert, the rebuild and two prior audits. The key is now a TRIPLE, `(module, qualname, kind)`, so there are three ways to widen it and each now has its own control: a different function in an exempted module must still flag (qualname), a DISPLAY cap in an exempted function must still flag (kind), and the same qualname+kind in another module must still flag (module). Mutation **`cap_shapes #B19`** - the source calls it `B9`, an id already taken here by an unrelated `cap_shapes` entry - CAUGHT. **The general rule the source states and this plan should have carried: any exemption or allowlist keyed on a tuple must test that EVERY component of the key is load-bearing** |
+| **SC4** | **LOW** | **phase 4, with the `fast_test_on_stop` work** | **A fix ORDER that no row states, and getting it wrong produces a SURVIVED mutation.** `p14_triage.md` records that `F-H3` "establishes a fix ORDER the main list does not state: fix `_child` FIRST, because adding `verify_unit` to mutation #10 alone just flips it to SURVIVED." The ordering constraint is real, is load-bearing for whether the mutation proves anything, and appears nowhere in this plan - the triage doc says in as many words that the main list does not state it, and no subsequent row added it. Recorded now so the constraint survives to whoever does that work |
+
+**What this pass did NOT do, stated so the scope is not overread.** The three large source docs
+(`p14_audit_findings.md` 100 KB, `p14_new_code_review.md` 87 KB, `p14_cluster1_evidence.md`
+64 KB) were **not** re-enumerated prose-by-prose. The skill's procedure calls for a Workflow
+fan-out to do that without skimming, and the usage snapshot needed to authorise one was not
+available. The id-space reconciliation above is mechanical and COMPLETE for items that carry
+an id; it is BLIND to a source requirement stated only in prose with no id. That is a real
+coverage limit of this pass, not a clearance - and it is exactly how `SC3` hid, since its own
+recommendation names an id (`B9`) that never existed.
+
+#### Meta-review, 2026-08-06 (B1) - one class recurring six times, and six clean probes
+
+**The probes came back clean, and that is worth stating with its denominator.** Prior
+meta-reviews found MR-a (a gate fully disarmable with every test green) and MR-b (a
+false-alarm mode in the guard written to avoid one) by PROBING rather than reading. The same
+method against this session's guards, each in an isolated copy of the repo: **6 of 6
+disarming edits were CAUGHT** - the `capped_report` delegate returning `[]`, `verdict()`
+always saying OK, `exemption_problems()` returning nothing, the roster check bypassed, every
+site suppressed, and clause 2 swallowing every display cap. Two of those exercise the
+DECISION rather than the detector, which is precisely what MR-a proved was missing before.
+A negative result, reported with what was tried.
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **MR-c** | **MEDIUM** | **phase 2, with the verifier-of-verifiers** | **An uncontrolled timing claim has now been written and corrected SIX times in this repo, and every fix has been an INSTANCE fix.** The record: four timing conclusions reversed by a control during the A8 work; "the ~50-minute sweep" caught by the 2026-08-05 consistency audit and withdrawn; and "1.08s" caught by today's, where the true figure is **1.291s median (n=5)** and the control proved the box was idle. The rule is written down, is known, and is applied correctly to the number under scrutiny - then dropped for whichever number feels too small to matter. **That pattern does not respond to another reminder; it needs a mechanism.** The mechanism is mechanically decidable and this repo already has its twin: `numbers_match_on_write` fires when a number written into a doc matches no source. The analogue: fire when a doc gains a DURATION (`\d+(\.\d+)?\s*(s\|ms\|sec\|seconds\|minutes?)`) that is not accompanied by a control marker (`median`, `n=`, `interleaved`, `control`, `spread`). Fail-silent, once per session, like its twin. Until it exists, the class WILL recur - it has six times |
+| **MR-d** | LOW | phase 4 | **Every audit artifact this session and the last is dated `2026-08-06`; the system clock says `2026-08-05`.** MEASURED: `date -u` returns `2026-08-05T20:41:48Z` and the newest `gate_runs.json` entry is `2026-08-05T20:40:06Z`, 90 seconds old - so the ledger is live and the CLOCK is the thing the filenames disagree with. No functional impact found: `check_review_freshness` reads file mtimes, not these labels. But an audit trail whose dates do not match the clock is a weak audit trail, and the drift is now two sessions deep across six filenames and dozens of plan rows. NOT unilaterally rewritten - the user's own brief uses `2026-08-06`, so the convention may be deliberate and renaming would break every reference. Flagged for a decision rather than silently changed |
+| **MR-e** | LOW | phase 4, with M3 | `hooks/cap_shapes.py` grew **694 -> 739 lines** inside one session, purely from fixtures and controls added by the close-out audits. Not a violation (M3's watch band is 760+, where `duplicate_registration_check` sits at 792 and `hook_health_check` at 790) but the trajectory is the same one that put those two there, and the growth came from the healthiest possible source. Recorded so the next addition is a decision. The natural split, if needed, is the fixture tables out to a sibling |
+
+**Gate ledger, read rather than reconstructed** (the check this skill insists on). 153 entries,
+**exactly one distinct gate: `run_selftests`** - M2's finding, unchanged and already scheduled
+for phase 4. The last entry is 90 seconds old, so the ledger is CURRENT for the one gate it
+covers and blind for every other. `mutation_check` ran four times today and wrote nothing to
+it, which is exactly M2's point.
+
+**Durability check on this session's own fixes.** AC2 -> mutation `#B18` + a corpus family;
+the exemption key -> three controls + mutation `#B19`; the duplicate definitions -> removed,
+with the general check scheduled as `N3-DUP`; the corpus contradiction -> `score_corpus`
+derives and prints it every run + mutation `#B1c`. **The one fix with no mechanism behind it
+is the timing correction, which is MR-c above** - and it is the one that has recurred six times.

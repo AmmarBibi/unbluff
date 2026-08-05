@@ -470,6 +470,16 @@ MUTATIONS = [
      [("return bool(appends) and all(all(isinstance(a, ast.Constant) for a in c.args)\n"
        "                                 for c in appends)",
        "return False")], False),
+    # p14_new_code_review.md reserved a mutation for this against the OLD (module, constant)
+    # key and it was never built: a two-line widening of the exemption membership test blinded
+    # the guard while capped_report --selftest, the whole suite and all three capped_report
+    # mutations stayed green, "because nothing anywhere pins the (module, constant) pair".
+    # The source names it B9; that id is taken here by an unrelated cap_shapes mutation, so it
+    # is B19. The key is now a TRIPLE and this widens it to the module alone.
+    ("cap_shapes", "B19", "the exemption key widens to the module, so every cap in an "
+     "exempted file inherits the exemption (the reserved-but-never-built B9)",
+     [("            if use_roster and key in ALL_EXEMPTIONS:",
+       "            if use_roster and any(k[0] == key[0] for k in ALL_EXEMPTIONS):")], False),
     ("cap_shapes", "B16", "an index bounds check inside a loop reads as a cap again",
      [("        if any(_references(o, loop_vars) for o in others):\n            continue",
        "        if False:\n            continue")], False),

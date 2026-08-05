@@ -675,6 +675,38 @@ def selftest() -> int:
                   "    return out\n", "numbers_match_on_write.py")
         if slicing_offenders(d):
             fails.append("the fixture exemption did not suppress its own site")
+        # EVERY COMPONENT OF THE EXEMPTION KEY MUST BE LOAD-BEARING.
+        # p14_new_code_review.md reserved a mutation for exactly this against the OLD
+        # (module, constant) key: a two-line widening of the membership test blinded the
+        # guard to real offenders while capped_report --selftest, the whole suite and all
+        # three capped_report mutations stayed green, "because nothing anywhere pins the
+        # (module, constant) pair". The key is now a TRIPLE, so there are three ways to widen
+        # it and each needs its own control.
+        exempt_mod = os.path.join(d, "numbers_match_on_write.py")
+        with open(exempt_mod, "a", encoding="utf-8") as fh:
+            fh.write("\n\ndef build_message(rows):\n    return rows[:200]\n")
+        got = slicing_offenders(d)
+        if not any("build_message" in o for o in got):
+            fails.append("QUALNAME is not load-bearing: a DIFFERENT function in an exempted "
+                         "module inherited the exemption, so widening the key to the module "
+                         "would blind the guard with every test green")
+        with open(exempt_mod, "a", encoding="utf-8") as fh:
+            fh.write("\n\ndef scan_and_slice(xs):\n    out = []\n    for x in xs:\n"
+                     "        if len(out) >= 200:\n            break\n        out.append(x)\n"
+                     "    return out[:200]\n")
+        got = slicing_offenders(d)
+        if not any("scan_and_slice" in o and "render" in o for o in got):
+            fails.append("KIND is not load-bearing: a DISPLAY cap was suppressed by a "
+                         "COLLECTION exemption, which is the (module, constant) defect the "
+                         "triple key replaced")
+        d2 = tempfile.mkdtemp(dir=td)
+        _plant(d2, "def scan(xs):\n    out = []\n    for x in xs:\n"
+                   "        if len(out) >= 200:\n            break\n        out.append(x)\n"
+                   "    return out\n", "other_module.py")
+        if not slicing_offenders(d2):
+            fails.append("MODULE is not load-bearing: the same qualname and kind in a "
+                         "DIFFERENT module inherited the exemption")
+
         live = exemption_problems(d, FIXTURE_EXEMPTIONS)
         if any("/ scan /" in p for p in live):
             fails.append("a NEEDED exemption was reported dead - the liveness check would "
