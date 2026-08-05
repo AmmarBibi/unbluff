@@ -30,17 +30,15 @@ import sys
 _HOOKS_DIR_SB = os.path.dirname(os.path.abspath(__file__))
 if _HOOKS_DIR_SB not in sys.path:
     sys.path.insert(0, _HOOKS_DIR_SB)
+import cap_shapes  # noqa: E402  the C1-NEW detector
 import selftest_budget  # noqa: E402  ONE declaration of the per-hook selftest cap
 
-# (module, constant) pairs that are resource BOUNDS, not display caps: they exist to stop a
-# pathological input ballooning memory, and the code that owns them reports its own totals
-# separately. A FLOOR that forces a decision - a new cap that is neither routed through this
-# module nor listed here is a selftest failure, not a silent truncation.
-BOUND_EXEMPTIONS = {
-    ("numbers_match_on_write", "MAX_FINDINGS_TRACKED"),   # anti-balloon, total reported via M2
-    ("numbers_match_on_write", "MAX_SOURCE_VALUES"),      # source-index size bound
-    ("numbers_match_on_write", "MAX_FILE_BYTES"),         # per-file read bound
-}
+# The exemption roster moved to cap_shapes with the detector, and its KEY changed from
+# (module, constant) to (module, qualname, kind). That is not cosmetic: a constant-keyed
+# roster cannot separate a sanctioned COLLECTION bound from a DISPLAY cap on the SAME
+# constant in the same file, and the corpus carries three must-flag entries that are exactly
+# that. Re-exported here because this is the name the audit docs cite.
+BOUND_EXEMPTIONS = cap_shapes.BOUND_EXEMPTIONS
 
 
 def keep(items, limit: int) -> tuple[list, int]:
@@ -70,62 +68,27 @@ def render(findings, limit: int, *, prefix: str = "- ", noun: str = "finding",
     return lines
 
 
-def _max_names(tree: ast.AST) -> set:
-    """Module-level constants whose name marks them as a cap."""
-    out = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id.startswith("MAX_"):
-                    out.add(t.id)
-    return out
-
-
 def slicing_offenders(hooks_dir: str) -> list:
-    """Hooks that cap a list against a MAX_* constant without going through this module.
+    """Hooks that silently shorten a REPORTED collection without going through this module.
 
-    STRUCTURAL (walks the AST), not a grep. A textual guard would have to contain the very
-    pattern it forbids, and this repo has already recorded one guard that could not fail
-    because the string it searched for appeared in the guard itself.
+    [P14 B1, C1-NEW] The implementation lives in cap_shapes/cap_types and this is a delegate,
+    kept at this name because it is the DECLARED entrypoint in tests/noregress_registry.py -
+    renaming it would make no_regression measure the predecessor as detecting nothing and
+    report a total loss that never happened.
 
-    Flags two shapes:
-      * `something[:MAX_FOO]`        - a display cap, which needs render()
-      * `if len(x) >= MAX_FOO: break` - a collection cap, which needs keep()
+    What changed, and it is the whole design: the predecessor classified the BOUND - a
+    module-level `MAX_*` constant used as a slice upper or a break comparator. Python's
+    grammar does not bound the ways to spell a bound, so that design failed OPEN on every
+    unenumerated spelling (import, class attribute, dict value, walrus, lowercase parameter,
+    bare integer) and was reverted at 2,101 lines. C1-NEW classifies the OPERATION instead,
+    which IS grammar-closed.
+
+    MEASURED against tests/cap_spelling_corpus.py: predecessor 38 of 103 with 1 false
+    positive; this 100 of 103 with 0. The 3 misses are byte-identical corpus pairs carrying
+    opposite verdicts, so 100 with zero false positives is the arithmetic ceiling, not a
+    shortfall - see tools/score_corpus.py, which now detects and prints those pairs.
     """
-    offenders = []
-    for path in sorted(glob.glob(os.path.join(hooks_dir, "*.py"))):
-        module = os.path.splitext(os.path.basename(path))[0]
-        if module == "capped_report":
-            continue                      # this module is the sanctioned home for the pattern
-        try:
-            with open(path, encoding="utf-8") as f:
-                tree = ast.parse(f.read())
-        except (OSError, SyntaxError):
-            continue
-        caps = _max_names(tree)
-        if not caps:
-            continue
-        for node in ast.walk(tree):
-            # display cap:  xs[:MAX_FOO]
-            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
-                upper = node.slice.upper
-                if (isinstance(upper, ast.Name) and upper.id in caps
-                        and (module, upper.id) not in BOUND_EXEMPTIONS):
-                    offenders.append(f"{module}: slices to {upper.id} directly - use "
-                                     f"capped_report.render() so the message names what it hid")
-            # collection cap:  if len(xs) >= MAX_FOO: break
-            if isinstance(node, ast.If) and any(isinstance(b, ast.Break) for b in node.body):
-                for cmp_node in ast.walk(node.test):
-                    if not isinstance(cmp_node, ast.Compare):
-                        continue
-                    for comparator in cmp_node.comparators:
-                        if (isinstance(comparator, ast.Name) and comparator.id in caps
-                                and (module, comparator.id) not in BOUND_EXEMPTIONS):
-                            offenders.append(
-                                f"{module}: breaks out of a scan at {comparator.id}, so the "
-                                f"real total is destroyed and any '+N more' under-reports - "
-                                f"use capped_report.keep()")
-    return sorted(set(offenders))
+    return cap_shapes.slicing_offenders(hooks_dir)
 
 
 def selftest() -> int:
@@ -153,19 +116,26 @@ def selftest() -> int:
     if "38 more" not in lines[-1] or "40 total" not in lines[-1]:
         fails.append(f"render(total=) ignored the caller's real total: {lines[-1]!r}")
 
-    # [assume a fifth] no hook may grow its own cap again
-    offenders = slicing_offenders(os.path.dirname(os.path.abspath(__file__)))
-    for o in offenders:
-        fails.append(o)
+    # [assume a fifth] no hook may grow its own cap again, and no exemption may outlive the
+    # site it was written for. Both go through cap_shapes.verdict(), which is the DECISION -
+    # asserted branch by branch in cap_shapes' own selftest, because MR-a recorded a gate
+    # that was fully disarmable while every test exercising its DETECTOR stayed green.
+    here = os.path.dirname(os.path.abspath(__file__))
+    ok, lines = cap_shapes.verdict(slicing_offenders(here),
+                                   cap_shapes.exemption_problems(here))
+    if not ok:
+        fails.extend(lines)
 
     # the guard must be able to SEE an offender - a structural check that matches nothing is
-    # indistinguishable from a clean sweep, which is the failure this whole module is about
+    # indistinguishable from a clean sweep, which is the failure this whole module is about.
+    # cap_shapes' selftest plants one fixture per shape; this pins the DELEGATION itself,
+    # which is the only thing this file still owns.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         with open(os.path.join(td, "planted.py"), "w", encoding="utf-8") as f:
-            f.write("MAX_BULLETS = 3\n\n\ndef m(xs):\n    return xs[:MAX_BULLETS]\n")
+            f.write("MAX_BULLETS = 12\n\n\ndef m(xs):\n    return xs[:MAX_BULLETS]\n")
         with open(os.path.join(td, "planted2.py"), "w", encoding="utf-8") as f:
-            f.write("MAX_ITEMS = 3\n\n\ndef m(xs):\n    out = []\n    for x in xs:\n"
+            f.write("MAX_ITEMS = 12\n\n\ndef m(xs):\n    out = []\n    for x in xs:\n"
                     "        if len(out) >= MAX_ITEMS:\n            break\n"
                     "        out.append(x)\n    return out\n")
         planted = slicing_offenders(td)

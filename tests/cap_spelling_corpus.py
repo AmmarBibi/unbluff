@@ -541,6 +541,57 @@ ENTRIES = ENTRIES + _SCALAR_SUFFIX_ENTRIES
 MUST_FLAG = tuple(e for e in ENTRIES if e[2])
 NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
 
+
+# --- APPENDED 2026-08-06: caps OUTSIDE a function -----------------------------
+# The second family derived from the PREDECESSOR's capabilities rather than the
+# successor's, which the plan records as still owed.
+#
+# Every one of the 125 entries above wraps its cap in a `def`. The predecessor has no
+# notion of a function at all - it walks the whole AST - so a rebuild that only ever
+# looks inside functions loses all seven of these while the corpus reports parity.
+# MEASURED, not reasoned: a real intermediate build of C1-NEW (function scopes only)
+# was BLIND to 7 of 7 while the predecessor caught 7 of 7, and no_regression printed
+# "predecessor saw 31 of 96, working tree sees 31". A detection regression that every
+# gate in this repo would have passed.
+#
+# must_flag=True is baseline-verified the same way the scalar-suffix family was: each
+# entry was planted and run against the live predecessor guard, not assumed from its
+# name.
+_MODULE_SCOPE_ENTRIES = (
+    ('pred_module_level_display_slice',
+     'hooks/f.py',
+     True,
+     'MAX_BULLETS = 12\nITEMS = list(range(50))\nSHOWN = ITEMS[:MAX_BULLETS]\n'),
+    ('pred_module_level_collection_break',
+     'hooks/f.py',
+     True,
+     'MAX_ITEMS = 10\nOUT = []\nfor x in range(50):\n    if len(OUT) >= MAX_ITEMS:\n        break\n    OUT.append(x)\n'),
+    ('pred_class_body_display_slice',
+     'hooks/f.py',
+     True,
+     'MAX_BULLETS = 12\n\n\nclass Report:\n    ROWS = list(range(50))\n    SHOWN = ROWS[:MAX_BULLETS]\n'),
+    ('pred_slice_in_main_guard',
+     'hooks/f.py',
+     True,
+     "import sys\nMAX_BULLETS = 12\nif __name__ == '__main__':\n    print(sys.argv[:MAX_BULLETS])\n"),
+    ('pred_break_in_module_try',
+     'hooks/f.py',
+     True,
+     'MAX_ITEMS = 10\nOUT = []\ntry:\n    for x in range(50):\n        if len(OUT) >= MAX_ITEMS:\n            break\n        OUT.append(x)\nexcept OSError:\n    pass\n'),
+    ('pred_display_slice_in_a_lambda',
+     'hooks/f.py',
+     True,
+     'MAX_BULLETS = 12\nhead = lambda xs: xs[:MAX_BULLETS]\n'),
+    ('pred_function_local_max_used_at_module_level',
+     'hooks/f.py',
+     True,
+     'def setup():\n    MAX_BULLETS = 12\n    return MAX_BULLETS\n\n\nROWS = list(range(50))\nSHOWN = ROWS[:MAX_BULLETS]\n'),
+)
+
+ENTRIES = ENTRIES + _MODULE_SCOPE_ENTRIES
+MUST_FLAG = tuple(e for e in ENTRIES if e[2])
+NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
+
 def selftest() -> int:
     """The corpus checks ITSELF: unique names, non-empty sources, both classes populated."""
     fails = []

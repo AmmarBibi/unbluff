@@ -76,6 +76,42 @@ def split_corpus(entries=None, extra=None):
     return pos, neg
 
 
+def contradictions(entries=None):
+    """Groups of entries that are the SAME INPUT with OPPOSITE verdicts.
+
+    [P14 B1, 2026-08-06] `run_entry` plants ONE entry in a fresh temp dir and calls
+    slicing_offenders(dirname). So (rel_path, source) IS the complete input a guard sees.
+    Two entries sharing it and disagreeing on must_flag ask a deterministic guard the same
+    question twice and require different answers - no guard can satisfy both, ever.
+
+    MEASURED when this was written: THREE such pairs, so CAUGHT 100 of 103 at zero false
+    positives is the arithmetic CEILING and not a shortfall. Before this existed the tool
+    printed 103 as though it were reachable, and a reader comparing 100 against it would
+    conclude the guard had a gap it does not have.
+
+    This is the same class as the double-counting defect fixed above and as SC1: a
+    measurement tool was exempted from the gates for having "no pass/fail opinion", while
+    quietly reporting a denominator nobody could trust. Whether a grader's own questions are
+    answerable is not an opinion.
+    """
+    entries = list(corpus.ENTRIES if entries is None else entries)
+    groups = {}
+    for e in entries:
+        groups.setdefault((e[1], e[3]), []).append((e[0], e[2]))
+    out = []
+    for (rel, src), members in groups.items():
+        if len({mf for _n, mf in members}) > 1:
+            out.append((rel, src, sorted(members)))
+    return sorted(out, key=lambda g: sorted(n for n, _ in g[2]))
+
+
+def ceiling(pos, neg, groups):
+    """(max CAUGHT at zero false positives, min FALSE-POS at full CAUGHT)."""
+    blocked_pos = sum(1 for _r, _s, ms in groups for _n, mf in ms if mf)
+    blocked_neg = sum(1 for _r, _s, ms in groups for _n, mf in ms if not mf)
+    return len(pos) - blocked_pos, blocked_neg
+
+
 def selftest():
     """The arithmetic this tool exists to report. A scorer that miscounts the corpus makes every
     number derived from it wrong in the same direction, silently."""
@@ -106,6 +142,26 @@ def selftest():
     # file for a path pattern - a guard that searches for a literal it contains is a defect this
     # repo has already recorded once. A hardcoded path that happens to be correct on the author's
     # machine passes every local check and only fails in CI, on the other two platforms.
+    # PLANTED, both directions. A contradiction detector that finds nothing is
+    # indistinguishable from a consistent corpus, and that is exactly how the real three
+    # pairs sat unnoticed while the tool printed an unreachable denominator.
+    same = ("hooks/f.py", "x = 1\n")
+    got = contradictions([("a", same[0], True, same[1]), ("b", same[0], False, same[1])])
+    if len(got) != 1 or [n for n, _ in got[0][2]] != ["a", "b"]:
+        fails.append("a byte-identical pair with opposite verdicts was NOT reported: %r"
+                     % (got,))
+    quiet = contradictions([("a", same[0], True, same[1]),
+                            ("b", "hooks/g.py", False, same[1]),
+                            ("c", same[0], True, same[1])])
+    if quiet:
+        fails.append("entries that differ by PATH, or agree on must_flag, are not "
+                     "contradictions - reporting them would make the check noise: %r"
+                     % (quiet,))
+    top, minfp = ceiling([1, 2, 3], [4, 5], [(same[0], same[1], [("a", True), ("b", False)])])
+    if (top, minfp) != (2, 1):
+        fails.append("ceiling() is wrong: got %r, expected (2, 1) - one blocked positive and "
+                     "one blocked negative" % ((top, minfp),))
+
     want = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if os.path.normcase(REPO) != os.path.normcase(want):
         fails.append("REPO is %r, not this file's own repo root %r. A machine-specific path in a "
@@ -157,6 +213,17 @@ def main():
     print(f"NEGATIVES (must stay quiet): CLEAN  {len(clean)}/{nneg}   "
           f"FALSE-POS {len(fp)}   CRASHED {len(ncrash)}")
     print(f"DENOMINATOR: {npos} positives + {nneg} negatives = {npos + nneg} corpus entries")
+    groups = contradictions()
+    if groups:
+        top, minfp = ceiling(pos, neg, groups)
+        print(f"CEILING:     CAUGHT {top}/{npos} at zero false positives, or {npos}/{npos} "
+              f"at {minfp}+ false positives - NEVER both.")
+        print(f"             {len(groups)} contradictory input group(s): entries that are "
+              f"byte-identical in (rel_path, source) and disagree on must_flag. A guard sees "
+              f"one input and is asked for two answers.")
+        for rel, _src, members in groups:
+            names = ", ".join("%s=%s" % (n, mf) for n, mf in members)
+            print(f"               {rel}: {names}")
     if crashed:
         print(f"\nCRASHES on positives ({len(crashed)}): {crashed[:8]}")
     if ncrash:

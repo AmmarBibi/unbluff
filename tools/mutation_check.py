@@ -438,9 +438,43 @@ MUTATIONS = [
     ("capped_report", "B7", "render() truncates with no notice again",
      [('    hidden = real_total - len(shown)\n    if hidden > 0:',
        "    hidden = real_total - len(shown)\n    if False:")], False, "plan_defer_guard"),
-    ("capped_report", "B8", "the twin-guard stops seeing a hook that grew its own cap",
+    # [P14 B1, C1-NEW] The detector moved to cap_shapes/cap_types when it stopped classifying
+    # the BOUND and started classifying the OPERATION. #B8 is re-anchored rather than dropped
+    # - the capability it pins (the sweep can still SEE a file) is unchanged. B9..B18 pin one
+    # rule each: every suppression rule needs its own mutation, or a later edit can delete the
+    # rule and the corpus score will not move, because the corpus has no entry for a live
+    # false positive that no longer exists.
+    ("cap_shapes", "B8", "the twin-guard stops seeing a hook that grew its own cap",
      [("    offenders = []\n    for path in sorted(glob.glob(os.path.join(hooks_dir, \"*.py\"))):",
        "    offenders = []\n    for path in []:")], False),
+    ("cap_shapes", "B9", "an unparseable file is silently skipped again (fail-open)",
+     [('        except SyntaxError as exc:\n            offenders.append("%s: does not parse '
+       '(%s) - a file this guard cannot read is "\n                             "REPORTED, '
+       'never silently skipped" % (module, exc.msg))\n            continue',
+       "        except SyntaxError:\n            continue")], False),
+    ("cap_shapes", "B10", "clause 1 stays quiet on anything it cannot classify",
+     [('                if kind == "scalar":', '                if kind != "collection":')],
+     False),
+    ("cap_shapes", "B11", "a dead exemption stops being a finding",
+     [("    lines = list(offenders) + list(dead_exemptions)",
+       "    lines = list(offenders)")], False),
+    ("cap_shapes", "B12", "module-level caps go blind again (the predecessor-derived loss)",
+     [('    out = [("<module>", tree)]', "    out = []")], False),
+    ("cap_shapes", "B13", "clause 2 swallows every display cap, not just the aggregated ones",
+     [('            if (clause2 and site.kind == "display" and site.expr is not None',
+       '            if (clause2 and site.kind == "display" and site.expr is None')], False),
+    ("cap_shapes", "B14", "clause 3 stops recognising a read window this function performed",
+     [("            if clause3 and facts.io_derived(site.target):\n                continue",
+       "            if False:\n                continue")], False),
+    ("cap_shapes", "B15", "a pad-to-minimum loop reads as a cap again",
+     [("return bool(appends) and all(all(isinstance(a, ast.Constant) for a in c.args)\n"
+       "                                 for c in appends)",
+       "return False")], False),
+    ("cap_shapes", "B16", "an index bounds check inside a loop reads as a cap again",
+     [("        if any(_references(o, loop_vars) for o in others):\n            continue",
+       "        if False:\n            continue")], False),
+    ("cap_types", "B17", "the positional floor swallows real caps",
+     [("POSITIONAL_FLOOR = 5", "POSITIONAL_FLOOR = 50")], False),
     ("./run_selftests", "A3b", "an undeclared tools/ file no longer forces a decision",
      [("    return (sorted(present - gate_basenames - set(not_a_gate)),\n"
        "            sorted(set(not_a_gate) - present))",
@@ -479,6 +513,9 @@ MUTATIONS = [
     ("tools/score_corpus", "B1s", "the corpus scorer counts every negative control twice again, "
      "so it reports 154 entries for a 125-entry corpus and doubles every false-positive count",
      [("        if e[0] in seen:", "        if False:")], False),
+    ("tools/score_corpus", "B1c", "the scorer stops noticing that its own corpus asks the same "
+     "question twice with opposite answers, so it prints a denominator no guard can reach",
+     [("        if len({mf for _n, mf in members}) > 1:", "        if False:")], False),
     # [P14 B3-P] The LAYER roster. Each of these reintroduces one half of the fix: seeing
     # nothing, or seeing too much. The second is the dangerous one - B3-FP proved that a guard
     # which false-alarms on a correct config gets switched off, which is worse than none.

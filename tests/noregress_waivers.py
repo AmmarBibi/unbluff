@@ -38,4 +38,24 @@ ENTRY SHAPE
 
 from __future__ import annotations
 
-WAIVERS = ()
+WAIVERS = (
+    {"unit": "hooks/capped_report.py",
+     "capability": "scalar_slice_without_a_roster_entry",
+     "narrowed_on": "2026-08-06",
+     "reason":
+         "Detecting it was WRONG, and the corpus proves it mechanically rather than by "
+         "argument. `scalar_slice_without_a_roster_entry` and `neg_scalar_slice_rostered` "
+         "are BYTE-IDENTICAL: same rel_path 'hooks/f.py', same source "
+         "(`text = fh.read(); return text[:MAX_FILE_BYTES]`), opposite must_flag. "
+         "score_corpus plants one entry per fresh temp dir, so a deterministic guard is "
+         "asked the same question twice and required to answer differently. It cannot. "
+         "The predecessor took the flag-both side and paid for it with the single false "
+         "positive in its record; C1-NEW takes the stay-quiet side, because clause 1 "
+         "correctly reads `fh.read()` as a str and truncating a string is not the defect "
+         "this guard exists to catch. Trading 1 unreachable positive for 0 false positives "
+         "is the better half of an unsatisfiable pair, not a narrowing of the guard. "
+         "MEASURED: predecessor 38 of 103 with FALSE-POS 1; C1-NEW 100 of 103 with "
+         "FALSE-POS 0, which is the arithmetic ceiling given three such pairs. "
+         "This waiver goes STALE and BLOCKING the moment the corpus stops contradicting "
+         "itself, which is the correct trigger to revisit it."},
+)
