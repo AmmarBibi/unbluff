@@ -48,6 +48,17 @@ def unit_path(root: str, name: str) -> str:
     return os.path.join(root, "hooks", name + ".py")
 
 
+def missing_anchors(live_text: str, edits) -> list:
+    """The `find` strings in `edits` that no longer appear in `live_text`.
+
+    ONE implementation, shared by `run()` below and by `tools/check_mutation_anchors.py`. A
+    second copy of this rule in the standalone gate would be the twin defect this repo hunts:
+    that gate exists to say something about what this harness actually does, and a gate whose
+    rule has quietly diverged from the harness reports on a program nobody runs.
+    """
+    return [find for find, _replace in edits if find not in live_text]
+
+
 # (unit, finding, description, [(find, replace), ...], posix_only[, verify_unit])
 # `unit` is a hook name, or a repo-relative path like "tools/check_review_freshness".
 MUTATIONS = [
@@ -445,7 +456,77 @@ MUTATIONS = [
      "tree instead of an unusable yardstick, so a broken probe reads as no regression",
      [('        if prev_score == 0:\n            raise Broken(',
        '        if False:\n            raise Broken(')], False),
+    # [P14 M1] The anchor-drift sweep. The detector lives HERE, the planted-fixture selftest
+    # that pins it lives in the gate, so these are TWIN mutations - hence the 6th element.
+    #
+    # Both anchors are written SPLIT ("missing_" "anchors"). These are the first mutations whose
+    # target file is THIS one, so an anchor written contiguously would occur twice in it - once
+    # as the code and once as this very table entry - and `replace(find, replace, 1)` would edit
+    # the TABLE rather than the code, mutating nothing and reporting SURVIVED. Splitting keeps
+    # the contiguous literal unique to the code. If this is ever got wrong,
+    # `check_mutation_anchors` prints a multi-match note for the entry.
+    ("tools/mutation_check", "M1a", "anchor_audit stops reporting a drifted anchor, so the cheap "
+     "gate goes green while a mutation is silently unrunnable",
+     [("        for find in missing_" "anchors(text, edits):", "        for find in []:")],
+     False, "tools/check_mutation_anchors"),
+    ("tools/mutation_check", "M1b", "an unreadable unit is recorded as empty rather than "
+     "unreadable, so a mutation naming a deleted file is reported as a drifted anchor and the "
+     "reader is sent to fix an anchor that is fine",
+     [('                cache[path] = (None' ', e)', '                cache[path] = ("", e)')],
+     False, "tools/check_mutation_anchors"),
 ]
+
+
+def anchor_audit(root: str = REPO, mutations=None) -> tuple:
+    """(problems, anchors, units, multi) for every mutation anchor against CURRENT sources.
+
+    [P14 M1] `run()` validates one entry's anchors on the way past. This asks the same question
+    of the whole table in one cheap sweep, so a disarmed mutation surfaces in under a second
+    instead of on the next ~25-minute full run - the gap that let the B3 entry-encoding change
+    silently make `#20/23` unrunnable while every FILTERED run reported clean.
+
+    Pure and root-parameterised so the gate's selftest can PLANT a drifted anchor. A selftest
+    that could only audit the live repo would pass on a clean tree no matter what this function
+    did, which is how every mutation of such a guard survives.
+
+    Fails CLOSED. A unit that cannot be read is a PROBLEM, not a skip, and its anchors stay in
+    the denominator - otherwise the total shrinks silently as units go missing and the sweep
+    reads healthier the more of it has evaporated.
+
+    `multi` is an OBSERVATION, not a failure: an anchor matching more than once means
+    `str.replace(find, replace, 1)` mutates the FIRST site, which may not be the intended one.
+    That is finding M-M12 in cluster 2; it is reported here so that row arrives already
+    measured, and enforcing it here would be doing M-M12's work under M1's name.
+    """
+    if mutations is None:
+        mutations = MUTATIONS
+    problems, anchors, multi = [], 0, []
+    units, cache = {}, {}
+    for entry in mutations:
+        unit, finding, edits = entry[0], entry[1], entry[3]
+        path = unit_path(root, unit)
+        units[path] = True
+        anchors += len(edits)
+        if path not in cache:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    cache[path] = (f.read(), None)
+            except OSError as e:
+                cache[path] = (None, e)
+        text, err = cache[path]
+        if text is None:
+            problems.append("%s #%s: cannot read %s (%s) - a mutation naming a file that is "
+                            "not there is as unrunnable as one whose anchor drifted"
+                            % (unit, finding, os.path.relpath(path, root), err))
+            continue
+        for find in missing_anchors(text, edits):
+            problems.append("%s #%s: anchor no longer matches %s: %r"
+                            % (unit, finding, os.path.relpath(path, root), find[:70]))
+        for find, _replace in edits:
+            n = text.count(find)
+            if n > 1:
+                multi.append("%s #%s matches %dx" % (unit, finding, n))
+    return problems, anchors, sorted(units), multi
 
 
 def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str = "") -> str:
@@ -463,9 +544,9 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
             live_text = f.read()
     except OSError as e:
         return "HARNESS ERROR: cannot read %s (%s)" % (hook, e)
-    for find, _replace in edits:
-        if find not in live_text:
-            return "HARNESS ERROR: mutation anchor not found: %r" % (find[:70],)
+    gone = missing_anchors(live_text, edits)
+    if gone:
+        return "HARNESS ERROR: mutation anchor not found: %r" % (gone[0][:70],)
 
     # `posix_only` is True for posix-only, or the string "nt" for windows-only. A mutation that
     # can only be MEANINGFUL on one platform must SKIP on the other, never report SURVIVED: a

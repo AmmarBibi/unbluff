@@ -65,6 +65,12 @@ AUX_GATES = (
     # see it. This one asks provenance instead of directory-equality, so it keeps working after
     # the duplicate directory is deleted.
     ("hook-provenance", ("tools", "hook_divergence_report.py"), ("--selftest",)),
+    # [P14 M1] A mutation entry finds its target by a literal string, so an unrelated fix that
+    # edits that line disarms the mutation SILENTLY - it stays green everywhere except the full
+    # ~25-minute sweep, which is CI-only. Measured 2026-08-05: the B3 encoding change broke
+    # #20/23's anchor and every filtered run still reported clean. Sub-second, so it belongs
+    # here rather than in CI, where the answer arrives a cycle late.
+    ("mutation-anchors", ("tools", "check_mutation_anchors.py"), ()),
 )
 
 # tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification
