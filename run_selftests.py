@@ -71,6 +71,13 @@ AUX_GATES = (
     # #20/23's anchor and every filtered run still reported clean. Sub-second, so it belongs
     # here rather than in CI, where the answer arrives a cycle late.
     ("mutation-anchors", ("tools", "check_mutation_anchors.py"), ()),
+    # [P14 B1] Was exempted as "measurement, no pass/fail opinion of its own". That reasoning is
+    # what let it double-count: it added NEGATIVE_CONTROLS to the negatives already inside
+    # ENTRIES and printed "96 + 58 = 154 corpus entries" for a corpus of 125, doubling every
+    # false-positive count it reported - in the tool the B1 ship-blocker is graded with.
+    # Whether a scorer can count its own corpus IS a pass/fail question, and it is independent
+    # of whatever guard is being scored.
+    ("corpus-scorer", ("tools", "score_corpus.py"), ("--selftest",)),
 )
 
 # tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification
@@ -84,7 +91,6 @@ NOT_A_GATE = {
     # has no pass/fail opinion of its own. Kept in the repo because the C1-NEW rebuild is
     # graded with it and a scorer that lives only in a scratchpad is a measurement nobody can
     # reproduce.
-    "score_corpus.py",              # measurement (grades a guard against the cap corpus)
     "make_hook_screenshot.py",      # docs asset generation
 }
 

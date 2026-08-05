@@ -1583,6 +1583,31 @@ inverse rule against all 125 corpus entries to get its true false-positive set, 
 discrimination against that measured set. `tools/score_corpus.py` already
 does the harness half.
 
+**FIRST MOVE DONE 2026-08-06 - and it justified itself twice over.**
+
+*The grader was broken.* `score_corpus.py` added `corpus.NEGATIVE_CONTROLS` to the negatives it
+had already filtered out of `corpus.ENTRIES`. They are not "extra" - `MUST_FLAG +
+NEGATIVE_CONTROLS == ENTRIES == 125` - so **every negative control was scored TWICE**. The tool
+whose docstring reads "printing the DENOMINATOR" printed `96 positives + 58 negatives = 154
+corpus entries` for a corpus of 125: inflated 23%, with every false-positive count doubled. It
+survived because measurement tools were exempted from the gates (`NOT_A_GATE`) on the grounds
+that they have "no pass/fail opinion of their own" - but whether a scorer can count its own
+corpus is a pass/fail question entirely independent of the guard being scored. **Fixed,
+de-duplicated by entry NAME (so a genuinely new control added only to `NEGATIVE_CONTROLS` is
+still picked up rather than silently dropped), given a `--selftest`, promoted from `NOT_A_GATE`
+to AUX gate `corpus-scorer` (suite 27 -> 28), and pinned by mutation `#B1s`.** This is the
+verify-the-verifier lesson again: had B1 been graded before this was found, every
+false-positive number in the design would have been twice its true value.
+
+*The measured set is bigger than the brief's reasoned one.* Naive inverse rule, scored against a
+correct denominator: **CAUGHT 67 of 96 positives, FALSE-POS 11 of 29 negatives** (well clear of
+the 31/96 predecessor floor, so the floor is not the binding constraint - the false positives
+are). The brief above predicts 8 negative controls by reasoning; the measurement finds **11**.
+The three it did not name are `neg_read_derived_input_window_rostered`,
+`neg_scalar_shrink_while`, and - most instructive - **`neg_collection_cap_in_the_approved_
+function`**, a cap inside the sanctioned function that the rule flags anyway. The
+discrimination must be designed against these 11, not the 8.
+
 **Exit condition for P14:** every row above closed to the severity bar, the dropped
 candidate adjudicated (done), the recovered set triaged and merged (done), full mutation
 suite re-run after EACH cluster (not just at the end - P13 proved three times that a fix

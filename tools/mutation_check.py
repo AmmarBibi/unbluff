@@ -456,6 +456,12 @@ MUTATIONS = [
      "tree instead of an unusable yardstick, so a broken probe reads as no regression",
      [('        if prev_score == 0:\n            raise Broken(',
        '        if False:\n            raise Broken(')], False),
+    # [P14 B1] The scorer that grades the ship-blocker. It double-counted every negative control
+    # and printed a denominator 23% too large; nothing noticed because measurement tools were
+    # exempt from the gates. Reintroducing the double-count must go RED.
+    ("tools/score_corpus", "B1s", "the corpus scorer counts every negative control twice again, "
+     "so it reports 154 entries for a 125-entry corpus and doubles every false-positive count",
+     [("        if e[0] in seen:", "        if False:")], False),
     # [P14 B3-P] The LAYER roster. Each of these reintroduces one half of the fix: seeing
     # nothing, or seeing too much. The second is the dangerous one - B3-FP proved that a guard
     # which false-alarms on a correct config gets switched off, which is worse than none.
