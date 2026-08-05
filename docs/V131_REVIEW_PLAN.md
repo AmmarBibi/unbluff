@@ -1652,6 +1652,68 @@ The three it did not name are `neg_read_derived_input_window_rostered`,
 function`**, a cap inside the sanctioned function that the rule flags anyway. The
 discrimination must be designed against these 11, not the 8.
 
+#### C1-NEW discrimination design, 2026-08-06 - designed against the MEASURED set
+
+**The reframing, and it is the whole design.** Scoring the naive inverse rule did not just give
+a false-positive set, it exposed that the rule *itself* still contains a spelling taxonomy. All
+**29** of its misses are cap-SPELLING variants: the bound arriving as an import
+(`from_import_bound`, `star_import_*`, `imported_bound_behind_a_plain_alias`), a class attribute,
+a dict value, a walrus, a tuple/list target, a function-local, a lowercase parameter, or a bare
+integer literal (every `int_*` entry). "Flag every load of a cap-NAMED constant" smuggles the
+111-spelling problem back in through the definition of *cap-named* - the exact design that
+failed open, wearing an inverse-shaped hat.
+
+**So do not classify the BOUND at all. Classify the OPERATION on the reported collection.** The
+ways to silently shorten a sequence in Python are grammar-closed and few - slice, `break` out of
+an accumulation loop, `itertools.islice`/`takewhile`, `del seq[n:]`, `sorted(...)[:n]`, a
+comprehension index guard, `zip(xs, range(n))` - roughly eight shapes, bounded by the grammar
+rather than by anyone's imagination. Once the operation is the subject, the bound's spelling
+becomes irrelevant, and all 29 misses are recovered for free rather than one taxonomy entry at
+a time.
+
+**The rule.** Flag a site when ALL five hold:
+
+1. **A shortening operation** from the closed set above applies to a **collection** (not a
+   `str`/`bytes` scalar, not a counter, not a clock).
+2. The collection is **REPORTED** - it reaches a `return`, a print, or a rendered message.
+3. The collection **derives from caller-supplied data** - a parameter, or an accumulation over
+   one - rather than from I/O the function performed itself.
+4. The shortening is **SILENT**: no `raise` on the bound path, and the true total is not
+   reported alongside (the sanctioned `keep()`/`render()` path).
+5. The site is **not exempted** (`BOUND_EXEMPTIONS`).
+
+**Verified against all 11 measured false positives** - each is killed by a specific clause, not
+by a name exception:
+
+| negative control | killed by |
+|---|---|
+| `neg_max_used_for_retries`, `neg_retry_while`, `neg_poll_while`, `neg_depth_while` | (1) bounds a loop counter or a clock; no collection is shortened |
+| `neg_scalar_slice_rostered`, `neg_scalar_shrink_while` | (1) the target is `str`, not a collection |
+| `neg_max_used_as_loud_rejection` | (4) it `raise`s - loud, therefore fine |
+| `neg_size_skip_rostered` | (1) `continue` keyed to `getsize(p)`, a property of the ITEM; it filters input, it does not truncate output |
+| `neg_read_derived_input_window_rostered` | (3) `lines` comes from `handle.read()` inside the function - a read WINDOW, not a truncation of data the caller already had |
+| `neg_bound_exemption_collection`, `neg_collection_cap_in_the_approved_function` | (5) roster only |
+
+**Clause (3) is the load-bearing and least obvious one.** `lowercase_cap_parameter` (must flag)
+and `neg_read_derived_input_window_rostered` (must stay quiet) BOTH take a cap as a parameter
+with a default, so "the cap is a parameter" discriminates nothing - provenance of the shortened
+collection is what separates them. Needs simple intra-function dataflow, not type inference.
+
+**Three honest risks, recorded before any code is written:**
+
+- **The last two negatives are structurally IDENTICAL to true positives** (`out = []`, append in
+  a loop, `break` at a cap, `return out`). No structural rule can ever separate them, so an
+  exemption roster stays load-bearing. Per B3's lesson that roster must be *verified*: an
+  exemption that stops being needed has to be REPORTED, or it rots into cover for the next
+  thing added. `transcript_util` already does exactly this with its used-check.
+- **Clause (1)'s collection-vs-scalar test is where new false positives will appear.**
+  `text = fh.read()` is a scalar; `problems: list[str]` and `out = []` are collections. Tractable,
+  but it is a heuristic and must be scored, not assumed.
+- **Grade every iteration with `tools/score_corpus.py`** against the full 125 and against the
+  predecessor floor. The corpus is still biased toward the reverted detector (only the 14
+  scalar-suffix entries are baseline-verified), so entries derived from the PREDECESSOR's
+  capabilities are still owed before any score above 31/96 can be read as real progress.
+
 **Exit condition for P14:** every row above closed to the severity bar, the dropped
 candidate adjudicated (done), the recovered set triaged and merged (done), full mutation
 suite re-run after EACH cluster (not just at the end - P13 proved three times that a fix
