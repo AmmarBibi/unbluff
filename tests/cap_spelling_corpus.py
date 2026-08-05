@@ -592,6 +592,39 @@ ENTRIES = ENTRIES + _MODULE_SCOPE_ENTRIES
 MUST_FLAG = tuple(e for e in ENTRIES if e[2])
 NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
 
+
+# --- APPENDED 2026-08-06: derived from the ACCEPTANCE CRITERIA ----------------
+# A third provenance, and arguably the soundest of the three. The scalar-suffix family
+# comes from the predecessor's CAPABILITIES and the module-scope family from the
+# predecessor's SCOPE; this one comes from the RECORDED DEFECTS of the reverted detector
+# ("a callee renamed by assignment must still resolve"), so it is biased toward neither
+# guard.
+#
+# Found by probing the 8 acceptance criteria directly during the completeness audit.
+# C1-NEW had REINTRODUCED that defect and still scored 100 of 103, because every existing
+# entry renames a callee by IMPORT - a corpus cannot see a shape it has no entry for, and
+# a score that does not move is not evidence that nothing broke. That is the whole
+# argument for this family existing.
+_ACCEPTANCE_ENTRIES = (
+    ('callee_renamed_by_assignment',
+     'hooks/f.py',
+     True,
+     'import itertools\ntake = itertools.islice\nMAX_BULLETS = 12\ndef report(xs):\n    return list(take(xs, MAX_BULLETS))\n'),
+    ('callee_renamed_through_a_chain',
+     'hooks/f.py',
+     True,
+     'import itertools\na = itertools.islice\nb = a\nMAX_BULLETS = 12\ndef report(xs):\n    return list(b(xs, MAX_BULLETS))\n'),
+    ('neg_unrelated_assignment_rename',
+     'hooks/f.py',
+     False,
+     'import os\np = os.path\ndef report(xs):\n    return p.join(*xs)\n'),
+)
+
+ENTRIES = ENTRIES + _ACCEPTANCE_ENTRIES
+MUST_FLAG = tuple(e for e in ENTRIES if e[2])
+NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
+
+
 def selftest() -> int:
     """The corpus checks ITSELF: unique names, non-empty sources, both classes populated."""
     fails = []

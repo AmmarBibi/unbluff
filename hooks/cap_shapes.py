@@ -559,6 +559,13 @@ _SHOULD_FLAG = (
      "    return out\n"),
     ("module level, outside any def",
      "MAX_B = 12\nROWS = list(range(50))\nSHOWN = ROWS[:MAX_B]\n"),
+    # acceptance criterion 2. Every other fixture and every corpus entry renames a callee by
+    # IMPORT, so the import path was covered and this one was blind - with the corpus score
+    # unmoved, because a corpus cannot see a shape it has no entry for.
+    ("callee renamed by ASSIGNMENT",
+     "import itertools\ntake = itertools.islice\ndef r(xs):\n    return list(take(xs, 12))\n"),
+    ("callee renamed through an assignment CHAIN",
+     "import itertools\na = itertools.islice\nb = a\ndef r(xs):\n    return list(b(xs, 12))\n"),
     ("a file that does not parse", "MAX_B = 12\ndef r(xs)\n    return xs[:MAX_B]\n"),
 )
 
@@ -596,6 +603,12 @@ _SHOULD_STAY_QUIET = (
     ("read window this function performed itself",
      "def r(path, n=120):\n    with open(path, 'rb') as h:\n        data = h.read()\n"
      "    lines = data.decode('utf-8', 'replace').splitlines()\n    return lines[-n:]\n"),
+    # the other half of acceptance criterion 2: resolving assignments must not INVENT a
+    # shortener out of an unrelated rename, and a self-referential assignment must terminate
+    ("an unrelated assignment rename",
+     "import os\np = os.path\ndef r(xs):\n    return p.join(*xs)\n"),
+    ("a self-referential assignment",
+     "def r(xs):\n    a = a\n    return list(xs)\n"),
 )
 
 

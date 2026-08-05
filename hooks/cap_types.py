@@ -104,6 +104,21 @@ def _contains_exit(node):
 
 
 def _import_aliases(tree):
+    """{local name -> the name it ultimately refers to}, for resolving a CALLEE.
+
+    Covers `import x as y`, `from x import y as z`, AND a callee renamed by plain
+    ASSIGNMENT - `take = itertools.islice`, then `take(xs, n)`.
+
+    The assignment form is C1-NEW acceptance criterion 2 ("a callee renamed by assignment
+    must still resolve"), a real defect in the reverted detector. It was REINTRODUCED here
+    and found by probing the criteria directly during the completeness audit, not by review:
+    every fixture and every corpus entry uses an IMPORT alias, so that path was covered while
+    the assignment path was blind - and the corpus score did not move at all, because the
+    corpus cannot see a shape it has no entry for.
+
+    Chains resolve (`a = itertools.islice; b = a`), bounded at 3 passes: deep enough for any
+    real aliasing and terminating by construction rather than by assuming the graph is acyclic.
+    """
     aliases = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -112,6 +127,24 @@ def _import_aliases(tree):
         elif isinstance(node, ast.Import):
             for a in node.names:
                 aliases[a.asname or a.name] = a.name.split(".")[0]
+    for _ in range(3):
+        changed = False
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                continue
+            target, value = node.targets[0].id, node.value
+            if isinstance(value, ast.Attribute):
+                leaf = value.attr
+            elif isinstance(value, ast.Name):
+                leaf = aliases.get(value.id, value.id)
+            else:
+                continue
+            if leaf != target and aliases.get(target) != leaf:
+                aliases[target] = leaf
+                changed = True
+        if not changed:
+            break
     return aliases
 
 
@@ -355,26 +388,6 @@ def _loop_depths(scope):
 def _references(node, names):
     return any(isinstance(s, ast.Name) and s.id in names for s in ast.walk(node))
 
-def _contains_exit(node):
-    """Break/Return/Continue anywhere under `node`. Recursive on purpose:
-    break_nested_in_with buries the break inside a `with` inside the if-body."""
-    for sub in _walk_skipping_functions(node):
-        if isinstance(sub, (ast.Break, ast.Return, ast.Continue)):
-            return True
-    return False
-
-
-def _import_aliases(tree):
-    aliases = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            for a in node.names:
-                aliases[a.asname or a.name] = a.name
-        elif isinstance(node, ast.Import):
-            for a in node.names:
-                aliases[a.asname or a.name] = a.name.split(".")[0]
-    return aliases
-
 
 # ----------------------------------------------------------------------------------
 # selftest - each vocabulary decision asserted on a parsed snippet
@@ -439,6 +452,22 @@ def selftest() -> int:
         fails.append("io_derived lost the chain lines <- data <- h.read()")
     if facts.io_derived("path"):
         fails.append("io_derived claimed a bare parameter came from I/O")
+
+    # ACCEPTANCE CRITERION 2 - a callee renamed by ASSIGNMENT must resolve, and a chain of
+    # renames must resolve to the same leaf. Asserted HERE, in the file that owns
+    # _import_aliases: the first version of this test lived only in cap_shapes' selftest, and
+    # mutation #B18 came back SURVIVED because mutating cap_types runs cap_types' selftest.
+    # A fixture in the wrong file is a decorative test with extra steps.
+    al = _import_aliases(ast.parse("import itertools\ntake = itertools.islice\nb = take\n"))
+    if al.get("take") != "islice":
+        fails.append("a callee renamed by ASSIGNMENT does not resolve: %r - acceptance "
+                     "criterion 2, and a real defect in the reverted detector" % (al,))
+    if al.get("b") != "islice":
+        fails.append("an assignment CHAIN does not resolve to its leaf: %r" % (al,))
+    al = _import_aliases(ast.parse("import os\np = os.path\n"))
+    if al.get("p") != "path":
+        fails.append("an ordinary attribute rename stopped resolving: %r" % (al,))
+    _import_aliases(ast.parse("a = a\n"))            # must terminate, not spin
 
     # a cycle must terminate rather than recurse forever
     _node, facts = _scope_of("def f(a):\n    b = a\n    a = b\n    return a\n", "f")

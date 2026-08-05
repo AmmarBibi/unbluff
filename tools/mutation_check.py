@@ -475,6 +475,11 @@ MUTATIONS = [
        "        if False:\n            continue")], False),
     ("cap_types", "B17", "the positional floor swallows real caps",
      [("POSITIONAL_FLOOR = 5", "POSITIONAL_FLOOR = 50")], False),
+    # C1-NEW acceptance criterion 2, which this build REINTRODUCED and the corpus could not
+    # see: every existing entry renamed a callee by IMPORT, so the score never moved.
+    ("cap_types", "B18", "a callee renamed by ASSIGNMENT stops resolving again "
+     "(acceptance criterion 2, a real defect in the reverted detector)",
+     [("    for _ in range(3):", "    for _ in range(0):")], False),
     ("./run_selftests", "A3b", "an undeclared tools/ file no longer forces a decision",
      [("    return (sorted(present - gate_basenames - set(not_a_gate)),\n"
        "            sorted(set(not_a_gate) - present))",

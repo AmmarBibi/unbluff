@@ -54,8 +54,11 @@ WAIVERS = (
          "correctly reads `fh.read()` as a str and truncating a string is not the defect "
          "this guard exists to catch. Trading 1 unreachable positive for 0 false positives "
          "is the better half of an unsatisfiable pair, not a narrowing of the guard. "
-         "MEASURED: predecessor 38 of 103 with FALSE-POS 1; C1-NEW 100 of 103 with "
-         "FALSE-POS 0, which is the arithmetic ceiling given three such pairs. "
+         "MEASURED 2026-08-06, and stamped rather than written in the present tense because "
+         "the corpus is append-only and these figures move every time it grows: predecessor "
+         "38 of 105 with FALSE-POS 1; C1-NEW 102 of 105 with FALSE-POS 0, which is the "
+         "arithmetic ceiling given three such pairs. The live figures are whatever "
+         "tools/score_corpus.py prints, and it prints the ceiling alongside them. "
          "This waiver goes STALE and BLOCKING the moment the corpus stops contradicting "
          "itself, which is the correct trigger to revisit it."},
 )
