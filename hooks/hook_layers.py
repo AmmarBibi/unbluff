@@ -110,7 +110,7 @@ def plugin_layers(home: str, settings_data) -> tuple:
     plugins_root = os.path.join(home, "plugins")
     on_disk = _hooks_json_files(plugins_root)
 
-    layers, unresolved, silent = [], [], []
+    layers, unresolved, silent, ambiguous = [], [], [], []
     for key in keys:
         name, _sep, marketplace = key.partition("@")
         hits = [p for p in on_disk if _matches(p, name, marketplace)]
@@ -120,9 +120,20 @@ def plugin_layers(home: str, settings_data) -> tuple:
             # cries wolf on every plugin that simply has no hooks.
             unresolved.append(key)
             continue
-        for p in hits:
-            if p not in layers:
-                layers.append(p)
+        if len(hits) > 1:
+            # [P14 meta-review 2026-08-06] ONE plugin, SEVERAL copies on disk - it exists in both
+            # the cache and the marketplace tree. Merging all of them counts the same hook once
+            # per copy and reports a correct config as a DUPLICATE: the precise false-alarm mode
+            # this module was written to avoid, reproduced inside it. Found by probing rather
+            # than by reading; no fixture covered it.
+            #
+            # Claude Code loads ONE of them, and which one is not knowable from here, so take a
+            # deterministic single copy and REPORT the ambiguity rather than guessing silently.
+            # Reporting is what keeps this from being the fail-open it replaces.
+            ambiguous.append("%s resolves to %d copies on disk; using %s"
+                             % (key, len(hits), os.path.relpath(hits[0], home)))
+        if hits[0] not in layers:
+            layers.append(hits[0])
 
     # A file that parses but declares nothing is REPORTED. Silent zero-contribution is exactly
     # how a layer that was added stops being a layer without anyone noticing.
@@ -143,6 +154,7 @@ def plugin_layers(home: str, settings_data) -> tuple:
         "layers": layers,
         "no_hooks_file": unresolved,
         "declares_nothing": silent,
+        "ambiguous": ambiguous,
     }
     return layers, report
 
@@ -224,6 +236,9 @@ def selftest() -> int:
         # one DISABLED plugin, in the OTHER layout - the false-alarm case that motivated this
         off = plant(home, ("plugins", "marketplaces", "mkt", "plugins", "beta", "hooks",
                            "hooks.json"), wired)
+        # ONE enabled plugin present in BOTH layouts: must merge ONCE, and say so.
+        plant(home, ("plugins", "marketplaces", "mkt", "plugins", "alpha", "hooks",
+                     "hooks.json"), wired)
         # an enabled plugin whose file declares nothing (reference/doc schema)
         ref = plant(home, ("plugins", "cache", "mkt", "gamma", "hooks", "hooks.json"),
                     {"description": "reference only", "events": [{"event": "Stop"}]})
@@ -239,13 +254,25 @@ def selftest() -> int:
             fails.append("a DISABLED plugin's hooks.json was merged. Its hooks never fire, so "
                          "every one of them would be reported as a duplicate against a correct "
                          "config - B3-FP, which is how a guard gets switched off")
-        if len(rep["on_disk"]) != 3:
-            fails.append("the on-disk denominator is %d, expected 3 - a guard that cannot say "
+        if len(rep["on_disk"]) != 4:
+            fails.append("the on-disk denominator is %d, expected 4 - a guard that cannot say "
                          "how many it looked at cannot be audited" % (len(rep["on_disk"]),))
         if ref not in layers or not rep["declares_nothing"]:
             fails.append("an enabled plugin whose file declares no hooks was not REPORTED; a "
                          "layer that silently contributes zero looks identical to one nobody "
                          "looked for: %r" % (rep["declares_nothing"],))
+        # ONE plugin, TWO copies on disk: exactly one layer, and the ambiguity REPORTED. Merging
+        # both counts the same hook twice and reports a correct config as a duplicate - the
+        # false-alarm mode this whole module exists to avoid, reproduced inside it.
+        alpha_layers = [p for p in layers if "alpha" in p.replace("\\", "/").split("/")]
+        if len(alpha_layers) != 1:
+            fails.append("an enabled plugin present in BOTH the cache and marketplace layouts "
+                         "merged %d layers, expected 1. Each extra copy re-counts the same hook "
+                         "and reports a correct config as a DUPLICATE" % (len(alpha_layers),))
+        if not rep["ambiguous"]:
+            fails.append("a plugin resolving to several on-disk copies was resolved SILENTLY. "
+                         "Which copy Claude Code loads is not knowable here, so picking one "
+                         "without saying so is the fail-open this module replaced")
         if not rep["malformed"]:
             fails.append("a non-boolean enabledPlugins value was accepted silently; guessing "
                          "either way is how a wiring gets invented or lost")

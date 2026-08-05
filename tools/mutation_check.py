@@ -456,6 +456,18 @@ MUTATIONS = [
      "tree instead of an unusable yardstick, so a broken probe reads as no regression",
      [('        if prev_score == 0:\n            raise Broken(',
        '        if False:\n            raise Broken(')], False),
+    # [P14 meta-review] The two defects the 2026-08-06 meta-review PROBED out of this session's
+    # own work. Both were invisible to reading and to every existing test.
+    ("tools/check_mutation_anchors", "MRa", "the anchor gate's own DECISION is disarmed - a "
+     "drifted anchor no longer fails it. Before the verdict() split this was silent: selftest "
+     "OK and both M1 mutations still CAUGHT, i.e. finding #16 inside the guard built to stop it",
+     [("    if problems:\n        head =", "    if False:\n        head =")], False),
+    ("hook_layers", "MRb", "one enabled plugin present in BOTH the cache and marketplace trees "
+     "merges every copy again, so the same hook is counted once per copy and a correct config "
+     "is reported as a duplicate - the false-alarm mode this module exists to avoid",
+     [("        if hits[0] not in layers:\n            layers.append(hits[0])",
+       "        for _h in hits:\n            if _h not in layers:\n                "
+       "layers.append(_h)")], False),
     # [P14 B1] The scorer that grades the ship-blocker. It double-counted every negative control
     # and printed a denominator 23% too large; nothing noticed because measurement tools were
     # exempt from the gates. Reintroducing the double-count must go RED.

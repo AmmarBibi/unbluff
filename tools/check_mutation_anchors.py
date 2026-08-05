@@ -42,40 +42,49 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 from mutation_check import MUTATIONS, anchor_audit  # noqa: E402  (path set above)
 
 
-def main() -> int:
-    problems, anchors, units, multi = anchor_audit(REPO)
+def verdict(problems, anchors, units, multi, entries) -> tuple:
+    """(exit_code, message) for one audit result. PURE, so the selftest can exercise EVERY branch.
 
-    # The DENOMINATOR, every run. "anchors OK" is true of whatever happened to be iterated, so a
-    # MUTATIONS list that silently shrank - or an entry shape this loop stopped unpacking - would
+    [P14 meta-review 2026-08-06] This decision used to be inline in `main()`, which left the
+    gate's own decision path completely untested. Changing `if problems:` to `if False:`
+    disarmed the gate - a drifted anchor could no longer fail it - while its selftest still
+    printed SELFTEST OK and BOTH its mutations still reported CAUGHT, because they only ever
+    exercised `anchor_audit()`. That is finding #16 of this plan ("the guard can be fully
+    disarmed with all gate assertions green") reproduced inside a guard written to prevent that
+    exact class. `check_readme_fresh.verdict()` already solved this the same way and for the
+    same stated reason; the pattern simply was not applied here.
+    """
+    # The DENOMINATOR first. "anchors OK" is true of whatever happened to be iterated, so a
+    # MUTATIONS list that silently shrank - or an entry shape the loop stopped unpacking - would
     # read exactly like a healthy sweep.
-    if not MUTATIONS or anchors <= 0:
-        print("mutation-anchors: FAIL - %d mutation entr(ies) and %d anchor(s) to check. A zero "
-              "denominator makes this gate pass against any repo."
-              % (len(MUTATIONS), anchors))
-        return 1
+    if not entries or anchors <= 0:
+        return 1, ("mutation-anchors: FAIL - %d mutation entr(ies) and %d anchor(s) to check. A "
+                   "zero denominator makes this gate pass against any repo." % (entries, anchors))
 
     note = ""
     if multi:
-        # NOT a failure here - see the SCOPE note above. Printed so M-M12 arrives measured.
+        # NOT a failure - see the SCOPE note above. Reported so M-M12 arrives measured.
         shown = "; ".join(multi[:5]) + ("; ..." if len(multi) > 5 else "")
         note = ("\n  note: %d anchor(s) match their source more than once, and replace(..., 1) "
                 "mutates the FIRST. Uniqueness is M-M12's row, not enforced here: %s"
                 % (len(multi), shown))
 
     if problems:
-        print("mutation-anchors: FAIL - %d of %d anchor(s) across %d mutation entr(ies) in %d "
-              "file(s) no longer match their source. Each one is a mutation that cannot run, and "
-              "nothing short of a full ~25-minute sweep would have said so:"
-              % (len(problems), anchors, len(MUTATIONS), len(units)))
-        for p in problems:
-            print("  " + p)
-        if note:
-            print(note.lstrip("\n"))
-        return 1
+        head = ("mutation-anchors: FAIL - %d of %d anchor(s) across %d mutation entr(ies) in %d "
+                "file(s) no longer match their source. Each one is a mutation that cannot run, "
+                "and nothing short of a full ~25-minute sweep would have said so:"
+                % (len(problems), anchors, entries, len(units)))
+        return 1, head + "".join("\n  " + p for p in problems) + note
 
-    print("mutation-anchors: OK - %d anchor(s) across %d mutation entr(ies) in %d file(s) still "
-          "match their source%s" % (anchors, len(MUTATIONS), len(units), note))
-    return 0
+    return 0, ("mutation-anchors: OK - %d anchor(s) across %d mutation entr(ies) in %d file(s) "
+               "still match their source%s" % (anchors, entries, len(units), note))
+
+
+def main() -> int:
+    problems, anchors, units, multi = anchor_audit(REPO)
+    rc, msg = verdict(problems, anchors, units, multi, len(MUTATIONS))
+    print(msg)
+    return rc
 
 
 def selftest() -> int:
@@ -158,6 +167,29 @@ def selftest() -> int:
     # instead is that the table is non-empty, which mutating this file cannot fake.
     if not MUTATIONS:
         fails.append("MUTATIONS is empty, so the live gate would pass against any repo")
+
+    # EVERY BRANCH of the gate's own decision. Without these, `if problems:` -> `if False:`
+    # disarms the gate completely and this selftest still prints OK - measured, not theorised.
+    rc_ok, msg_ok = verdict([], 5, ["u"], [], 3)
+    if rc_ok != 0 or "OK" not in msg_ok:
+        fails.append("a CLEAN audit did not verdict 0/OK: %r" % ((rc_ok, msg_ok),))
+    rc_bad, msg_bad = verdict(["u #X: anchor no longer matches"], 5, ["u"], [], 3)
+    if rc_bad != 1:
+        fails.append("a DRIFTED anchor did not fail the gate. The detector can be correct and "
+                     "the gate still green if this decision is wrong - that is how a guard gets "
+                     "disarmed with every test passing")
+    if "#X" not in msg_bad:
+        fails.append("the failure message drops the problem detail, so the operator is told "
+                     "something is wrong but not what: %r" % (msg_bad,))
+    rc_zero, msg_zero = verdict([], 0, [], [], 0)
+    if rc_zero != 1 or "zero denominator" not in msg_zero:
+        fails.append("an EMPTY mutation table did not fail: %r" % ((rc_zero, msg_zero),))
+    # the multi-match note must survive on BOTH paths, or M-M12's measurement disappears exactly
+    # when the gate is red and someone is actually reading the output
+    if "M-M12" not in verdict([], 5, ["u"], ["u #Y matches 2x"], 3)[1]:
+        fails.append("the multi-match note is dropped on the CLEAN path")
+    if "M-M12" not in verdict(["p"], 5, ["u"], ["u #Y matches 2x"], 3)[1]:
+        fails.append("the multi-match note is dropped on the FAIL path")
 
     for f in fails:
         print("SELFTEST FAIL:", f)
