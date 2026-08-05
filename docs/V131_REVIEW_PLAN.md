@@ -1359,11 +1359,11 @@ is derived from what is now true.
 
 | phase | contents | why it is here |
 |---|---|---|
-| **0 - FOUNDATION** | C1 gate ledger; B6 CI; D1; D2 | Nothing downstream is provable until gates leave traces and CI runs. D1/D2 are what stop the next cluster repeating cluster 1 |
+| **0 - FOUNDATION** | C1 gate ledger; B6 CI; D1; D2. **M1 anchor-drift gate DONE 2026-08-06 (`6807121`).** STILL OPEN: **A8** - promoted here, because a loaded box turns wall-clock budget failures into 14-of-98 HARNESS ERRORs and so blocks the verification loop itself | Nothing downstream is provable until gates leave traces and CI runs. D1/D2 are what stop the next cluster repeating cluster 1. M1 belongs here for the same reason: it makes a disarmed mutation cost 0.087s to find instead of a full sweep |
 | **1 - THE CLASS FIX** | the fail-open family. **`transcript_util` twin-guard DONE and `duplicate_registration_check` DONE (2026-08-05, commit `0c0dfb9`).** STILL OPEN: C1-NEW (4 HIGH, design brief below), plus the roster-shaped checks (`run_selftests` `_DISPATCH_RE` + aux-gate-exit-0, `check_review_freshness` EXEMPT floor + narrowing fixture, `mutation_check` prose-substring bucket, N3) | ~15 findings, ONE principle. Fixing them separately is 15 chances to reintroduce the premise |
-| **2 - VERIFIER OF VERIFIERS** | `mutation_check` remainder | it certifies every other fix and nothing verifies it |
+| **2 - VERIFIER OF VERIFIERS** | `mutation_check` remainder (9 findings, incl. **M-M12** now explicitly rowed), plus **SC1** - the measurement-tool exemption hole, of which `score_corpus` was only the first instance | it certifies every other fix and nothing verifies it. SC1 sits here because a tool that produces numbers quoted in this plan is a verifier in everything but name |
 | **3 - THE RELEASE GATE** | `check_review_freshness` (8 findings) | it decides whether v1.3.1 can ship, and sat at position 6 |
-| **4 - INDEPENDENT BUGS** | the genuine one-offs, by severity | |
+| **4 - INDEPENDENT BUGS** | the genuine one-offs, by severity: M2, M3, A4-narrow, A9, F-L8, C2, N2, plus **SC2** (mutation scratch-tree leak - 22 dirs / 16 MB, `rmtree(ignore_errors=True)` swallowing the reason) | |
 
 **Release decision, 2026-08-02:** no interim version is cut. v1.3.1 ships once the fixes are
 done, so users never see an intermediate guard. Recorded here rather than left in chat.
