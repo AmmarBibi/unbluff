@@ -39,8 +39,6 @@ import shlex
 import sys
 from collections import defaultdict
 
-SETTINGS = os.path.expanduser("~/.claude/settings.json")
-
 # REUSED from the sibling guard, never re-declared. hook_health_check has recognised four hook
 # extensions since v1.2; this file recognised one, so the repo simultaneously believed both that
 # a .js hook is a hook and that it is not. A second copy of a roster is the exact defect these
@@ -49,6 +47,12 @@ _HD = os.path.dirname(os.path.abspath(__file__))
 if _HD not in sys.path:
     sys.path.insert(0, _HD)
 from hook_health_check import _SCRIPT_EXTS as SCRIPT_EXTS  # noqa: E402
+# [P14 B3-P] Same discipline for the LAYER roster. Deriving which plugins actually contribute
+# hooks is subtle enough - the authority is `enabledPlugins`, the locations are the filesystem,
+# and neither alone is correct - that it lives in one module with its own planted fixtures
+# rather than being re-derived here. See hook_layers.py for why this is not a glob.
+import hook_layers  # noqa: E402
+from hook_layers import settings_layers  # noqa: E402
 
 _UNKNOWN_KIND = ("UNKNOWN - at least one file could not be read, so sameness was NOT "
                  "determined; check both by hand before deleting either")
@@ -88,28 +92,6 @@ def _path_tokens(text: str) -> list[str]:
             out.append(t.replace(".", "/") + ".py")
         prev = t
     return out
-
-
-def settings_layers(settings_path: str | None = None, cwd: str | None = None) -> list[str]:
-    """Every settings file Claude Code merges, most-global first.
-
-    Reading only ~/.claude/settings.json hid the commonest real double-wiring: the same hook
-    in the user file AND in the project's .claude/settings.json. Both fire on every event,
-    and the check printed nothing.
-    """
-    base = cwd or os.getcwd()
-    out = [settings_path or SETTINGS]
-    if not settings_path:
-        out.append(os.path.join(os.path.expanduser("~"), ".claude", "settings.local.json"))
-    out.append(os.path.join(base, ".claude", "settings.json"))
-    out.append(os.path.join(base, ".claude", "settings.local.json"))
-    seen, uniq = set(), []
-    for p in out:
-        key = os.path.normcase(os.path.abspath(p))
-        if key not in seen:
-            seen.add(key)
-            uniq.append(p)
-    return uniq
 
 
 def _iter_commands(settings_path: str, malformed: list | None = None):
@@ -321,7 +303,7 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
         label = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(layer)))) \
             or "?"
         scope = "user" if os.path.normcase(os.path.abspath(layer)) == \
-            os.path.normcase(os.path.abspath(settings_path or SETTINGS)) else label
+            os.path.normcase(os.path.abspath(settings_path or hook_layers.SETTINGS)) else label
         for path, event, matcher, full in _iter_commands(layer, malformed):
             head, tail = _split(path)
             registered[tail].append("%s|%s||%s|%s|%s" % (head, scope, event, matcher, full))
@@ -643,6 +625,47 @@ def _selftest() -> int:
                 fails.append("a hook wired at BOTH user and project scope was invisible || " +
                              (out6 or "(nothing reported)")[:200])
 
+            # (6b) [B3-P] PLUGINS are a layer too, and were not read at all - so a hook wired
+            # both by a plugin and by settings.json reported CLEAN. Same premise as (6), one
+            # layer up: an EXTENSION roster became a LAYER roster.
+            phome = os.path.join(td, "phome")
+            plugged = os.path.join(a, "plugged.py")
+            with open(plugged, "w", encoding="utf-8") as fh:
+                fh.write("pl = 1\n")
+            pdir = os.path.join(phome, "plugins", "cache", "mkt", "alpha", "1.0", "hooks")
+            os.makedirs(pdir, exist_ok=True)
+            with open(os.path.join(pdir, "hooks.json"), "w", encoding="utf-8") as fh:
+                json.dump({"hooks": {"Stop": [{"hooks": [{"command": plugged}]}]}}, fh)
+            psettings = os.path.join(phome, "settings.json")
+            with open(psettings, "w", encoding="utf-8") as fh:
+                json.dump({"enabledPlugins": {"alpha@mkt": True, "beta@mkt": False},
+                           "hooks": {"Stop": [{"hooks": [{"command": plugged}]}]}}, fh)
+            out6b = "\n".join(audit(psettings, cwd=hermetic))
+            if "plugged.py" not in out6b:
+                fails.append("a hook wired by an ENABLED PLUGIN and by settings.json was "
+                             "invisible - plugins are not a layer || " +
+                             (out6b or "(nothing reported)")[:200])
+
+            # (6c) THE NEGATIVE CONTROL, and it is the load-bearing half. A DISABLED plugin's
+            # hooks never fire. Reporting them would invent duplicates on a correct config -
+            # measured 2026-08-06: 6 of 7 plugin hooks.json on the author's machine belong to
+            # disabled plugins. That is B3-FP, whose lesson is that a guard which false-alarms
+            # gets switched off, which is strictly worse than no guard at all.
+            offdir = os.path.join(phome, "plugins", "marketplaces", "mkt", "plugins", "beta",
+                                  "hooks")
+            os.makedirs(offdir, exist_ok=True)
+            offonly = os.path.join(a, "disabled_only.py")
+            with open(offonly, "w", encoding="utf-8") as fh:
+                fh.write("d = 1\n")
+            with open(os.path.join(offdir, "hooks.json"), "w", encoding="utf-8") as fh:
+                json.dump({"hooks": {"Stop": [{"hooks": [{"command": offonly},
+                                                         {"command": offonly}]}]}}, fh)
+            out6c = "\n".join(audit(psettings, cwd=hermetic))
+            if "disabled_only.py" in out6c:
+                fails.append("a DISABLED plugin's double-wiring was reported as a duplicate. "
+                             "Its hooks never fire, so this is a false alarm on a correct "
+                             "config || " + out6c[:240])
+
             # (7) [finding 25] when a file cannot be read, its digest is None. Those were
             # DISCARDED before the comparison, so one readable file plus one missing one left a
             # single distinct digest and the report asserted "SAME FILE twice (redundant)" - a
@@ -701,8 +724,11 @@ def _selftest() -> int:
         # un-overridable, so this exact check failed to produce output on first attempt.
         import contextlib
         import io as _io
-        global SETTINGS
-        real, SETTINGS = SETTINGS, settings
+        # Patch the ONE authority, in the module that owns it. Rebinding a local alias here
+        # left settings_layers() still reading hook_layers.SETTINGS - a split brain that made
+        # main() audit the REAL config and print nothing. That is A9's lesson exactly: a
+        # canonicalisation is only canonical inside the program that defines it.
+        real, hook_layers.SETTINGS = hook_layers.SETTINGS, settings
         buf = _io.StringIO()
         # main() correctly resolves the project layer from os.getcwd() - that IS the production
         # behaviour - so the TEST must control the cwd rather than the code. Without this the
@@ -714,7 +740,7 @@ def _selftest() -> int:
                 rc = main()
         finally:
             os.chdir(real_cwd)
-            SETTINGS = real
+            hook_layers.SETTINGS = real
         emitted = buf.getvalue()
         if rc != 0:
             print(f"SELFTEST FAIL: main() should exit 0 (advisory), got {rc}")

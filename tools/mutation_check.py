@@ -456,6 +456,24 @@ MUTATIONS = [
      "tree instead of an unusable yardstick, so a broken probe reads as no regression",
      [('        if prev_score == 0:\n            raise Broken(',
        '        if False:\n            raise Broken(')], False),
+    # [P14 B3-P] The LAYER roster. Each of these reintroduces one half of the fix: seeing
+    # nothing, or seeing too much. The second is the dangerous one - B3-FP proved that a guard
+    # which false-alarms on a correct config gets switched off, which is worse than none.
+    ("hook_layers", "B3Pa", "every plugin on disk counts as enabled again, so six DISABLED "
+     "plugins' hooks are reported as live wirings on a correct config",
+     [("        if v is True:", "        if True:")], False),
+    ("hook_layers", "B3Pb", "plugin matching goes back to a SUBSTRING, so plugin 'alpha' "
+     "claims 'alpha-extras' and merges a layer belonging to another plugin",
+     [("    if name.lower() not in parts:", "    if name.lower() not in path.lower():")], False),
+    # TWIN: the defect is in hook_layers (where settings_layers moved when the plugin work
+    # pushed duplicate_registration_check over the 800-line rule), but the test that catches it
+    # is the end-to-end case in duplicate_registration_check's selftest - so the 6th element
+    # names the verifying unit. The anchor-drift gate caught this move in 0.087s, one commit
+    # after being built, which is the case M1 was written for.
+    ("hook_layers", "B3Pc", "settings_layers stops appending plugin layers, so a hook wired by "
+     "both a plugin and settings.json reports CLEAN again",
+     [("    out.extend(_plugin_layer_files(user))", "    out.extend([])")], False,
+     "duplicate_registration_check"),
     # [P14 M1] The anchor-drift sweep. The detector lives HERE, the planted-fixture selftest
     # that pins it lives in the gate, so these are TWIN mutations - hence the 6th element.
     #
