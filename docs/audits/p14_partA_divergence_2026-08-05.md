@@ -116,8 +116,10 @@ global dispatcher exec-ing a missing file and broken pushes in every repo.
 1. `--install-global` re-run from the REPO copy: **22 dispatchers** (up from 16 - the P13 D8
    fix restoring seven names that had been silently killed), and it discloses the one it drops.
 2. All 3 per-repo shims re-installed from the repo copy.
-3. 12 stale files deleted (11 unbluff `.py` + one `.bak`). Backed up first. `state/` (69 files
-   of live pass-ledgers) and the 3 ECC scripts preserved.
+3. 12 stale files deleted (11 unbluff `.py` + one `.bak`). Backed up first. `state/` and the 3
+   ECC scripts preserved. (`state/` held **69 files at the moment of the repair** and is a LIVE
+   directory - hooks write markers into it continuously, so it read 70 an hour later. Recorded
+   as a timestamped observation, not an invariant, so a later count is not mistaken for drift.)
 4. Verified: suite 25/25, and the live gate path exercised directly - `exit 0`, printing
    "verified 257823s ago, no source touched since (docs/images excluded)".
 

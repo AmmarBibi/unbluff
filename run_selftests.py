@@ -73,6 +73,12 @@ NOT_A_GATE = {
     "mutation_check.py",            # a gate, but minutes-long: CI runs it as its own job
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
+    # [P14 B1] grades a cap-guard against tests/cap_spelling_corpus.py and prints the
+    # denominator. Measurement, not a gate: it scores whatever guard it is pointed at, so it
+    # has no pass/fail opinion of its own. Kept in the repo because the C1-NEW rebuild is
+    # graded with it and a scorer that lives only in a scratchpad is a measurement nobody can
+    # reproduce.
+    "score_corpus.py",              # measurement (grades a guard against the cap corpus)
     "make_hook_screenshot.py",      # docs asset generation
 }
 

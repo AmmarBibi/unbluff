@@ -427,6 +427,12 @@ def _selftest_shape_coverage() -> list:
         if "notify.ps1" not in out:
             fails.append("a .ps1 hook wired twice is invisible || " + (out or "(silent)"))
 
+        sh = script("notify.sh", "# hook\n")
+        out = verdict(one("Stop", [{"command": 'bash "%s"' % sh},
+                                   {"command": 'sh "%s"' % sh}]))
+        if "notify.sh" not in out:
+            fails.append("a .sh hook wired twice is invisible || " + (out or "(silent)"))
+
         out = verdict(one("Stop", [{"command": "python -m hooks.rate_prompt"},
                                    {"command": "python -m hooks.rate_prompt"}]))
         if "rate_prompt.py" not in out:

@@ -1494,8 +1494,43 @@ unenumerated shape reported CLEAN is not.
 | B2 | HIGH | **DONE** | `transcript_util` twin-guard. Was 4 hardcoded names / 3 line-anchored regexes / 1 non-recursive dir. Now: the 4 names kept as a FLOOR (they catch a bare `def first_text` the behavioural rule misses - measured control C2, which is exactly why the audit said not to delete them) plus a BEHAVIOURAL ceiling (a file touching the transcript's own vocabulary and not importing this module), recursive over the whole repo, `_bound_identifiers` via AST so annotated assignment / lambda / `async def` are all seen. **MEASURED: 5/11 -> 11/11 (controls 5/5, novels 0/6 -> 6/6).** Planted-fixture selftest so mutations bite; denominator printed every run; unreadable files REPORTED, never skipped. Mutations B2a/B2b/B2c all CAUGHT |
 | B3 | HIGH | **DONE** | `duplicate_registration_check`. Extensions now REUSED from `hook_health_check._SCRIPT_EXTS` rather than the hardcoded `".py"` - the repo simultaneously believed a `.js` hook both is and is not a hook. `python -m pkg.mod` normalised to a path. Dispatcher detection is behavioural (the AST is asked) instead of a filename substring, and the fan-out list may carry any ALL-CAPS name instead of literally `HOOKS`. Mutations B3a-B3e all CAUGHT |
 | **B3-FP** | **HIGH, found by fixing B3** | **DONE** | **Making non-`.py` hooks visible exposed the opposite defect: the guard counted a basename across ALL events and matchers.** On the author's real config it then reported `observe-runner.js` (2 DISTINCT events) and `run-with-flags.js` (13 hits, one shared runner invoked with different flags) as duplicates - about 15 false alarms on a correct config. Shipping the extension fix alone would have produced a guard its owner disables, which is strictly worse than none. Identity is now (script + arguments + event + matcher), split at the script path so launcher flags (`pwsh -NoProfile -File x.ps1` vs `powershell -File x.ps1`) compare EQUAL while `runner.js --alpha` vs `--beta` compare DIFFERENT. Three distinct faults all still caught: variant conflict, identical re-wiring, and direct-plus-dispatcher on one event |
-| B3-N | LOW | noted | Two defects were introduced and caught by fixtures while building B3: the first `_invocation_key` re-split each `args` entry on whitespace, reintroducing findings 21/22 (a path with a space stops ending in `.py`); the second keyed on all non-script tokens, so `-NoProfile` counted as script work and the `.ps1` pair was missed. Both were caught by planted fixtures rather than by review - the argument for writing the fixture before the fix |
+| B3-N | - | **CLOSED - historical note, nothing outstanding** | Recorded as a lesson, NOT as parked work: both defects below were introduced AND fixed within this session, so there is nothing left to build. Stated explicitly because "noted" in a status column is exactly the optional-forever framing this plan exists to catch, and an auditor should not have to guess. Two defects were introduced and caught by fixtures while building B3: the first `_invocation_key` re-split each `args` entry on whitespace, reintroducing findings 21/22 (a path with a space stops ending in `.py`); the second keyed on all non-script tokens, so `-NoProfile` counted as script work and the `.ps1` pair was missed. Both were caught by planted fixtures rather than by review - the argument for writing the fixture before the fix |
 | **B1** | **HIGH x4** | **OPEN - NOT STARTED, design brief below** | `capped_report` C1-NEW. Deliberately not attempted at the end of a long session; it is the item that already consumed two adversarial workflow rounds and 2,101 lines before being reverted |
+
+#### Source-coverage audit, 2026-08-05 - ONE gap found with no home in this plan
+
+Reconciled `docs/audits/p14_audit_findings.md` (the B5 three-guard audit) item-by-item against
+what B2/B3 actually built. `transcript_util`: all 6 blind shapes BUILT and fixtured, plus both
+of the audit's structural recommendations (recursive glob, keep the 4 names as a FLOOR).
+`duplicate_registration_check`: 6 of the 7 blind shapes BUILT. The seventh had never been
+written into this plan at all - the exact failure a defer-grep cannot detect, because the plan
+did not mention it.
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **B3-P** | **MEDIUM** | **phase 1, with the roster-shaped checks** | **`settings_layers()` does not read plugin `hooks.json` files, so hooks declared by plugins are invisible to the duplicate audit.** MEASURED on this machine 2026-08-05: **7 plugin `hooks.json` files exist and 6 declare real events** - `hookify` (PreToolUse, PostToolUse, Stop, UserPromptSubmit), `security-guidance` (PostToolUse, SessionStart, Stop, UserPromptSubmit), `posthog` (PreToolUse, SessionEnd), `ralph-loop` (Stop), and two output-style plugins (SessionStart). `settings_layers()` returns exactly 4 paths, none of them a plugin. A hook double-wired between a plugin and `settings.json` therefore reports CLEAN - the same non-extraction-reads-as-non-duplication premise B3 just fixed for extensions, one layer up in the LAYER roster rather than the EXTENSION roster. Fix belongs with the other roster-shaped checks because it is the same shape: derive the layer list from the filesystem instead of listing it |
+| B3-S | LOW | **DONE** | The `.sh` blind shape was fixed by the `SCRIPT_EXTS` reuse but had **no fixture**, so it was working-by-accident rather than pinned. Fixture added (`bash x.sh` + `sh x.sh`) in the same pass that found this |
+
+#### SHIP GATE STATUS, verified 2026-08-05 - v1.3.1 must NOT ship
+
+Mechanically re-counted after this session's changes, because the ship gate is the one number
+nobody should take on trust:
+
+- The work-order table's 12 rows sum to **11 HIGH / 44 total**, matching the stated merged
+  backlog exactly. (A prior audit caught this summing to 43 against a stated 44; it stays fixed.)
+- **All 11 HIGH are still OPEN.** `capped_report` 4, `mutation_check` 2, `run_selftests` 2,
+  `pre_push_gate_selftest` 2, `meta_audit_on_stop` 1. **This session closed none of them** -
+  B2 and B3 belong to the B5 guard-audit family, which is tracked by the phase order, not by
+  the 44-row work-order table, and `transcript_util`'s work-order row carries 0 HIGH.
+- Therefore **zero-HIGH is not met and v1.3.1 does not ship.** Nothing in this session's rows
+  should be read as moving the release closer to shippable; they move MEDIUM/LOW class work
+  and one HIGH-severity live defect that was never in the backlog (the installed-hooks
+  divergence) off the board.
+
+**Two accounting systems coexist and must not be conflated:** the 44-finding work-order table
+(from the P14 review plus the first-run triage) and the ~15-finding fail-open class family
+(from the B5 guard audit). B2/B3 severities are assigned within the class family. Recorded so a
+future reader does not add the two HIGH counts together or assume one subsumes the other.
 
 #### Meta-review findings, 2026-08-05 (post-commit `0c0dfb9`)
 
@@ -1544,7 +1579,7 @@ Constraints the rebuild must respect, each already paid for:
 
 **Recommended first move:** do NOT start by writing a detector. Start by scoring the naive
 inverse rule against all 125 corpus entries to get its true false-positive set, then design the
-discrimination against that measured set. `score_corpus.py` (this session's scratchpad) already
+discrimination against that measured set. `tools/score_corpus.py` already
 does the harness half.
 
 **Exit condition for P14:** every row above closed to the severity bar, the dropped
