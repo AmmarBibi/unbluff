@@ -40,8 +40,13 @@ if HOOKS_DIR not in sys.path:
 
 import fast_test_on_stop as fast_test  # noqa: E402  (path set above; it owns detect/state/SRC_EXT)
 
+# The "managed by" comment is templated from {script}, NOT hardcoded. It used to name
+# ~/.claude/hooks/pre_push_gate.py unconditionally while the exec line came from __file__, so a
+# shim installed from this repo documented a file it did not run - and a grep for the stale path
+# matched a correctly-installed shim, which is how a 2026-08-05 divergence check reported the
+# opposite of the truth. Pinned by _selftest_shim_self_reference.
 SHIM = """#!/bin/sh
-# Universal pre-push gate - managed by ~/.claude/hooks/pre_push_gate.py
+# Universal pre-push gate - managed by {script}
 # Bypass once with: git push --no-verify
 exec "{py}" "{script}" "$@"
 """
@@ -457,7 +462,7 @@ def git_client_hook_names() -> tuple:
 # GIT_DIR is .git/worktrees/<name>, which has no hooks dir, so we re-resolve to the common dir
 # there and nowhere else.
 GLOBAL_SHIM = """#!/bin/sh
-# Universal git hook dispatcher - managed by ~/.claude/hooks/pre_push_gate.py
+# Universal git hook dispatcher - managed by {script}
 # 1. universal pre-push gate  2. this repo's own hook, if it has one (never overridden)
 # Bypass once with: git push --no-verify
 hook=${{0##*/}}

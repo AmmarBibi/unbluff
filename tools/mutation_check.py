@@ -69,6 +69,24 @@ MUTATIONS = [
     ("pre_push_gate", "9b", "last_pass stops guarding the float coercion",
      [('    try:\n        return float(st.get("ts") or 0.0)\n    except (TypeError, ValueError):\n        return 0.0',
        '    return float(st.get("ts") or 0.0)')], False),
+    # [P14 A6] The shim's "managed by" comment is the only thing a human reads when auditing an
+    # installed git hook. Hardcoding it made a grep for the STALE path match a correctly-installed
+    # shim - 22 of 22 during the 2026-08-05 repair - so the check written to prove the stale copy
+    # was gone reported the opposite of the truth.
+    ("pre_push_gate", "A6", "a shim template hardcodes a path it does not exec again",
+     [("# Universal pre-push gate - managed by {script}",
+       "# Universal pre-push gate - managed by ~/.claude/hooks/pre_push_gate.py")], False),
+    # [P14 A3] The provenance gate. A3a is the FAIL-OPEN direction and the one that matters:
+    # git's hook surface is where the stale copy actually ran, so a gate that stops reading it
+    # reports a clean machine while every push runs a foreign copy. A3b and A3c are the
+    # fail-LOUD direction - a gate that fires on a correct install gets disabled by its owner,
+    # which is strictly worse than no gate.
+    ("tools/hook_divergence_report", "A3a", "the provenance gate stops reading core.hooksPath",
+     [('for scope in ("--global", "--local"):', 'for scope in ():')], False),
+    ("tools/hook_divergence_report", "A3b", "shell COMMENTS read as wirings again (false alarms)",
+     [("if not ln.lstrip().startswith(\"#\")", "if True")], False),
+    ("tools/hook_divergence_report", "A3c", "a bare basename is classified as a foreign copy again",
+     [('if "/" not in t and "\\\\" not in t:', "if False:")], False),
     # The bounded runner and the shared state key live in fast_test_on_stop - BOTH gates use
     # them, so that is where the mutation must be applied. pre_push_gate's selftest is what
     # catches it, which is the point: the twin is covered, not just the instance.
@@ -128,8 +146,13 @@ MUTATIONS = [
      [("        if code == 2 and message:\n            sys.stderr.write(message)", "        pass")],
      False),
     ("duplicate_registration_check", "20/23", "registrations collapse into a set of roots again",
-     [('            registered[tail].append("%s|%s|" % (head, scope))',
-       '            entry_ = "%s|%s|" % (head, scope)\n'
+     # ANCHOR UPDATED 2026-08-05 (P14 B3). The entry encoding grew event/matcher/invocation
+     # fields, so the old anchor stopped matching and this mutation became UNRUNNABLE - it
+     # reported HARNESS ERROR rather than silently passing, which is the only reason it was
+     # noticed. A fix that disarms another finding's test while the suite stays green is the
+     # failure P13 hit three times; here the FULL re-run caught it and the filtered run did not.
+     [('            registered[tail].append("%s|%s||%s|%s|%s" % (head, scope, event, matcher, full))',
+       '            entry_ = "%s|%s||%s|%s|%s" % (head, scope, event, matcher, full)\n'
        "            if entry_ not in registered[tail]:\n"
        "                registered[tail].append(entry_)")], False),
     ("duplicate_registration_check", "21/22", "paths scraped by regex again (spaces break it)",
@@ -302,6 +325,17 @@ MUTATIONS = [
     ("plan_defer_guard", "D2", "the exemption branch stops being load-bearing",
      [("    if _EXEMPT_RE.search(line):\n        return False", "    if False:\n        return False")],
      False),
+    # [P14 B2] The twin guard, rebuilt fail-closed. B2a/B2b are the two axes the predecessor
+    # was blind on - it enumerated 4 identifiers over 1 non-recursive directory and missed 6 of
+    # 6 novel twins while catching 5 of 5 controls. B2c pins the unreadable-file reporting: a
+    # file the guard could not parse must never be counted as clean.
+    ("transcript_util", "B2a", "twin guard back to a non-recursive hooks/ scan",
+     [("    for dirpath, dirnames, filenames in os.walk(root):",
+       "    for dirpath, dirnames, filenames in [(here, [], os.listdir(here))]:")], False),
+    ("transcript_util", "B2b", "twin guard back to enumerated NAMES only (behaviour ignored)",
+     [("            if marks or tags:", "            if False:")], False),
+    ("transcript_util", "B2c", "an unparseable file is silently skipped again",
+     [("                unreadable_paths.append(rel)", "                pass")], False),
     ("transcript_util", "D4", "an image-only prompt is not a turn boundary again",
      [("    return first_text(content) is not None or has_user_media(content)",
        "    return first_text(content) is not None")], False),
@@ -332,6 +366,23 @@ MUTATIONS = [
        "                if raw_command is not None and not isinstance(raw_command, str):",
        '                raw_command = h.get("command", "")\n'
        "                if False:")], False),
+    # [P14 B3] The four axes the guard was blind on, plus the false-alarm axis its fix opened.
+    ("duplicate_registration_check", "B3a", "extraction back to the hardcoded '.py' only",
+     [("        if t.lower().endswith(SCRIPT_EXTS):", "        if t.lower().endswith('.py'):")],
+     False),
+    ("duplicate_registration_check", "B3b", "`python -m pkg.mod` yields no script again",
+     [('        elif prev == "-m" and t and not t.startswith("-"):', "        elif False:")],
+     False),
+    ("duplicate_registration_check", "B3c", "dispatcher detection back to a FILENAME substring",
+     [('        if not base.lower().endswith(".py"):', '        if "dispatcher" not in base:')],
+     False),
+    ("duplicate_registration_check", "B3d", "the fan-out list must be literally named HOOKS again",
+     [("        if not any(isinstance(t, ast.Name) and t.id.isupper() for t in targets):",
+       '        if not any(isinstance(t, ast.Name) and t.id == "HOOKS" for t in targets):')],
+     False),
+    ("duplicate_registration_check", "B3e",
+     "counting back to bare basenames, so distinct events read as duplicates (false alarms)",
+     [("        fires, why = _fires(entries)", "        fires, why = True, 'merged'")], False),
     ("duplicate_registration_check", "C6", "a non-string command silences the whole audit again",
      [("                if cmd is not None and not isinstance(cmd, str):",
        "                if False:")], False),

@@ -166,6 +166,147 @@ def is_genuine_user(entry) -> bool:
 
 # ------------------------------------------------------------------ selftest
 
+# --------------------------------------------------------------------------- the twin guard
+#
+# WHY THIS IS NOT A NAME LIST ANY MORE. The previous guard enumerated FOUR identifiers across
+# three line-anchored regexes over ONE non-recursive directory, and an audit demonstrated 6 of 6
+# novel twins passing it silently while all 5 controls were caught. The shape space it was
+# enumerating is IDENTIFIER CHOICES - unbounded by construction, because the scenario it guards
+# against is an author who did not know this module existed and therefore had no reason to pick
+# its names. It could only ever catch a twin written by someone who already knew the canonical
+# names, which is close to the population that would not have written a twin.
+#
+# The rule below is bounded by BEHAVIOUR instead. A second classifier has to answer "is this the
+# user speaking?", and it cannot answer that without touching the transcript's own vocabulary -
+# whatever it calls its variables. So: any file that touches that vocabulary and does NOT import
+# this module is a candidate, and the exemption roster carries the few honest exceptions with a
+# written reason each. N recorded exemptions is a healthy design; a guard that reports an
+# unenumerated shape as CLEAN is not.
+
+# FLOOR - the original four names, kept. The behavioural rule below MISSES a bare `def
+# first_text` that contains no harness vocabulary of its own (measured: audit control C2), so
+# the floor is not redundant. Floor plus derived ceiling is already this repo's house style;
+# install.py, run_selftests.py and hook_health_check.py all made this same conversion.
+_TWIN_CONSTANTS = ("META_PROMPT_PREFIXES", "SYNTHETIC_PREFIXES")
+_TWIN_HELPERS = ("first_text", "is_synthetic")
+
+# CEILING - the transcript's own vocabulary. A classifier that avoids all of these is not
+# classifying transcripts.
+_DISCRIMINATORS = ("isMeta", "sourceToolUseID", "toolUseResult")
+_HARNESS_TAGS = ("<bash-stdout>", "<bash-stderr>", "<command-args>", "<command-name>",
+                 "<system-reminder>", "[Request interrupted by user]",
+                 "Base directory for this skill:", "This session is being continued",
+                 "task-notification")
+
+# Every entry needs a REASON, and an entry naming a file that no longer exists is itself
+# reported - otherwise the roster rots into cover for whatever gets added next.
+TWIN_EXEMPTIONS = {
+    "tools/mutation_check.py":
+        "mutates hook SOURCE, so it necessarily contains the marker strings it rewrites; it "
+        "classifies nothing at runtime",
+}
+# The audit that designed this rule measured TWO exemptions (the other being
+# tools/compare_delivery_gate.py). By the time the rule was built that file no longer touched
+# any transcript vocabulary, so its entry was dead on arrival - which is exactly why an
+# exemption roster needs a USED check and not only an EXISTS check.
+
+_SKIP_DIRS = {"__pycache__", ".git", ".ruff_cache", ".pytest_cache", "node_modules", ".venv"}
+
+
+def _bound_identifiers(tree) -> set:
+    """Every name this module BINDS, in any syntax.
+
+    Deliberately syntax-agnostic: the old guard anchored on `^\\s*NAME\\s*=` and on `^\\s*def `,
+    so an annotated assignment (`SYNTHETIC_PREFIXES: tuple[str, ...] = ...`), a lambda bound to
+    a name, and `async def is_synthetic` were all invisible. Asking the AST "what does this bind"
+    covers those and the ones nobody has thought of yet.
+    """
+    import ast
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            out.add(node.id)
+        elif isinstance(node, ast.alias):
+            out.add((node.asname or node.name).split(".")[0])
+    return out
+
+
+def twin_offenders(root: str | None = None) -> tuple:
+    """(offenders, stats). FAILS CLOSED: an unreadable file is reported, never skipped."""
+    import ast
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = root or os.path.dirname(here)          # the whole repo, not just hooks/
+    me = os.path.abspath(__file__)
+
+    offenders, unreadable_paths = [], []
+    examined = imports_canonical = exempt = 0
+    seen_rel, used_exemptions = set(), set()
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for fn in sorted(filenames):
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fn)
+            if os.path.abspath(path) == me:
+                continue
+            rel = os.path.relpath(path, root).replace("\\", "/")
+            seen_rel.add(rel)
+            examined += 1
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    src = fh.read()
+                tree = ast.parse(src)
+            except (OSError, SyntaxError):
+                # NOT `continue`. A file the guard could not read is a file the guard has no
+                # opinion about, and "no opinion" must never be reported as "clean".
+                unreadable_paths.append(rel)
+                continue
+
+            bound = _bound_identifiers(tree)
+            if "transcript_util" in bound:
+                imports_canonical += 1
+                continue
+
+            why = []
+            hit_names = {n for n in bound
+                         if n.lstrip("_") in _TWIN_CONSTANTS or n.lstrip("_") in _TWIN_HELPERS}
+            if hit_names:
+                why.append("binds %s" % sorted(hit_names))
+            marks = [m for m in _DISCRIMINATORS if m in src]
+            tags = [t for t in _HARNESS_TAGS if t in src]
+            if marks or tags:
+                why.append("uses transcript vocabulary %s" % sorted(marks + tags)[:4])
+            if not why:
+                continue
+            if rel in TWIN_EXEMPTIONS:
+                exempt += 1
+                used_exemptions.add(rel)
+                continue
+            offenders.append("%s (%s)" % (rel, "; ".join(why)))
+
+    # LIVENESS, both directions. An entry naming a file that is gone is obvious rot; an entry
+    # whose file no longer triggers the rule is the SAME rot and far harder to notice, because
+    # the roster still looks purposeful. One of this roster's two original entries was already
+    # in that state on the day it was written.
+    problems = ["twin exemption %r names a file that does not exist - a roster entry that "
+                "outlives its file is cover for the next one added" % rel
+                for rel in sorted(TWIN_EXEMPTIONS) if rel not in seen_rel]
+    problems += ["twin exemption %r is never needed - its file no longer trips the rule, so the "
+                 "entry now only hides whatever that file becomes next" % rel
+                 for rel in sorted(TWIN_EXEMPTIONS)
+                 if rel in seen_rel and rel not in used_exemptions]
+
+    return sorted(offenders), {
+        "examined": examined, "imports_canonical": imports_canonical, "exempt": exempt,
+        "unreadable": len(unreadable_paths), "unreadable_paths": sorted(unreadable_paths),
+        "exemption_problems": problems, "root_label": os.path.basename(root) or root,
+    }
+
+
 def selftest() -> int:
     fails = []
 
@@ -231,31 +372,71 @@ def selftest() -> int:
     check({"message": {"role": "user", "content": "hi"}}, True, "no top-level type")
     check({"type": "user", "message": {"role": "user", "content": "hi"}}, True, "with type")
 
-    # THE TWIN MUST NOT COME BACK. This module exists because two hooks each kept their own
-    # prefix list and their own classifier, and each was wrong in a way the other was not.
-    # Fixing both lists would leave the same trap for the next person, so the durable property
-    # asserted here is that exactly ONE implementation exists.
-    import glob
-    import os
-    import re
-    here = os.path.dirname(os.path.abspath(__file__))
-    twins = []
-    for path in sorted(glob.glob(os.path.join(here, "*.py"))):
-        if os.path.abspath(path) == os.path.abspath(__file__):
-            continue
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                src = fh.read()
-        except OSError:
-            continue
-        # A real assignment at the start of a line - not a mention inside a string or comment,
-        # which is how a previous twin-guard produced its own false alarm.
-        if re.search(r"^\s*(?:_)?(?:META_PROMPT_PREFIXES|SYNTHETIC_PREFIXES)\s*=", src, re.M):
-            twins.append(os.path.basename(path) + " (own prefix list)")
-        if re.search(r"^\s*def _?first_text\b", src, re.M):
-            twins.append(os.path.basename(path) + " (own first_text)")
-        if re.search(r"^\s*def _?is_synthetic\b", src, re.M):
-            twins.append(os.path.basename(path) + " (own is_synthetic)")
+    # THE GUARD MUST BE ABLE TO SEE AN OFFENDER. Without this the selftest passes on a clean
+    # repo no matter what the detector does, so every mutation of it SURVIVES and the whole
+    # guard is decorative - which is how the predecessor stayed blind to 6 of 6 novel twins
+    # while printing OK. Each planted case below is a shape the old guard missed.
+    import os as _os
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        _h = _os.path.join(_td, "hooks")
+        _os.makedirs(_os.path.join(_h, "lib"))
+        _os.makedirs(_os.path.join(_td, "tools"))
+        _plant = {
+            # a complete twin with every name changed - the shape the guard exists for
+            "hooks/renamed.py": "HARNESS_TEXT_MARKERS = ('<bash-stdout>',)\n"
+                                "def is_real_user_turn(e):\n"
+                                "    return not e.get('isMeta')\n",
+            # annotated assignment: the old line-anchored regex required `=` after the name
+            "hooks/annotated.py": "SYNTHETIC_PREFIXES: tuple = ('<bash-stdout>',)\n",
+            # bound without a plain `def`
+            "hooks/lambdas.py": "first_text = lambda c: c[0]\n"
+                                "async def is_synthetic(t):\n    return False\n",
+            # one directory down: the old glob was hooks/*.py, non-recursive
+            "hooks/lib/user_turns.py": "def scan(e):\n    return e.get('sourceToolUseID')\n",
+            # a sibling directory entirely: the old scan never left hooks/
+            "tools/turn_classifier.py": "SYNTHETIC_PREFIXES = ('<command-args>',)\n",
+        }
+        for _rel, _src in _plant.items():
+            with open(_os.path.join(_td, _rel.replace("/", _os.sep)), "w",
+                      encoding="utf-8") as _fh:
+                _fh.write(_src)
+        # NEGATIVE controls: a guard that flags everything proves nothing
+        with open(_os.path.join(_h, "importer.py"), "w", encoding="utf-8") as _fh:
+            _fh.write("import transcript_util\n"
+                      "def go(e):\n    return transcript_util.is_genuine_user(e)\n")
+        with open(_os.path.join(_h, "unrelated.py"), "w", encoding="utf-8") as _fh:
+            _fh.write("def add(a, b):\n    return a + b\n")
+        # an unparseable file must be REPORTED, never silently skipped
+        with open(_os.path.join(_h, "broken.py"), "w", encoding="utf-8") as _fh:
+            _fh.write("def (((\n")
+
+        _found, _st = twin_offenders(_td)
+        _blob = " ".join(_found)
+        for _rel in _plant:
+            if _rel not in _blob:
+                fails.append("twin guard is BLIND to a planted %s - a detector that matches "
+                             "nothing reports every repo as clean" % _rel)
+        for _neg in ("importer.py", "unrelated.py"):
+            if _neg in _blob:
+                fails.append("twin guard flagged %s, which is not a twin - a guard that fires "
+                             "on correct code gets disabled" % _neg)
+        if _st["unreadable"] != 1:
+            fails.append("an unparseable file was not reported as unreadable (%r); a file the "
+                         "guard could not read must never count as clean" % (_st,))
+
+    # THE TWIN MUST NOT COME BACK.
+    twins, stats = twin_offenders()
+    print("  [twin-guard] examined %d .py file(s) under %s: %d import this module, "
+          "%d exempt, %d unreadable, %d offender(s)"
+          % (stats["examined"], stats["root_label"], stats["imports_canonical"],
+             stats["exempt"], stats["unreadable"], len(twins)))
+    for problem in stats["exemption_problems"]:
+        fails.append(problem)
+    if stats["unreadable"]:
+        fails.append("%d file(s) could not be parsed, so the twin question was NOT answered "
+                     "for them: %r - an unread file is not a clean file"
+                     % (stats["unreadable"], stats["unreadable_paths"]))
     if twins:
         fails.append("a SECOND transcript classifier exists in %s - import transcript_util "
                      "instead; two copies of one rule is the defect this module fixes" % twins)

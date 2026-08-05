@@ -159,8 +159,8 @@ show_your_proof: OK
 stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
 skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
-no-regression: OK
-all 24 selftests passed
+no-regression: OK  hook-provenance: OK
+all 25 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

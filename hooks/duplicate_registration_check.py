@@ -41,6 +41,15 @@ from collections import defaultdict
 
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
 
+# REUSED from the sibling guard, never re-declared. hook_health_check has recognised four hook
+# extensions since v1.2; this file recognised one, so the repo simultaneously believed both that
+# a .js hook is a hook and that it is not. A second copy of a roster is the exact defect these
+# guards exist to catch, and it had already happened here.
+_HD = os.path.dirname(os.path.abspath(__file__))
+if _HD not in sys.path:
+    sys.path.insert(0, _HD)
+from hook_health_check import _SCRIPT_EXTS as SCRIPT_EXTS  # noqa: E402
+
 _UNKNOWN_KIND = ("UNKNOWN - at least one file could not be read, so sameness was NOT "
                  "determined; check both by hand before deleting either")
 
@@ -61,10 +70,23 @@ def _path_tokens(text: str) -> list[str]:
     except ValueError:
         toks = text.split()
     out = []
+    prev = ""
     for t in toks:
         t = t.strip().strip('"').strip("'")
-        if t.lower().endswith(".py"):
+        # [P14 B3] EXTENSIONS ARE DERIVED, not the literal ".py" this used to test. Claude Code
+        # hooks are language-agnostic and the repo's OWN sibling guard already declares four
+        # extensions - so a .js, .ps1 or .sh hook wired twice yielded NO token, never entered
+        # the `registered` dict, and could not reach the duplicate test at all. Non-extraction
+        # was indistinguishable from non-duplication. Importing the sibling's tuple rather than
+        # copying it means a fifth extension is learned in one place, not two.
+        if t.lower().endswith(SCRIPT_EXTS):
             out.append(t)
+        # `python -m package.module` carries no path token whatsoever, so the same hook wired
+        # twice in module form was completely invisible. Normalised to a path so both spellings
+        # land on one key and a mixed pair (one -m, one path) still collides.
+        elif prev == "-m" and t and not t.startswith("-"):
+            out.append(t.replace(".", "/") + ".py")
+        prev = t
     return out
 
 
@@ -101,10 +123,13 @@ def _iter_commands(settings_path: str, malformed: list | None = None):
         return
     if not isinstance(data, dict):
         return
-    for groups in (data.get("hooks") or {}).values():
+    for event, groups in (data.get("hooks") or {}).items():
         for group in groups or []:
             if not isinstance(group, dict):
                 continue
+            matcher = group.get("matcher") or ""
+            if not isinstance(matcher, str):
+                matcher = repr(matcher)
             for hook in group.get("hooks", []) or []:
                 if not isinstance(hook, dict):
                     continue
@@ -120,8 +145,14 @@ def _iter_commands(settings_path: str, malformed: list | None = None):
                                          "was skipped" % (os.path.basename(settings_path),
                                                           type(cmd).__name__))
                     continue
+                # The ARGUMENTS are part of the identity, not noise. A shared runner wired to
+                # one event several times with different flags is doing different work each
+                # time; collapsing it to its filename reported 13 "duplicates" for one
+                # correctly-wired ECC script. What is redundant is the same script run the same
+                # WAY twice - see _fires() below.
+                full = _invocation_key(cmd, hook.get("args"))
                 for match in _path_tokens(cmd or ""):
-                    yield match
+                    yield (match, event, matcher, full)
                 for arg in (hook.get("args") or []):
                     if not isinstance(arg, str):
                         continue
@@ -129,11 +160,99 @@ def _iter_commands(settings_path: str, malformed: list | None = None):
                     # what broke paths with spaces. Only fall back to tokenizing when the
                     # entry plainly is not a bare path.
                     stripped = arg.strip().strip('"').strip("'")
-                    if stripped.lower().endswith(".py"):
-                        yield stripped
+                    if stripped.lower().endswith(SCRIPT_EXTS):
+                        yield (stripped, event, matcher, full)
                     else:
                         for match in _path_tokens(arg):
-                            yield match
+                            yield (match, event, matcher, full)
+
+
+def _invocation_key(cmd, args) -> str:
+    """What makes two registrations the SAME work, ignoring how they were spelled.
+
+    Keeps only the arguments that are NOT the interpreter and NOT the script itself. Two
+    spellings of one invocation - `"python" "x.py"` and `command:"python", args:["x.py"]` -
+    must compare EQUAL, because they run the same thing twice and that is the fault this guard
+    exists for. A shared runner invoked as `runner.js --a` and `runner.js --b` must compare
+    DIFFERENT, because it is doing different work each time; treating those as duplicates
+    produced 13 false alarms for one correctly-wired script the moment non-.py extensions
+    became visible.
+    """
+    # `command` is a shell string and must be SPLIT; each `args` entry is ALREADY one token and
+    # must NOT be. Re-splitting an args entry on whitespace is findings 21/22 - it turns
+    # `C:\Users\John Doe\hooks\x.py` into two tokens, so the path stops ending in .py, survives
+    # as a bogus argument, and two spellings of one invocation stop comparing equal. This helper
+    # reintroduced that defect on its first draft and the space fixture caught it.
+    toks = []
+    if isinstance(cmd, str):
+        try:
+            toks += shlex.split(cmd, posix=False)
+        except ValueError:
+            toks += cmd.split()
+    for a in (args or []):
+        if isinstance(a, (str, int, float)):
+            toks.append(str(a))
+    # Everything BEFORE the script is the launcher and its flags; everything AFTER is the work.
+    # That split is what makes `pwsh -NoProfile -File x.ps1` and `powershell -File x.ps1` compare
+    # EQUAL - two launchers running one script on one event, which double-fires - while
+    # `runner.js --alpha` and `runner.js --beta` stay DIFFERENT. Keying on "all non-script
+    # tokens" instead treats -NoProfile as script work and misses the .ps1 pair entirely.
+    toks = [t.strip().strip('"').strip("'") for t in toks]
+    cut = None
+    for i, t in enumerate(toks):
+        if t.lower().endswith(SCRIPT_EXTS):
+            cut = i
+            break
+        if t == "-m" and i + 1 < len(toks):   # `-m pkg.mod` names the script without a path
+            cut = i + 1
+            break
+    return " ".join(toks[cut + 1:]) if cut is not None else " ".join(toks[1:])
+
+
+def _parts(entry: str) -> tuple:
+    """(root, scope, via, event, matcher, full) - one place that knows the entry encoding."""
+    bits = entry.split("|", 5)
+    while len(bits) < 6:
+        bits.append("")
+    return tuple(bits)
+
+
+def _fires(entries: list) -> tuple:
+    """(is_problem, reason) for one basename's registrations.
+
+    THE QUESTION IS "does this script run twice for ONE event", not "does this name appear
+    twice anywhere". Merging every event and matcher before counting reported the same hook
+    wired under Stop AND PreToolUse as a duplicate, though neither double-fires - and once
+    non-.py extensions became visible it reported 13 "duplicates" for a single correctly-wired
+    shared runner invoked with different flags. A guard that fires on a correct config gets
+    disabled by its owner, which is strictly worse than no guard.
+
+    Three genuinely distinct faults, all still caught:
+      * VARIANT CONFLICT - one basename resolving to more than one directory. Event-independent:
+        which file wins is nondeterministic regardless of when it fires.
+      * REDUNDANT - the same script wired the same WAY (identical command+args) more than once
+        for one (event, matcher). This is the fault that motivated the guard.
+      * DOUBLE PATH - the same module reached both directly and through a dispatcher on one
+        event. The commands differ, so an args comparison alone would miss it.
+    """
+    roots = {_parts(e)[0] for e in entries}
+    if len(roots) > 1:
+        return True, "variant conflict"
+    by_slot = defaultdict(list)
+    for e in entries:
+        root, _scope, via, event, matcher, full = _parts(e)
+        by_slot[(event, matcher)].append((full, bool(via)))
+    for (_event, _matcher), rows in by_slot.items():
+        if len(rows) < 2:
+            continue
+        if any(v for _f, v in rows):
+            return True, "reached directly AND via a dispatcher on one event"
+        counts = defaultdict(int)
+        for f, _v in rows:
+            counts[f] += 1
+        if any(n > 1 for n in counts.values()):
+            return True, "wired identically more than once for one event"
+    return False, ""
 
 
 def _split(path: str) -> tuple[str, str]:
@@ -150,21 +269,38 @@ def _digest(path: str) -> str | None:
 
 
 def dispatched_modules(dispatcher_path: str) -> list[str]:
-    """Module names in a dispatcher's HOOKS tuple, via AST (never imports it)."""
+    """Module names in a dispatcher's fan-out list, via AST (never imports it).
+
+    [P14 B3] This used to require the list be literally named `HOOKS`. The repo's own
+    post_tooluse_dispatcher could be renamed to MODULES or PIPELINE and its whole fan-out went
+    invisible - every module it dispatches would then be counted zero times instead of once,
+    and a module wired BOTH directly and through the dispatcher stopped colliding. The name of
+    a variable is not a fact about behaviour, so the shape is what is matched now: a
+    module-level binding of a sequence whose elements start with a string, held to an
+    ALL-CAPS name so ordinary local lists cannot be mistaken for a roster.
+    """
     try:
         tree = ast.parse(open(dispatcher_path, encoding="utf-8").read())
     except (OSError, SyntaxError):
         return []
     names: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
+        if not any(isinstance(t, ast.Name) and t.id.isupper() for t in targets):
             continue
-        if not any(isinstance(t, ast.Name) and t.id == "HOOKS" for t in node.targets):
+        elts = getattr(node.value, "elts", None)
+        if not elts:
             continue
-        for elt in getattr(node.value, "elts", []):
+        found = []
+        for elt in elts:
             parts = getattr(elt, "elts", [elt])
             if parts and isinstance(parts[0], ast.Constant) and isinstance(parts[0].value, str):
-                names.append(parts[0].value)
+                found.append(parts[0].value)
+        # Only a list where EVERY element yields a module name is a fan-out roster; a mixed
+        # constant tuple is some other module-level table.
+        if found and len(found) == len(elts):
+            names.extend(found)
     return names
 
 
@@ -186,28 +322,36 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
             or "?"
         scope = "user" if os.path.normcase(os.path.abspath(layer)) == \
             os.path.normcase(os.path.abspath(settings_path or SETTINGS)) else label
-        for path in _iter_commands(layer, malformed):
+        for path, event, matcher, full in _iter_commands(layer, malformed):
             head, tail = _split(path)
-            registered[tail].append("%s|%s|" % (head, scope))
+            registered[tail].append("%s|%s||%s|%s|%s" % (head, scope, event, matcher, full))
 
     effective: dict[str, list[str]] = {k: list(v) for k, v in registered.items()}
     for base, entries in list(registered.items()):
-        if "dispatcher" not in base:
+        # [P14 B3] NO filename test. This was `if "dispatcher" not in base: continue` - a name
+        # test standing in for a behaviour test, so the SAME file fanning out to the SAME
+        # modules was expanded when called stop_dispatcher.py and invisible when called
+        # fanout.py. Every registered script is now ASKED whether it has a fan-out roster, and
+        # the AST answers; a file that has none costs one parse and yields nothing.
+        if not base.lower().endswith(".py"):
             continue
         for entry in entries:
-            root, scope, _ = entry.split("|", 2)
+            root, scope, _via, event, matcher, _full = _parts(entry)
             for mod in dispatched_modules(os.path.join(root, base)):
                 effective.setdefault(mod + ".py", []).append(
-                    "%s|%s|via %s" % (root, scope, base))
+                    "%s|%s|via %s|%s|%s|%s" % (root, scope, base, event, matcher, "via " + base))
 
     problems: list[str] = list(malformed)
     for base in sorted(effective):
         entries = sorted(effective[base])
         if len(entries) < 2:
             continue
+        fires, why = _fires(entries)
+        if not fires:
+            continue
         digests = {}
         for i, entry in enumerate(entries):
-            root = entry.split("|", 1)[0]
+            root = _parts(entry)[0]
             digests[i] = _digest(os.path.join(root, base))
         values = list(digests.values())
         if any(v is None for v in values):
@@ -220,12 +364,111 @@ def audit(settings_path: str | None = None, cwd: str | None = None) -> list[str]
             kind = "SAME FILE twice (redundant)"
         else:
             kind = "DIFFERENT PROGRAMS sharing a name (nondeterministic)"
-        problems.append("%s - registered %d times - %s:" % (base, len(entries), kind))
+        problems.append("%s - registered %d times - %s (%s):"
+                        % (base, len(entries), kind, why))
         for i, entry in enumerate(entries):
-            root, scope, via = entry.split("|", 2)
+            root, scope, via = _parts(entry)[:3]
             problems.append("      <- %s [%s]%s  [sha %s]" % (
                 root, scope, (" (" + via + ")") if via else "", digests[i] or "UNREADABLE"))
     return problems
+
+
+def _selftest_shape_coverage() -> list:
+    """[P14 B3] Every shape the guard was measurably blind to, planted, plus the controls.
+
+    Without these the selftest passes on a clean config no matter what the extractor does, so
+    every mutation of these fixes SURVIVES and the guard is decorative. The audit demonstrated
+    6 of 6 novel shapes reported CLEAN while 3 of 3 enumerated shapes were caught - non-
+    extraction was indistinguishable from non-duplication.
+
+    The two CONTROLS matter as much as the positives: making non-.py hooks visible without
+    fixing the counting key reported 13 duplicates for one correctly-wired shared runner, and a
+    guard that fires on a correct config gets disabled.
+    """
+    import tempfile
+    fails = []
+    with tempfile.TemporaryDirectory() as td:
+        hooks = os.path.join(td, "hooks")
+        os.makedirs(hooks)
+        hermetic = os.path.join(td, "hermetic")
+        os.makedirs(hermetic)
+        n = [0]
+
+        def script(name, body="x = 1\n"):
+            p = os.path.join(hooks, name)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            return p
+
+        def verdict(cfg):
+            n[0] += 1
+            p = os.path.join(td, "cfg%d.json" % n[0])
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump({"hooks": cfg}, fh)
+            return "\n".join(audit(p, cwd=hermetic))
+
+        def one(event, entries, matcher=None):
+            g = {"hooks": entries}
+            if matcher is not None:
+                g["matcher"] = matcher
+            return {event: [g]}
+
+        js = script("notify.js", "// hook\n")
+        out = verdict(one("Stop", [{"command": 'node "%s"' % js},
+                                   {"command": 'node "%s"' % js}]))
+        if "notify.js" not in out:
+            fails.append("a .js hook wired twice is invisible - the sibling guard has "
+                         "recognised four hook extensions since v1.2 || " + (out or "(silent)"))
+
+        ps = script("notify.ps1", "# hook\n")
+        out = verdict(one("Stop", [{"command": 'pwsh -NoProfile -File "%s"' % ps},
+                                   {"command": 'powershell -File "%s"' % ps}]))
+        if "notify.ps1" not in out:
+            fails.append("a .ps1 hook wired twice is invisible || " + (out or "(silent)"))
+
+        out = verdict(one("Stop", [{"command": "python -m hooks.rate_prompt"},
+                                   {"command": "python -m hooks.rate_prompt"}]))
+        if "rate_prompt.py" not in out:
+            fails.append("`python -m` module form is invisible - no .py token exists in the "
+                         "command string at all || " + (out or "(silent)"))
+
+        # a dispatcher whose FILENAME does not contain 'dispatcher', fanning out to a module
+        # that is ALSO wired directly: two executions on one event
+        w = script("widget.py")
+        fan = script("fanout.py", "HOOKS = ((\"widget\", \"w\"),)\n")
+        out = verdict(one("Stop", [{"command": 'python "%s"' % w},
+                                   {"command": 'python "%s"' % fan}]))
+        if "widget.py" not in out:
+            fails.append("a dispatcher whose filename lacks the substring 'dispatcher' fans "
+                         "out invisibly - a name test standing in for a behaviour test || "
+                         + (out or "(silent)"))
+
+        w2 = script("gadget.py")
+        pipe = script("stop_dispatcher2.py", "MODULES = ((\"gadget\", \"g\"),)\n")
+        out = verdict(one("Stop", [{"command": 'python "%s"' % w2},
+                                   {"command": 'python "%s"' % pipe}]))
+        if "gadget.py" not in out:
+            fails.append("a dispatcher whose module list is not literally named HOOKS fans out "
+                         "invisibly || " + (out or "(silent)"))
+
+        # ---- CONTROLS: a guard that flags these is unusable ----
+        solo = script("solo.py")
+        out = verdict({"Stop": [{"hooks": [{"command": 'python "%s"' % solo}]}],
+                       "PreToolUse": [{"hooks": [{"command": 'python "%s"' % solo}]}]})
+        if "solo.py" in out:
+            fails.append("the same hook under two DIFFERENT events was reported as a duplicate; "
+                         "neither double-fires || " + out)
+
+        runner = script("runner.js", "// shared\n")
+        out = verdict(one("Stop", [{"command": 'node "%s" --alpha' % runner},
+                                   {"command": 'node "%s" --beta' % runner},
+                                   {"command": 'node "%s" --gamma' % runner}]))
+        if "runner.js" in out:
+            fails.append("a shared runner invoked with DIFFERENT flags was reported as a "
+                         "duplicate - it does different work each time, and this false alarm "
+                         "fired 13 times on the author's real config || " + out)
+    return fails
 
 
 def _selftest_malformed_command() -> list:
@@ -441,6 +684,7 @@ def _selftest() -> int:
             os.chdir(_real_cwd)
 
         fails += _selftest_malformed_command()
+        fails += _selftest_shape_coverage()
         if fails:
             for f in fails:
                 print("SELFTEST FAIL: " + f)

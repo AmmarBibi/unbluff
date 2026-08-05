@@ -44,6 +44,52 @@ def _selftest_undispatched_disclosure() -> list:
     return fails
 
 
+def _selftest_shim_self_reference() -> list:
+    """Every path-shaped self-reference in a shim template must name the copy that will RUN.
+
+    Both templates carried `managed by ~/.claude/hooks/pre_push_gate.py` as a hardcoded literal
+    while the exec line was templated from `__file__`. Install from a clone and the shim
+    documents a file it does not use - and that comment is the ONLY thing a human reads when
+    auditing a git hook.
+
+    MEASURED HARM, 2026-08-05: during the installed-hooks divergence repair,
+    `grep -rl '.claude/hooks/pre_push_gate.py' ~/.claude/githooks` returned 22 of 22 AFTER a
+    correct re-point, because it matched the comment. The check written to confirm the stale
+    path was gone reported the exact opposite of the truth.
+
+    DERIVED, not a patch to two strings: any module-level string that looks like a shell shim is
+    discovered by shape and checked, so a third template is covered the day it lands. A bare
+    filename token is allowed - GLOBAL_SHIM greps for one deliberately.
+    """
+    import re
+    fails = []
+    sentinel = "/SENTINEL/DIR/pre_push_gate.py"
+    templates = {n: v for n, v in vars(_m).items()
+                 if isinstance(v, str) and v.lstrip().startswith("#!/bin/sh")}
+    # DENOMINATOR, printed: a roster-shaped check that silently found nothing is the failure
+    # this whole guard family exists to abolish.
+    print("  [shim-self-reference] %d shim template(s) checked: %s"
+          % (len(templates), ", ".join(sorted(templates)) or "(none)"))
+    if not templates:
+        fails.append("no shim template found by shape - this guard is checking NOTHING; "
+                     "if the templates were renamed or restructured, re-derive the selector")
+    for name, body in sorted(templates.items()):
+        try:
+            rendered = body.format(py="/SENTINEL/python.exe", script=sentinel)
+        except (KeyError, IndexError, ValueError) as e:
+            fails.append("%s: cannot be rendered with (py, script): %r" % (name, e))
+            continue
+        refs = re.findall(r"[^\s\"']*pre_push_gate\.py", rendered)
+        pathish = [r for r in refs if "/" in r or "\\" in r]
+        wrong = sorted({r for r in pathish if r != sentinel})
+        if wrong:
+            fails.append("%s: names a DIFFERENT copy than it execs: %r, exec target is %r. "
+                         "A reader auditing the installed hook is sent to the wrong file, and a "
+                         "grep for the stale path matches a correctly-installed shim"
+                         % (name, wrong, sentinel))
+    return fails
+
+
 def selftest() -> int:
     import tempfile
     fails = []
@@ -576,6 +622,7 @@ def selftest() -> int:
 
     fast_test.STATE_DIR = real_state
     fails += _selftest_undispatched_disclosure()
+    fails += _selftest_shim_self_reference()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

@@ -1460,6 +1460,85 @@ class. Restored below with current status rather than re-derived from memory.
 | show_your_proof docstring | **Was FALSE and is fixed in this commit.** It claimed the judgement was "written down in `capped_report.SIZE_EXEMPTIONS`" and that the site "is visible" to the guard. Neither is true post-revert. Found by the completeness audit; no gate caught it |
 
 
+### PART A - the installed-hooks divergence, 2026-08-05. CLOSED except the rows below
+
+Full evidence: `docs/audits/p14_partA_divergence_2026-08-05.md`. Headline: it was **11 shared
+files diverging, not 2**; `install.py` was never at fault (the Claude Code surface pointed at
+the repo all along); the stale copy ran from **git's** surface, because
+`core.hooksPath` was set globally to a dispatcher that pinned
+`~/.claude/hooks/pre_push_gate.py` - and `install()` writes its shim from
+`os.path.abspath(__file__)`, so the copy that runs `--install` is the copy that gets pinned.
+**unbluff had been gating its own pushes with a stale fail-open copy of its own gate since
+2026-07-28.**
+
+| id | sev | owner | item |
+|---|---|---|---|
+| A1 | - | **DONE** | Both-directions diff adjudicated. `read_source_globs`/`is_source` and `PUSH_MAX_TIMEOUT_S` **DISCARDED, not ported**: a 4-case A/B with a live control showed the deny-list covers `.json` AND `.tf` with no declaration, while the glob is blind one extension past whatever was declared. Nothing in the installed copy was worth porting upstream |
+| A2 | - | **DONE** | Cause established: two wiring surfaces, two path conventions, nothing reconciling them. Not hand-editing (that came later) and not a second clone |
+| A5 | - | **DONE** | Repaired: 22 dispatchers + 3 per-repo shims re-pointed at the repo, 12 stale files deleted, `state/` preserved, suite 25/25, live gate path exercised (`exit 0`) |
+| A3 | - | **DONE** | `tools/hook_divergence_report.py` rebuilt from a report that "exits 0 always" into a PROVENANCE gate. Derived roster, both denominators printed, `--selftest` with planted offenders on both surfaces plus negative controls, 3 mutations all CAUGHT, AUX gate (suite 24 -> 25), README updated in the same change. **Historical control: 16 of 16 FOREIGN against the preserved pre-repair artefact** |
+| A6 | LOW | **DONE** | Shim templates hardcoded `managed by ~/.claude/hooks/pre_push_gate.py` while exec-ing `{script}`. MEASURED harm: a grep for the stale path matched 22 of 22 correctly-installed dispatchers, so the check written to prove the stale copy was gone reported the opposite. Templated from `{script}`; pinned by a DERIVED `_selftest_shim_self_reference` (discovers templates by shape, prints its denominator); mutation `#A6` CAUGHT |
+| **A4** | MEDIUM | **phase 4, SCHEDULED TO BE BUILT** | In-flight-thread hook. The GENERIC version is **declined with reasons** (see the audit doc): "was this output referenced?" is not mechanically decidable - every `Read` that informs an `Edit` would fire, and a hook that nags on correct behaviour gets disabled. The NARROW variant is a real, bounded gap and is scheduled: fire only when a turn ends with an **unadjudicated FAILURE signal** (a tool result carrying a non-zero exit or a `FAIL`/`SURVIVED`/`BLOCKED` marker) and nothing follows it. Mechanically decidable, names the command, matches the measured failure. NOT a twin of `show_your_proof`, which fires on the complementary condition (a success claim with ZERO tool runs) |
+| **A8** | MEDIUM | phase 0, with D1-LIMIT | **D1-LIMIT has a THIRD instance and it is already SHIPPED.** `meta_audit_on_stop` is WIRED at 0.70 share and failed its budget at 30.50s vs 17.50s today. An interleaved A/B against an unmodified control showed **12.86s median, 1.0x the 13.30s plan baseline** - the box was at 97% CPU with foreign work. The previously named cases (`fast_test_on_stop`, `pre_push_gate`) are deliberately UNWIRED for this reason; this one is live, so the flakiness ships to users. No invariant weakened: the budget is right and the instrument is wrong. Strengthens the case for CPU time or a calibration probe before any further hook is budgeted on wall clock |
+| A9 | LOW | phase 4 | The state-key divergence reappeared at the INSTALL boundary: repo `_state_key()` normalises to `c:/...`, the old copy hashed `cwd.lower()` with backslashes, so unbluff carried **two** `fasttest-*.json` ledgers. Findings 28/34 fixed inside one program and re-broken across two copies of it. Now moot (one copy), but the class - "a canonicalisation is only canonical within the program that defines it" - has no detector |
+
+### PHASE 1 - the fail-open class fix. TWO of three guards rebuilt, 2026-08-05
+
+The principle, applied once and reused: **fail CLOSED, bounded by a naming convention or a
+behaviour rather than by syntax, with an exemption roster carrying a written reason per entry
+and a liveness check in BOTH directions.** N recorded exemptions is a healthy design; an
+unenumerated shape reported CLEAN is not.
+
+| id | sev | status | item |
+|---|---|---|---|
+| B2 | HIGH | **DONE** | `transcript_util` twin-guard. Was 4 hardcoded names / 3 line-anchored regexes / 1 non-recursive dir. Now: the 4 names kept as a FLOOR (they catch a bare `def first_text` the behavioural rule misses - measured control C2, which is exactly why the audit said not to delete them) plus a BEHAVIOURAL ceiling (a file touching the transcript's own vocabulary and not importing this module), recursive over the whole repo, `_bound_identifiers` via AST so annotated assignment / lambda / `async def` are all seen. **MEASURED: 5/11 -> 11/11 (controls 5/5, novels 0/6 -> 6/6).** Planted-fixture selftest so mutations bite; denominator printed every run; unreadable files REPORTED, never skipped. Mutations B2a/B2b/B2c all CAUGHT |
+| B3 | HIGH | **DONE** | `duplicate_registration_check`. Extensions now REUSED from `hook_health_check._SCRIPT_EXTS` rather than the hardcoded `".py"` - the repo simultaneously believed a `.js` hook both is and is not a hook. `python -m pkg.mod` normalised to a path. Dispatcher detection is behavioural (the AST is asked) instead of a filename substring, and the fan-out list may carry any ALL-CAPS name instead of literally `HOOKS`. Mutations B3a-B3e all CAUGHT |
+| **B3-FP** | **HIGH, found by fixing B3** | **DONE** | **Making non-`.py` hooks visible exposed the opposite defect: the guard counted a basename across ALL events and matchers.** On the author's real config it then reported `observe-runner.js` (2 DISTINCT events) and `run-with-flags.js` (13 hits, one shared runner invoked with different flags) as duplicates - about 15 false alarms on a correct config. Shipping the extension fix alone would have produced a guard its owner disables, which is strictly worse than none. Identity is now (script + arguments + event + matcher), split at the script path so launcher flags (`pwsh -NoProfile -File x.ps1` vs `powershell -File x.ps1`) compare EQUAL while `runner.js --alpha` vs `--beta` compare DIFFERENT. Three distinct faults all still caught: variant conflict, identical re-wiring, and direct-plus-dispatcher on one event |
+| B3-N | LOW | noted | Two defects were introduced and caught by fixtures while building B3: the first `_invocation_key` re-split each `args` entry on whitespace, reintroducing findings 21/22 (a path with a space stops ending in `.py`); the second keyed on all non-script tokens, so `-NoProfile` counted as script work and the `.ps1` pair was missed. Both were caught by planted fixtures rather than by review - the argument for writing the fixture before the fix |
+| **B1** | **HIGH x4** | **OPEN - NOT STARTED, design brief below** | `capped_report` C1-NEW. Deliberately not attempted at the end of a long session; it is the item that already consumed two adversarial workflow rounds and 2,101 lines before being reverted |
+
+#### B1 design brief - read this BEFORE writing any code
+
+The brief's inverse rule ("flag every load of a cap-named constant not passed to
+`capped_report.keep()`/`render()`") is the right SHAPE - it is bounded by the ~6-14 real cap
+sites rather than by Python's grammar - but it is **not sufficient on its own**, and the corpus
+proves it. Measured against `tests/cap_spelling_corpus.py` (125 entries: **96 must_flag, 29
+must-stay-quiet**), the naive inverse rule flags these NEGATIVE controls:
+
+- `neg_max_used_for_retries` - `for _ in range(MAX_RETRIES)`
+- `neg_retry_while` / `neg_poll_while` / `neg_depth_while` - `while n < MAX_WAIT_SECONDS`
+- `neg_max_used_as_loud_rejection` - `if len(rows) > MAX_ROWS: raise ValueError(...)`
+- `neg_scalar_slice_rostered` / `neg_size_skip_rostered` - byte and size windows
+- `neg_bound_exemption_collection` - the existing `BOUND_EXEMPTIONS` cases
+
+All of those are CORRECT code. So the real problem is not "find the cap loads" - that part is
+easy and genuinely unbounded-proof. The real problem is **discriminating a silent truncation of
+a REPORTED LIST from a resource bound or a loud rejection**, and that is where both previous
+rounds died.
+
+Constraints the rebuild must respect, each already paid for:
+
+1. **The predecessor floor is 31 of 96, measured today** by `tools/no_regression.py`
+   (`predecessor f3ebc8f0 saw 31 of 96, working tree sees 31`). Falling below it is a
+   detection regression and the gate will block it - which is the gate working.
+2. **The corpus is BIASED toward the reverted detector**, which wrote most of it and scores
+   96/96 where the baseline scores 31/96. **Only the 14 scalar-suffix entries are
+   baseline-verified.** Derive new entries from the PREDECESSOR's capabilities too, or the
+   grader keeps rewarding the design that was reverted.
+3. **A `raise` is loud and therefore fine**; a `break`, a slice, or a `return` that quietly
+   shortens a list that is later printed is the defect. Any rule that cannot tell those apart
+   will either fail open or bury the user in false positives.
+4. Selftest must stay inside `hook_health_check`'s 25s cap (`selftest_budget`), which the
+   reverted detector blew at 36.1s - a shipped defect on every installed machine, not a CI
+   symptom.
+5. The 8 acceptance criteria in "Acceptance criteria for C1-NEW" above are each a real defect
+   from the reverted version; re-read them before starting.
+
+**Recommended first move:** do NOT start by writing a detector. Start by scoring the naive
+inverse rule against all 125 corpus entries to get its true false-positive set, then design the
+discrimination against that measured set. `score_corpus.py` (this session's scratchpad) already
+does the harness half.
+
 **Exit condition for P14:** every row above closed to the severity bar, the dropped
 candidate adjudicated (done), the recovered set triaged and merged (done), full mutation
 suite re-run after EACH cluster (not just at the end - P13 proved three times that a fix

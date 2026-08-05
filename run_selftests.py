@@ -58,6 +58,13 @@ AUX_GATES = (
     # of 94 mutations reported ALL CAUGHT. Measured at ~0.4s, so it belongs in the per-stop
     # path rather than CI-only.
     ("no-regression", ("tools", "no_regression.py"), ()),
+    # [P14 A3] A stale COPY of these hooks ran every `git push` on the author's machine for
+    # weeks - unbluff's own pushes included, gated by an outdated fail-open copy of unbluff's
+    # own gate - while `git status` here stayed clean, because the copy lived outside the repo.
+    # No gate in this repo read git's own wiring (core.hooksPath, .git/hooks), so nothing could
+    # see it. This one asks provenance instead of directory-equality, so it keeps working after
+    # the duplicate directory is deleted.
+    ("hook-provenance", ("tools", "hook_divergence_report.py"), ("--selftest",)),
 )
 
 # tools/*.py deliberately NOT gated here. Every name needs a reason, and the classification
@@ -66,7 +73,6 @@ NOT_A_GATE = {
     "mutation_check.py",            # a gate, but minutes-long: CI runs it as its own job
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
-    "hook_divergence_report.py",    # reporting
     "make_hook_screenshot.py",      # docs asset generation
 }
 
