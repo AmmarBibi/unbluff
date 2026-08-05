@@ -12,7 +12,14 @@ import os
 import sys
 import tempfile
 
-REPO = r"C:\Users\ammar\Downloads\unbluff"
+# DERIVED from this file's location, never hardcoded. It was an absolute Windows path, which was
+# survivable only while this file was an exempt measurement tool nobody ran but its author. The
+# moment it became AUX gate `corpus-scorer` (2026-08-06) it started running in CI on Linux and
+# macOS, where that path does not exist and the corpus import dies at module load - `exit 1,
+# ModuleNotFoundError: No module named 'cap_spelling_corpus'`, reproduced before this fix.
+# Promoting a tool to a gate changes where it runs; anything machine-specific in it becomes a
+# defect at that moment, not gradually.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tests"))
 import cap_spelling_corpus as corpus  # noqa: E402
 
@@ -94,6 +101,16 @@ def selftest():
     if got != ["n1", "n2"]:
         fails.append("overlapping NEGATIVE_CONTROLS handling is wrong: got %r, expected "
                      "['n1','n2'] - n1 must appear once, n2 must not be dropped" % (got,))
+
+    # REPO must be DERIVED, not a literal. Asserted structurally rather than by grepping this
+    # file for a path pattern - a guard that searches for a literal it contains is a defect this
+    # repo has already recorded once. A hardcoded path that happens to be correct on the author's
+    # machine passes every local check and only fails in CI, on the other two platforms.
+    want = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.normcase(REPO) != os.path.normcase(want):
+        fails.append("REPO is %r, not this file's own repo root %r. A machine-specific path in a "
+                     "GATE is red on every platform but one - measured: 'ModuleNotFoundError: "
+                     "No module named cap_spelling_corpus'" % (REPO, want))
 
     for f in fails:
         print("SELFTEST FAIL:", f)

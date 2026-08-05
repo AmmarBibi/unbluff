@@ -468,6 +468,11 @@ MUTATIONS = [
      [("        if hits[0] not in layers:\n            layers.append(hits[0])",
        "        for _h in hits:\n            if _h not in layers:\n                "
        "layers.append(_h)")], False),
+    ("tools/score_corpus", "B1p", "the corpus scorer goes back to a hardcoded absolute repo "
+     "path, which is correct on exactly one machine and red in CI on the other two platforms",
+     [("REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))",
+       "REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))")],
+     False),
     # [P14 B1] The scorer that grades the ship-blocker. It double-counted every negative control
     # and printed a denominator 23% too large; nothing noticed because measurement tools were
     # exempt from the gates. Reintroducing the double-count must go RED.
