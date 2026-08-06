@@ -51,6 +51,20 @@
         "description": "Run show-your-proof / meta-audit / memory-hygiene / fast-test in one process."
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/unbluff/hooks/piped_gate_guard.py\"",
+            "timeout": 10
+          }
+        ],
+        "id": "unbluff:piped-gate",
+        "description": "Block a Bash command that pipes a GATE into head/tail/grep, because the pipeline returns the last command's exit status and the gate's real result is discarded."
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",

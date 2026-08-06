@@ -160,7 +160,7 @@ stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
 skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK  hook-provenance: OK  mutation-anchors: OK
-all 30 selftests passed
+all 31 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

@@ -483,6 +483,27 @@ MUTATIONS = [
     ("cap_shapes", "B16", "an index bounds check inside a loop reads as a cap again",
      [("        if any(_references(o, loop_vars) for o in others):\n            continue",
        "        if False:\n            continue")], False),
+    # The piped-gate guard. Each of these reintroduces one half of the design: seeing nothing,
+    # or seeing too much. The second is the dangerous one - this hook BLOCKS, and a guard that
+    # blocks correct work is disabled within a week (B3-FP).
+    ("piped_gate_guard", "PG1", "the gate token is matched as a SUBSTRING again, so a quoted "
+     "argument naming a gate blocks a correct grep",
+     [('    if tok.endswith(".py"):', "    if True:")], False),
+    ("piped_gate_guard", "PG2", "pipefail / PIPESTATUS no longer protect the exit status, so "
+     "a command that already captures it is blocked anyway",
+     [("    if any(p in command for p in PROTECTED):\n        return []",
+       "    if False:\n        return []")], False),
+    ("piped_gate_guard", "PG3", "the LAST pipeline segment is examined too, so a gate NAME "
+     "appearing as an argument to the final consumer reads as a discarded gate",
+     [("    for i, segment in enumerate(segments[:-1]):",
+       "    for i, segment in enumerate(segments):")], False),
+    ("piped_gate_guard", "PG4", "the guard stops blocking and the discarded exit code ships",
+     [("    offenders = piped_gates(command)\n    if not offenders:\n        return 0",
+       "    offenders = piped_gates(command)\n    if True:\n        return 0")], False),
+    ("piped_gate_guard", "PG5", "the lexer stops treating punctuation as tokens, so a pipe "
+     "written without surrounding spaces - the common shape - goes invisible",
+     [("        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
+       "        lexer = shlex.shlex(command, posix=True, punctuation_chars=False)")], False),
     ("cap_types", "B17", "the positional floor swallows real caps",
      [("POSITIONAL_FLOOR = 5", "POSITIONAL_FLOOR = 50")], False),
     # C1-NEW acceptance criterion 2, which this build REINTRODUCED and the corpus could not

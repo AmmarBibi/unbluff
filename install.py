@@ -49,14 +49,16 @@ GROUP_EVENTS = {"rate_prompt": "UserPromptSubmit",
                 "hook_health": "SessionStart",
                 "duplicate_check": "SessionStart",
                 "stop_dispatcher": "Stop",
-                "posttooluse_dispatcher": "PostToolUse"}
+                "posttooluse_dispatcher": "PostToolUse",
+                "piped_gate": "PreToolUse"}
 
 # Every hook file the suite depends on (each dispatcher imports its sub-hooks in-process).
 REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py",
                   "show_your_proof.py", "meta_audit_on_stop.py", "memory_hygiene_guard.py",
                   "fast_test_on_stop.py", "post_tooluse_dispatcher.py", "plan_defer_guard.py",
                   "numbers_match_on_write.py", "duplicate_registration_check.py",
-                  "close_skills_guard.py", "usage_snip_prompt.py", "pre_push_gate.py")
+                  "close_skills_guard.py", "usage_snip_prompt.py", "pre_push_gate.py",
+                  "piped_gate_guard.py")
 
 
 def _cmd(script: str) -> str:
@@ -93,6 +95,19 @@ def desired_groups() -> dict:
             "hooks": [{"type": "command", "command": _cmd("stop_dispatcher.py"), "timeout": 300}],
             "id": ID_PREFIX + "stop-dispatcher",
             "description": "Run show-your-proof / meta-audit / memory-hygiene / fast-test in one process.",
+        },
+        # EXPLICITLY registered. run_selftests derives its gate roster by scanning for a
+        # --selftest, which is a BACKSTOP: two real gates were once invisible to name-pattern
+        # detection because their filenames did not advertise them. A hook nobody wires is a
+        # hook that does not exist, however green its selftest is.
+        "PreToolUse": {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": _cmd("piped_gate_guard.py"),
+                       "timeout": 10}],
+            "id": ID_PREFIX + "piped-gate",
+            "description": "Block a Bash command that pipes a GATE into head/tail/grep, "
+                           "because the pipeline returns the last command's exit status and "
+                           "the gate's real result is discarded.",
         },
         "PostToolUse": {
             "matcher": "Edit|Write|MultiEdit",
