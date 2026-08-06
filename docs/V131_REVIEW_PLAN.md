@@ -1838,7 +1838,7 @@ an id; it is BLIND to a source requirement stated only in prose with no id. That
 coverage limit of this pass, not a clearance - and it is exactly how `SC3` hid, since its own
 recommendation names an id (`B9`) that never existed.
 
-#### Meta-review, 2026-08-06 (B1) - one class recurring six times, and six clean probes
+#### Meta-review, 2026-08-06 (B1) - one class recurring SEVEN times, and six clean probes
 
 **The probes came back clean, and that is worth stating with its denominator.** Prior
 meta-reviews found MR-a (a gate fully disarmable with every test green) and MR-b (a
@@ -1867,3 +1867,33 @@ the exemption key -> three controls + mutation `#B19`; the duplicate definitions
 with the general check scheduled as `N3-DUP`; the corpus contradiction -> `score_corpus`
 derives and prints it every run + mutation `#B1c`. **The one fix with no mechanism behind it
 is the timing correction, which is MR-c above** - and it is the one that has recurred six times.
+
+#### ADVERSARIAL REVIEW of the six guard files, 2026-08-06 - run `wf_91a48c61-20d`
+
+**B1 is NOT clean. 30 CONFIRMED findings, 6 at HIGH after refuter correction.** Full write-up
+with every finding, its failure scenario and its refuter's reasoning:
+`docs/audits/adversarial_review_2026-08-06_guards.md`. 5 lenses (fail-open, disarmability,
+false-alarm, roster-rot, grader-integrity), refuters UNCAPPED, 49 agents, **0 repo writes**
+(tree diffed against a pre-run snapshot).
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **AR-GAP** | **HIGH** | **phase 1, BEFORE anything else in B1** | **The review is INCOMPLETE and must not be read as a clean bill. The `disarmability` lens NEVER RETURNED** - 4 of 5 lenses produced results. Its transcript ends at "Now the disarm probes on the never-probed units": it had finished `cap_shapes`/`cap_types` and stalled entering `hook_layers`, `check_mutation_anchors` and `score_corpus`, which have therefore had **no disarm probing at all**. That is the single most important lens for this repo - MR-a was a gate fully disarmable while every test stayed green. Per the skill's own rule, its findings are OPEN CANDIDATES, not absent. **Re-run that lens alone before B1's HIGH count is trusted.** The 44 findings that WERE produced were all adjudicated (44 of 44), so the gap is one whole lens, not a capped fan-out |
+| **AR-1** | **HIGH** | phase 1 | **The grammar-closed claim - the whole design - is FALSE as implemented.** Two independent lenses landed on it. VERIFIED BY HAND: **`out[12:] = []` is INVISIBLE while its exact semantic twin `del out[12:]` is a shape**, because the slice-assignment Store path is never inspected. The fail-open lens reports 12 silent-shortening operations producing ZERO sites. This is precisely the disease that got the predecessor reverted, one level up: not an unenumerated cap SPELLING but an unenumerated shortening OPERATION. The claim in the module docstring and in the B1 row must be corrected, not just the code |
+| **AR-2** | **HIGH** | phase 1, with B1-SCOPE | **86% false-positive rate on ordinary correct Python.** The false-alarm lens measured the guard against real third-party code. B3-FP's lesson is that a guard which fires on correct code gets disabled - strictly worse than none. This QUANTIFIES B1-SCOPE and B1-C2FLOW, which were recorded as unmeasured, and it means widening the sweep beyond `hooks/` is blocked, not merely deferred |
+| **AR-3** | **HIGH** | phase 1 | `_routed()` is a two-name roster (`keep`/`render`) that exempts an ENTIRE function scope, so one sanctioned call disarms every unrelated cap in the same function. A roster-shaped fail-open inside the guard built to replace roster-shaped fail-opens |
+| **AR-4** | **HIGH** | phase 1 | **A dead branch the day it landed** - the index-bounds-check exclusion is unreachable for every `while` loop, because the `While` path calls `_size_test_target(node.test, set())` with an empty `loop_vars`. This is acceptance criterion 3 (`B1-AC3`) not merely unverified but **VIOLATED**, and AC3 was the one criterion this session scheduled instead of checking |
+| **AR-5** | **HIGH** | phase 1 | `_name_of` collapses an attribute chain to its root, so any method calling `self.<anything>.append()` marks `self` as a collection - clause 1 mis-typing at the root of a very common shape |
+| **AR-6** | **MEDIUM x23, LOW x6** | phase 1-2 | The remaining 29 confirmed findings, each with a refuter verdict, in the audit doc. They cluster into: exemption granularity (function-level, not site-level), `exemption_problems()` failing open (it audits which keys were SEEN, not which VERDICTS would change), `score_corpus.main()` being unable to fail, `run_entry` making `rel_path` decorative, closed callee-name rosters, and four shipped docstrings quoting corpus scores that are now wrong |
+| **AR-7** | - | **FIXED 2026-08-06** | **MR-c's EIGHTH instance, in shipped code, found by the review.** `capped_report.py` carried "Measured 2026-08-02: 0.20s, under 1% of the cap" and never updated it when the detector was rebuilt. Re-measured on a quiet box, interleaved against a control at 0.89x: **1.412s median (n=5, 1.375-1.462)**, i.e. ~7x stale. **The reviewer reported it as 20x stale from a 3.8-4.7s reading taken while five review agents loaded the box** - the finding was right and its magnitude was an A8 confound, so the corrected comment records the controlled figure and says why. Both halves of this repo's two timing lessons, in one finding |
+
+**What this changes about the ship gate.** Nothing about the arithmetic - all 11 HIGH in the
+work-order table were already open. But B1's own 4 HIGH are now joined by **6 more confirmed
+HIGH from the review plus AR-GAP**, and none of them can be counted into the 44-row table, the
+class family, the source-coverage bucket, or the B1 build bucket. **This is a FIFTH accounting
+system: the adversarial-review findings.** They must not be summed with any of the other four.
+
+**The honest summary of B1's status: BUILT, MEASURED AT THE CORPUS CEILING, AND NOT CORRECT.**
+A corpus score of 102 of 105 with zero false positives is exactly what this repo means when it
+says green gates on never-reviewed code are the absence of evidence - the corpus had no entry
+for any of the six HIGH findings above, so it could not move when they were present.

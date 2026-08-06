@@ -145,8 +145,21 @@ def selftest() -> int:
         if not any(o.startswith("planted2:") for o in planted):
             fails.append("slicing_offenders cannot see a planted collection cap")
 
-    # [P14 D1] default share. Measured 2026-08-02: 0.20s, under 1% of the cap. This is the
-    # hook the 36s regression happened in, which is why it is wired first.
+    # [P14 D1] default share. This is the hook the 36s regression happened in, which is why it
+    # is wired first.
+    #
+    # Re-measured 2026-08-06 after C1-NEW: **1.412s median (n=5, 1.375-1.462)**, interleaved
+    # against `check_readme_fresh` as a control at 0.088s median vs the 0.099s M1 characterised
+    # (0.89x, so the box was idle). 8.9x headroom inside the 12.50s share.
+    #
+    # The figure this replaces - "Measured 2026-08-02: 0.20s, under 1% of the cap" - was true
+    # when written and went ~7x stale the moment the detector was rebuilt, unnoticed, in the
+    # same session that corrected two other uncontrolled timing claims. That is MR-c's class
+    # again, in shipped code, and it is the reason MR-c is scheduled as a HOOK rather than as
+    # another reminder. An adversarial reviewer found this one and reported it as 20x stale
+    # from a 3.8-4.7s reading taken while five review agents were loading the box - the
+    # finding was right and its magnitude was an A8 confound, which is why the number above
+    # is the controlled one.
     fails += selftest_budget.report(name="capped_report")
     for f_ in fails:
         print("SELFTEST FAIL:", f_)
