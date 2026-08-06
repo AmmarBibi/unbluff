@@ -282,6 +282,31 @@ def _script_args(h: dict) -> list[str]:
     return [a for a in (h.get("args") or []) if isinstance(a, str) and a.strip()]
 
 
+# [HB-1] Hook commands are run BY A SHELL, so its builtins are perfectly valid executables even
+# though shutil.which() - which searches PATH for a FILE - cannot see them. `echo` is the
+# canonical trivial hook and is a cmd.exe builtin on Windows, so a WORKING config was reported
+# as broken on the one line the user reads at every SessionStart.
+#
+# These are FROZEN EXTERNAL VOCABULARIES, not rosters over this repo's code. A roster rots when
+# it tracks something that changes; cmd.exe's builtin set and POSIX sh's are fixed by their
+# specifications. A name absent here still has to resolve on PATH, so the check keeps its teeth.
+_CMD_BUILTINS = frozenset("assoc break call cd chdir cls color copy date del dir echo endlocal "
+                          "erase exit for ftype goto if md mkdir mklink move path pause popd "
+                          "prompt pushd rd rem ren rename rmdir set setlocal shift start time "
+                          "title type ver verify vol".split())
+_SH_BUILTINS = frozenset(": . [ alias bg break cd command continue echo eval exec exit export "
+                         "false fg getopts hash jobs kill printf pwd read readonly return set "
+                         "shift test times trap true type ulimit umask unalias unset wait".split())
+
+
+def is_shell_builtin(exe: str) -> bool:
+    """True iff the shell that runs hook commands would resolve `exe` without touching PATH."""
+    if os.name == "nt":
+        # cmd.exe is case-insensitive, and `echo.` / `echo:` are the same builtin.
+        return exe.lower().rstrip(".:") in _CMD_BUILTINS
+    return exe in _SH_BUILTINS
+
+
 def check_config(cfg: dict) -> tuple[int, list[str]]:
     """(n_commands, problems) for a parsed settings dict.
 
@@ -339,7 +364,7 @@ def check_config(cfg: dict) -> tuple[int, list[str]]:
                 if os.path.isabs(exe):
                     if not os.path.exists(exe):
                         problems.append(f"{event}: missing executable {exe}")
-                elif shutil.which(exe) is None:
+                elif shutil.which(exe) is None and not is_shell_builtin(exe):
                     problems.append(f"{event}: executable not on PATH: {exe}")
                 for tok in tokens[1:] + _script_args(h):
                     if not tok.lower().endswith(_SCRIPT_EXTS):
@@ -523,6 +548,48 @@ def _selftest_malformed_config() -> list:
     else:
         if not any("not a string" in str(p_) for p_ in problems):
             fails.append("a non-string hook command was not reported: %r" % (problems,))
+    return fails
+
+
+def _selftest_shell_builtin_is_not_missing() -> list:
+    """[HB-1] A hook command the shell CAN run must not be reported as a missing executable.
+
+    Claude Code runs a hook command through a shell, so the shell's builtins are valid even
+    though shutil.which() - which looks for a FILE on PATH - cannot see them. `echo` is the
+    canonical trivial hook and is a cmd.exe builtin on Windows, so this hook reported a WORKING
+    config as broken on the one line the user reads at every SessionStart. B3-FP's rule: a
+    guard that fires on a correct config gets disabled, which is strictly worse than none.
+
+    MEASURED before fixing: check_config({"Stop": [... "echo other"]}) returned
+    ['Stop: executable not on PATH: echo'] on win32 while `echo other` ran with rc=0 through
+    the shell. It stayed green in CI because the integration job is ubuntu-only, where
+    /bin/echo is a real file - P13 F's shape, already fixed for the mutation jobs with a
+    Windows mirror and never applied here.
+
+    Both directions are asserted. A guard that stops reporting a genuinely missing executable
+    would "pass" this test while being useless, which is the trade this repo never makes.
+    """
+    fails = []
+    # Platform-specific ON PURPOSE. `echo` is the real-world case and is builtin-only on
+    # Windows, but /bin/echo IS a file on POSIX, so asserting `echo` there would pass through
+    # shutil.which() and prove nothing. `export` cannot be an external binary - it has to be
+    # builtin to change the shell's own environment - so it exercises the same branch. The
+    # POSIX half is therefore proven by CI or nowhere, which is why the matrix runs three OSes.
+    builtin = "echo" if os.name == "nt" else "export"
+    _n, probs = check_config({"hooks": {"Stop": [{"matcher": "*", "id": "someone-else:keep",
+                              "hooks": [{"type": "command",
+                                         "command": "%s other" % builtin}]}]}})
+    if any("not on PATH" in str(p_) for p_ in probs):
+        fails.append("a shell-builtin hook command (`%s other`) is reported as a missing "
+                     "executable: %r - a correct config reads as broken at every SessionStart"
+                     % (builtin, probs))
+    # ...and the check must keep its teeth.
+    _n, probs = check_config({"hooks": {"Stop": [{"matcher": "*", "id": "x",
+                              "hooks": [{"type": "command",
+                                         "command": "ub-definitely-not-a-real-exe --go"}]}]}})
+    if not any("not on PATH" in str(p_) for p_ in probs):
+        fails.append("a genuinely missing executable was NOT reported (%r) - the builtin "
+                     "exemption swallowed the real case too" % (probs,))
     return fails
 
 
@@ -768,6 +835,7 @@ def selftest() -> int:
         if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
             fails.append("progress file not cleared after a completed sweep")
     fails += _selftest_malformed_config()
+    fails += _selftest_shell_builtin_is_not_missing()
     # [P14 D1] share 0.40 = 10.0s. Measured 2026-08-02: 6.53s, 26% of the cap. It runs OTHER
     # hooks' selftests inside its own, so it is legitimately heavier than a leaf hook and
     # carries a recorded share rather than the 0.50 default.

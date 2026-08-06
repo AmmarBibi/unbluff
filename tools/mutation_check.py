@@ -556,6 +556,26 @@ MUTATIONS = [
      "the UNKNOWN state, so a shallow checkout BLOCKS on a waiver it never examined",
      [('        if res is not None and unanswerable and res.get("skipped") == unanswerable:',
        "        if False:")], False),
+    # [HB-1 2026-08-06] The shell-builtin false positive, both directions. Found by running
+    # tests/test_integration.py ON WINDOWS - the integration CI job is ubuntu-only, where
+    # /bin/echo is a real file, so this shipped green. P13 F's shape, already fixed for the
+    # mutation jobs with a Windows mirror and never applied to the integration job.
+    #
+    # NOTE on what is NOT pinned here: the A2 twin-roster fix lives in tests/test_integration.py,
+    # which has no --selftest, so `verify` cannot reach it - the harness verifies units through
+    # their selftest. The whole 30-scenario integration suite is therefore mutation-covered by
+    # NOTHING: no mutation anywhere proves any of its scenarios can fail. Rowed for v1.4, not
+    # papered over with a mutation that would report CAUGHT without running it.
+    ("hook_health_check", "HB1a", "a shell builtin (`echo` on Windows, `export` on POSIX) is "
+     "reported as a missing executable again, so a correct config reads as broken on the one "
+     "line the user sees at every SessionStart",
+     [("                elif shutil.which(exe) is None and not is_shell_builtin(exe):",
+       "                elif shutil.which(exe) is None:")], False),
+    ("hook_health_check", "HB1b", "the builtin exemption widens to EVERY name, so a genuinely "
+     "missing executable stops being reported - the trade the fix must not make",
+     [('    if os.name == "nt":\n        # cmd.exe is case-insensitive',
+       "    if True:\n        return True\n    if os.name == \"nt\":\n"
+       "        # cmd.exe is case-insensitive")], False),
     # [P14 meta-review] The two defects the 2026-08-06 meta-review PROBED out of this session's
     # own work. Both were invisible to reading and to every existing test.
     ("tools/check_mutation_anchors", "MRa", "the anchor gate's own DECISION is disarmed - a "

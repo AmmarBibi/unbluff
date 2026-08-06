@@ -26,6 +26,23 @@ def _install_skill_names():
     return list(mod.SKILL_NAMES)
 
 
+def _install_group_ids():
+    """The hook-group ids install.py actually wires - read from install.py, never re-listed.
+
+    A2 asserted a hardcoded `== 4` while `_install_skill_names` above already documented why
+    that is wrong ("a second copy of this list is a twin waiting to drift"). It drifted the day
+    `piped_gate_guard` made it five, and main went red. A COUNT is also weaker than it looks:
+    it cannot tell a missing group from an unexpected extra one, so this returns the ids and
+    A2 compares sets.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_ub_install_groups",
+                                                  os.path.join(REPO, "install.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return {g["id"] for g in mod.desired_groups().values()}
+
+
 def _close_guard_required_skills():
     """The skills close_skills_guard demands, read from the hook itself."""
     import importlib.util
@@ -81,8 +98,11 @@ def main():
         s = json.load(open(settings_path))
         ids = [g.get("id") for gs in s["hooks"].values() for g in gs]
         record("A1 install exit 0", rc == 0, f"rc={rc} err={err[:200]}")
-        record("A2 four unbluff groups wired",
-               sum(1 for i in ids if str(i).startswith("unbluff:")) == 4, str(ids))
+        want = _install_group_ids()
+        got = {i for i in ids if str(i).startswith("unbluff:")}
+        record(f"A2 every unbluff group install.py declares is wired ({len(want)}, derived)",
+               got == want,
+               f"missing={sorted(want - got)} unexpected={sorted(got - want)} all={sorted(ids)}")
         record("A3 preexisting hook preserved", "someone-else:keep" in ids)
         record("A4 env preserved", s.get("env", {}).get("FOO") == "bar")
         # [finding 31] DERIVED from install.SKILL_NAMES, never a hand-written list. Three of
