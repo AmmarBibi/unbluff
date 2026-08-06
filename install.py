@@ -58,6 +58,7 @@ REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py"
                   "fast_test_on_stop.py", "post_tooluse_dispatcher.py", "plan_defer_guard.py",
                   "numbers_match_on_write.py", "duplicate_registration_check.py",
                   "close_skills_guard.py", "usage_snip_prompt.py", "pre_push_gate.py",
+                  "timing_claim_guard.py",
                   "piped_gate_guard.py")
 
 

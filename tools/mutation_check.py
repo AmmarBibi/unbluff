@@ -504,6 +504,23 @@ MUTATIONS = [
      "written without surrounding spaces - the common shape - goes invisible",
      [("        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
        "        lexer = shlex.shlex(command, posix=True, punctuation_chars=False)")], False),
+    # [MR-c] The timing-claim guard. TC1 is the FALSE-ALARM direction and the one that decides
+    # whether this hook survives contact with its owner: the first design fired on ~65 of 82
+    # duration mentions and would have been switched off in a week.
+    ("timing_claim_guard", "TC1", "the measurement-verb requirement is dropped, so every "
+     "declared cap and timeout is reported as an uncontrolled claim",
+     [("        if not (MEASUREMENT_VERBS.search(line) or AGAINST_A_BUDGET.search(line)):",
+       "        if False:")], False),
+    ("timing_claim_guard", "TC2", "a CONTROLLED claim is reported anyway, so writing the "
+     "median and the control earns a nag instead of silence",
+     [("        if CONTROL_MARKERS.search(line):", "        if False:")], False),
+    ("timing_claim_guard", "TC3", "the decision goes permanently silent (MR-a's one-token disarm)",
+     [('    if not found:\n        return False, ""', '    if True:\n        return False, ""')],
+     False),
+    ("timing_claim_guard", "TC4", "the once-per-session marker stops being honoured, so the "
+     "hook nags on every doc edit",
+     [("    if os.path.exists(marker):\n        return 0", "    if False:\n        return 0")],
+     False),
     ("cap_types", "B17", "the positional floor swallows real caps",
      [("POSITIONAL_FLOOR = 5", "POSITIONAL_FLOOR = 50")], False),
     # C1-NEW acceptance criterion 2, which this build REINTRODUCED and the corpus could not

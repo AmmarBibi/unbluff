@@ -32,6 +32,10 @@ LEDGER_MAX_BYTES = 512 * 1024  # rotate to .1 beyond this
 HOOKS = (
     ("plan_defer_guard", "defer"),
     ("numbers_match_on_write", "numbers"),
+    # Joins the dispatcher rather than wiring its own PostToolUse entry: every hook command
+    # costs a process per matching call, and this one is the third guard on the same event
+    # reading the same payload. Same reason the other two are here.
+    ("timing_claim_guard", "timing"),
 )
 
 
