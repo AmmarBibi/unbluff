@@ -1897,3 +1897,38 @@ system: the adversarial-review findings.** They must not be summed with any of t
 A corpus score of 102 of 105 with zero false positives is exactly what this repo means when it
 says green gates on never-reviewed code are the absence of evidence - the corpus had no entry
 for any of the six HIGH findings above, so it could not move when they were present.
+
+#### CORRECTION to the adversarial-review rows above, same day - `AR-GAP` is WITHDRAWN
+
+The run `wf_91a48c61-20d` **COMPLETED**. All 5 lenses returned; `coverage_complete: true`,
+`dropped: 0`. The rows above were written from a journal snapshot taken while the run was
+still live, and are superseded by these figures:
+
+| | reported above | ACTUAL |
+|---|---|---|
+| lenses returned | 4 of 5 | **5 of 5** |
+| findings produced | 44 | **59** (fail-open 7, false-alarm 18, grader-integrity 8, roster-rot 11, **disarmability 15**) |
+| adjudicated | 44 | **59**, dropped 0 |
+| CONFIRMED | 30 | **42** |
+| confirmed HIGH | 6 | **10** |
+| agents | 49 | 64, 0 errors, still **0 repo writes** |
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **AR-GAP** | - | **WITHDRAWN, same day** | Claimed the `disarmability` lens never returned and its findings must be treated as open candidates. FALSE: it returned 15 findings, 4 of them confirmed HIGH. The claim came from counting `started` vs `result` lines in `journal.jsonl` **while the workflow was still running** and reading the shortfall as a stall. **This is the same class as MR-c and MR-d - a single reading of a moving quantity, asserted as a fact** - and it is the third instance in one session, after the 1.08s timing and the date drift. The transferable rule: a coverage or progress number read from a live artifact is not a measurement until the producer has exited. Withdrawn rather than deleted, per the N1 precedent |
+| **AR-8** | **HIGH** | **phase 1, at the very front** | **MR-a REPRODUCED, one level up, in the LIVE cap guard.** The `disarmability` lens found that the cap-guard DECISION is a one-token disarm with all 30 gates green. **This directly refutes the claim recorded earlier this session that "6 of 6 disarm probes were CAUGHT, so the guards are not MR-a-disarmable"** - those 6 probes were hand-written by the same agent that wrote the guard, and a more thorough independent lens found disarms they did not cover. The shared-assumption failure the whole adversarial-review method exists to break, demonstrated against my own probes |
+| **AR-9** | **HIGH** | phase 1 | **`check_mutation_anchors.main()` is untested: two one-token edits disarm the anchor gate and it still prints OK.** That gate is M1, built specifically so a disarmed mutation costs 0.087s to find instead of a full sweep - and it is itself disarmable. MR-a's exact shape in the guard written after MR-a |
+| **AR-10** | **HIGH** | phase 1 | Clause 4's raise-exemption can be widened to exempt any function containing a conditional `raise`, with every gate green |
+| **AR-11** | **HIGH** | phase 1 | Four clause-1/2 vocabulary widenings each blind the guard with all 30 gates green - the `_SCALAR_CALLS` / `_AGGREGATORS` rosters are load-bearing and unpinned |
+
+**AR-1's severity, corrected by its own refuter and worth carrying.** The finder rated it
+CRITICAL over "12 silent-shortening operations". The refuter reproduced the core with a clean
+A/B - `del out[12:]` flags, `out[12:] = []` does not, same line, same file - and then cut the
+claim down: 2 of the 12 are impossible on the stated 3.8 floor, ~7 are contrived, **the
+credible core is ONE idiomatic truncation plus two marginal ones**. It also established that
+**the predecessor misses it too**, so this is a SHARED gap and not a regression - the rebuild
+strictly dominates on this family. HIGH, not CRITICAL, and "12 operations" should not be
+requoted.
+
+**Final status: 42 confirmed findings, 10 HIGH.** B1 is BUILT, at the corpus ceiling, and NOT
+CORRECT.
