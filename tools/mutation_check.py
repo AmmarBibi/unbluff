@@ -583,7 +583,10 @@ MUTATIONS = [
     # their selftest. The whole 30-scenario integration suite is therefore mutation-covered by
     # NOTHING: no mutation anywhere proves any of its scenarios can fail. Rowed for v1.4, not
     # papered over with a mutation that would report CAUGHT without running it.
-    ("hook_health_check", "HB1a", "a shell builtin (`echo` on Windows, `export` on POSIX) is "
+    # The fixture DERIVES its builtin from the box rather than naming one per platform: the
+    # first version said "`echo` on Windows" and came back SURVIVED on windows-latest, whose
+    # PATH carries Git for Windows' echo.EXE. Description kept in step with that.
+    ("hook_health_check", "HB1a", "a shell builtin invisible to shutil.which() on THIS box is "
      "reported as a missing executable again, so a correct config reads as broken on the one "
      "line the user sees at every SessionStart",
      [("                elif shutil.which(exe) is None and not is_shell_builtin(exe):",
