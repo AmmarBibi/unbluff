@@ -78,7 +78,20 @@ _ALLOW_TAGS = ("scheduled", "slotted", "decided", "done", "deprioritized", "clos
                "set-aside", "retired", "declined", "no-go", "historical", "superseded", "backlog")
 _TAG_ALT = "|".join(rf"\b{re.escape(t)}\b" for t in _ALLOW_TAGS)
 _ALLOW_CAPS_RE = re.compile("|".join(rf"\b{re.escape(t.upper())}\b" for t in _ALLOW_TAGS))
-_ALLOW_BRACKET_RE = re.compile(rf"[(\[][^)\]]*(?:{_TAG_ALT})[^)\]]*[)\]]", re.IGNORECASE)
+# [W-MA1] The bracket must BE the tag, not merely CONTAIN the word. The `[^)\]]*` that used to
+# sit before the alternation let an allow-word appear anywhere inside any parenthesis, so
+# "- PARKED: port the (closed-loop) controller" read as a decision tag: a genuine hiding line
+# in the USER's own plan, silently suppressed AND subtracted from the reported total. This is
+# P13 B3's defect surviving in the branch P13 B3 did not cover.
+#
+# Two constraints, and the SECOND is the one that matters. Anchoring the tag to the head of the
+# bracket is not enough on its own - the review that found this prescribed exactly that, and it
+# still matches "(closed-loop)", because `closed` IS at the head. MEASURED against a 12-case
+# matrix before adopting: the prescribed form scored 7 of 12 and failed on its own headline
+# example. So the tag must also be FOLLOWED by a separator or the bracket's end, which is what
+# separates the tag `(closed)` from the compound word `(closed-form)`.
+_ALLOW_BRACKET_RE = re.compile(rf"[(\[]\s*(?:{_TAG_ALT})(?:[\s:,;][^)\]]{{0,40}})?\s*[)\]]",
+                               re.IGNORECASE)
 
 
 def has_decision_tag(line: str) -> bool:
@@ -282,6 +295,24 @@ def _selftest_line_cases() -> list[str]:
         ("- DEFERRED: drop the retired v1 endpoints", True),
         ("- TODO (done 2026-06-30): shipped", False),  # bracketed tag still suppresses
         ("- DEFERRED SCHEDULED for the 2026-08 milestone", False),   # all-caps tag, unbracketed
+        # [W-MA1] The BRACKETED half of the same defect. P13 B3 fixed the unbracketed cases
+        # directly above and left this branch with no fixture at all: _ALLOW_BRACKET_RE
+        # accepted an allow-word ANYWHERE inside the brackets, so ordinary prose in
+        # parentheses read as a decision TAG - and a hiding line suppressed this way is also
+        # subtracted from the total, so the report under-counts as well as under-reports.
+        # These fire through is_hiding_line(), the DECISION, not through the regex.
+        ("- PARKED: port the (closed-loop) controller", True),
+        ("- TODO: retry when the (done-for-now) flag flips", True),
+        ("- PARKED: rewrite the (scheduled-task) runner", True),
+        ("- TODO: audit every (historical-import) path", True),
+        ("- PARKED: see notes (the loop is closed, mostly) about timing", True),
+        # ...and a REAL bracketed tag must still suppress, in every shape the hook's own
+        # message tells the user to write. Without these the fix could simply delete the
+        # bracket branch and "pass".
+        ("- PARKED: port the controller (backlog)", False),
+        ("- PARKED: port the controller [decided: no-go]", False),
+        ("- TODO: rewrite the parser (scheduled for v1.4)", False),
+        ("- PARKED: skip (set-aside, revisit in Q3)", False),
     ]
     fails = [f"is_hiding_line({line!r}) != {want}"
              for line, want in cases if is_hiding_line(line) is not want]

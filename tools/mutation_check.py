@@ -423,6 +423,23 @@ MUTATIONS = [
     ("meta_audit_on_stop", "B3", "a decision tag is matched anywhere in the line again",
      [("    return bool(_ALLOW_CAPS_RE.search(line) or _ALLOW_BRACKET_RE.search(line))",
        "    return bool(re.search(_TAG_ALT, line, re.IGNORECASE))")], False),
+    # [W-MA1 2026-08-06] The bracket branch, which the P13 B3 pass left with no fixture and no
+    # mutation at all. TWO entries because the fix has two independent constraints and the
+    # SECOND is the one the reviewer's own prescribed fix got wrong.
+    ("meta_audit_on_stop", "WMA1a", "the bracket branch goes back to matching an allow-word "
+     "ANYWHERE inside any parenthesis, so '(closed-loop)' in a user's own plan reads as a "
+     "decision tag and the hiding line is suppressed AND subtracted from the total",
+     [('_ALLOW_BRACKET_RE = re.compile(rf"[(\\[]\\s*(?:{_TAG_ALT})(?:[\\s:,;][^)\\]]{{0,40}})?'
+       '\\s*[)\\]]",\n                               re.IGNORECASE)',
+       '_ALLOW_BRACKET_RE = re.compile(rf"[(\\[][^)\\]]*(?:{_TAG_ALT})[^)\\]]*[)\\]]", '
+       're.IGNORECASE)')], False),
+    ("meta_audit_on_stop", "WMA1b", "the tag is anchored to the head of the bracket but is no "
+     "longer required to END there - the fix the review PRESCRIBED, which still reads "
+     "'(closed-loop)' as a tag and scored 7 of 12 on the measured case matrix",
+     [('_ALLOW_BRACKET_RE = re.compile(rf"[(\\[]\\s*(?:{_TAG_ALT})(?:[\\s:,;][^)\\]]{{0,40}})?'
+       '\\s*[)\\]]",\n                               re.IGNORECASE)',
+       '_ALLOW_BRACKET_RE = re.compile(rf"[(\\[]\\s*(?:{_TAG_ALT})[^)\\]]{{0,32}}[)\\]]", '
+       're.IGNORECASE)')], False),
     ("meta_audit_on_stop", "B4", "_is_superseded back to a substring match anywhere in the head",
      [("    return any(_SUPERSEDED_DECL_RE.match(line) for line in text.splitlines()[:5])",
        '    return "superseded" in "\\n".join(text.splitlines()[:5]).lower()')], False),
