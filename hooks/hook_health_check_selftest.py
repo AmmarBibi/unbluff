@@ -82,19 +82,29 @@ def _selftest_shell_builtin_is_not_missing() -> list:
     would "pass" this test while being useless, which is the trade this repo never makes.
     """
     fails = []
-    # Platform-specific ON PURPOSE. `echo` is the real-world case and is builtin-only on
-    # Windows, but /bin/echo IS a file on POSIX, so asserting `echo` there would pass through
-    # shutil.which() and prove nothing. `export` cannot be an external binary - it has to be
-    # builtin to change the shell's own environment - so it exercises the same branch. The
-    # POSIX half is therefore proven by CI or nowhere, which is why the matrix runs three OSes.
-    builtin = "echo" if os.name == "nt" else "export"
-    _n, probs = check_config({"hooks": {"Stop": [{"matcher": "*", "id": "someone-else:keep",
-                              "hooks": [{"type": "command",
-                                         "command": "%s other" % builtin}]}]}})
-    if any("not on PATH" in str(p_) for p_ in probs):
-        fails.append("a shell-builtin hook command (`%s other`) is reported as a missing "
-                     "executable: %r - a correct config reads as broken at every SessionStart"
-                     % (builtin, probs))
+    # DERIVED, not named. The first version hardcoded `echo` on Windows and `export` on POSIX,
+    # and CI proved the Windows half wrong: GitHub's windows-latest runners carry Git for
+    # Windows' usr/bin on PATH, so shutil.which("echo") FINDS echo.exe there. The unfixed code
+    # never flagged it, so reverting the fix changed nothing and mutation HB1a came back
+    # SURVIVED - a test that could not fail, on the very machine it was written to protect.
+    #
+    # Which builtins are invisible to which() is a property of the BOX, so the fixture asks the
+    # box instead of guessing. `.isalpha()` only to keep the message readable.
+    _pool = sorted(b for b in (_CMD_BUILTINS if os.name == "nt" else _SH_BUILTINS)
+                   if b.isalpha() and shutil.which(b) is None)
+    if not _pool:
+        # An extractor that finds nothing must prove it looked in the right place. With no
+        # such token the assertion below is vacuous, and vacuous must never read as passing.
+        fails.append("no shell builtin on this machine is invisible to shutil.which(), so the "
+                     "branch this test exists for was never exercised - it proved nothing")
+    for builtin in _pool[:1]:
+        _n, probs = check_config({"hooks": {"Stop": [{"matcher": "*", "id": "someone-else:keep",
+                                  "hooks": [{"type": "command",
+                                             "command": "%s other" % builtin}]}]}})
+        if any("not on PATH" in str(p_) for p_ in probs):
+            fails.append("a shell-builtin hook command (`%s other`) is reported as a missing "
+                         "executable: %r - a correct config reads as broken at every "
+                         "SessionStart" % (builtin, probs))
     # ...and the check must keep its teeth.
     _n, probs = check_config({"hooks": {"Stop": [{"matcher": "*", "id": "x",
                               "hooks": [{"type": "command",
