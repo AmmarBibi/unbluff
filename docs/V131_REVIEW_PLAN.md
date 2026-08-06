@@ -1513,6 +1513,14 @@ did not mention it.
 
 #### SHIP GATE STATUS, verified 2026-08-05 - v1.3.1 must NOT ship
 
+> **SUPERSEDED 2026-08-06 by the RE-SCOPED ship gate.** The zero-HIGH gate this section
+> enforces was retired by decision on 2026-08-06. Everything below remains TRUE as arithmetic -
+> the 11 HIGH are still open and still counted - but "11 HIGH open" no longer means "does not
+> ship". The current gate, its rule, and the SHIP-BLOCKING / V1.4-BACKLOG classification of all
+> 21 open HIGH are in **"RE-SCOPED SHIP GATE, 2026-08-06"** at the end of this file. Read that
+> one. This section is kept for the arithmetic and the two-accounting-systems warning, both of
+> which the re-scope does not change.
+
 Mechanically re-counted after this session's changes, because the ship gate is the one number
 nobody should take on trust:
 
@@ -1942,4 +1950,142 @@ despite being written down:
 |---|---|---|---|
 | **MR-c** | - | **BUILT 2026-08-06 (`5b6986a`)** | `hooks/timing_claim_guard.py`. Flags a duration written as MEASURED with no control marker. Narrow BY MEASUREMENT: the first design would have fired on ~65 of 82 duration mentions in this plan and been disabled in a week; the shipped design fires on **18 of 109** duration lines across all 16 docs (17%), and the fires are genuine. Joins `post_tooluse_dispatcher`, advisory, once per session. TC1-TC4 CAUGHT. **A dead branch turned harmful while building it**: a DECLARATION roster added as "belt and braces" was unreachable on arrival, then began vetoing every match of the second trigger. AR-4's class, one step later, inside the guard written to enforce measurement discipline |
 | **PG** | - | **BUILT 2026-08-06 (`3cea480`)** | `hooks/piped_gate_guard.py`, the suite's first PreToolUse hook. Blocks a Bash command piping a GATE into `head`/`tail`/`grep`, because the pipeline returns the last command's status and the gate's real result is discarded. Caught its own author 4 times in one session's command history, 0 false positives on 15 verbatim commands. Two defects found in it BY MEASURING: substring matching blocked a quoted grep argument, and plain `shlex.split()` was blind to `2>&1\|head` with no spaces - it caught 2 of 4 real offenders and was silently blind to the rest. PG1-PG5 CAUGHT |
-| **A8-PP** | **MEDIUM** | **phase 0, with A8** | **The pre-push gate now BLOCKS this repo's own pushes, and whether that is correct is UNMEASURABLE on this machine today.** The suite grew 30 -> 32 gates; `.claude/pre-push.cmd` caps it at 120s; the gate refused two verified commits with "tests exceeded 120s and were killed, so this push is NOT verified". **The gate is behaving correctly** - it declined to certify what it could not run. But every timing reading taken to adjudicate it is confounded: `run_selftests` measured 113.7s, 180.5s and 212.7s across runs while the CONTROL (`check_readme_fresh`, historically 0.099s) read **3.0x, 3.6x and 7.8x**, and `Win32_Processor` reports **LoadPercentage 100** with this session's own python processes idle. The suite failure in those runs was `meta_audit_on_stop` - **A8's named case, verbatim**. So: the cap may genuinely be too low for a 32-gate suite, or the box may simply be busy, and NOTHING here distinguishes them. **Not raising the cap on a confounded number, and not pushing with `--no-verify`** - both would be choosing a conclusion the evidence does not support. Re-measure on a genuinely quiet box, then either raise the cap deliberately or find what got slower. This is the third distinct consequence of A8 in one session, after 14 deleted mutations and a reviewer misreading a 1.4s selftest as 3.8s |
+| **A8-PP** | **RESOLVED 2026-08-06 - see the re-scoped ship-gate section below** | **phase 0, with A8** | **The pre-push gate now BLOCKS this repo's own pushes, and whether that is correct is UNMEASURABLE on this machine today.** The suite grew 30 -> 32 gates; `.claude/pre-push.cmd` caps it at 120s; the gate refused two verified commits with "tests exceeded 120s and were killed, so this push is NOT verified". **The gate is behaving correctly** - it declined to certify what it could not run. But every timing reading taken to adjudicate it is confounded: `run_selftests` measured 113.7s, 180.5s and 212.7s across runs while the CONTROL (`check_readme_fresh`, historically 0.099s) read **3.0x, 3.6x and 7.8x**, and `Win32_Processor` reports **LoadPercentage 100** with this session's own python processes idle. The suite failure in those runs was `meta_audit_on_stop` - **A8's named case, verbatim**. So: the cap may genuinely be too low for a 32-gate suite, or the box may simply be busy, and NOTHING here distinguishes them. **Not raising the cap on a confounded number, and not pushing with `--no-verify`** - both would be choosing a conclusion the evidence does not support. Re-measure on a genuinely quiet box, then either raise the cap deliberately or find what got slower. This is the third distinct consequence of A8 in one session, after 14 deleted mutations and a reviewer misreading a 1.4s selftest as 3.8s |
+
+## RE-SCOPED SHIP GATE, 2026-08-06 - the gate a future reader must use
+
+**THE GATE, by decision, replacing zero-HIGH:**
+
+> v1.3.1 ships when there is **no HIGH in the SHIPPED HOOK PATH** - no defect a user can hit at
+> runtime on their own machine, through a hook that actually fires for them.
+
+Everything else - a gate disarmable only by an edit nobody will make, a dev-time tool, a
+selftest of a selftest - moves to a **v1.4 backlog**. It stays SCHEDULED and gets built. It
+stops blocking the release.
+
+**WHY, measured.** Severity-bearing rows in this file went 18 -> 49 in a single day. The 11 HIGH
+in the work-order table have been open since 2026-08-02 and this file states twice that the
+sessions in between closed none of them; the last commit whose headline was CLOSING findings is
+dated 2026-07-31. C1-NEW targeted four of the 11, closed zero, and added ten more. The mechanism
+is structural, not a discipline failure: in a tool whose thesis is that checks lie, every new
+guard is new surface for the same defect class, so zero-HIGH recedes faster than it can be
+approached. **A gate that can never pass is not a gate** - the exact pattern this repo exists to
+catch, running on this repo.
+
+### The classification rule, stated so it can be refuted
+
+A finding is **SHIP-BLOCKING** iff BOTH hold. Otherwise it is **V1.4-BACKLOG**.
+
+- **R1 EXECUTION** - the defective code RUNS on an installed user's machine, via an entry point
+  this repo wires or documents. The entry points, derived rather than listed:
+  1. the 8 script paths `install.py:desired_groups()` writes into `~/.claude/settings.json`
+     (parsed out of the AST, not transcribed): `rate_prompt`, `hook_health_check`,
+     `duplicate_registration_check`, `usage_snip_prompt`, `stop_dispatcher`,
+     `post_tooluse_dispatcher`, `close_skills_guard`, `piped_gate_guard`;
+  2. `hooks/pre_push_gate.py` - NOT wired by `install.py`, but README documents it as a real git
+     hook the user installs (`--install-global` sets `core.hooksPath`). Excluding it because
+     `install.py` does not name it would be an artifact of the rule, not a fact about the user;
+  3. **`hook_health_check`'s weekly sweep**, which runs `subprocess.run([sys.executable, path,
+     "--selftest"])` over every `hooks/*.py` at SessionStart (`hook_health_check.py:223`). Every
+     hook selftest therefore EXECUTES on a user's box, weekly. `tools/*` and `tests/*` are not
+     swept.
+- **R2 TRIGGER** - the input that exposes it is something the USER supplies: their repo, their
+  `settings.json`, their plan documents, their transcript, their git state. NOT a modification
+  of unbluff's own source.
+
+**Neither half alone is sufficient, and this is the load-bearing part.** A pure import-closure
+of the entry points above reaches **24 of 41 local modules** (17 dev-time; computed by an AST
+walk over static imports plus the dispatchers' `importlib.import_module` string constants). That
+closure includes the entire cap detector - `capped_report` is imported by five wired hooks. But
+`capped_report` only CALLS `cap_shapes.slicing_offenders` / `verdict` / `exemption_problems`
+from inside `selftest()`, and that selftest's subject is unbluff's own `hooks/` directory, whose
+contents are byte-identical on every machine. A user who never edits unbluff's source cannot
+change that verdict, so R1 is satisfied and R2 is not. Conversely R2 alone would admit
+`tools/mutation_check.py`, which never runs on a user's machine at all.
+
+### Counts - and the denominator
+
+**SHIP-BLOCKING: 1 of 21. V1.4-BACKLOG: 20 of 21.**
+
+The denominator is **21 = 11 + 10**, reconciled rather than assumed:
+
+- **11** from the 44-row work-order table: `capped_report` 4, `mutation_check` 2,
+  `run_selftests` 2, `pre_push_gate_selftest` 2, `meta_audit_on_stop` 1.
+- **10** confirmed HIGH in `docs/audits/adversarial_review_2026-08-06_guards.md`
+  (`{'HIGH': 10, 'MEDIUM': 26, 'LOW': 6}` of 42 confirmed). They appear in this plan as **nine**
+  rows - AR-1..AR-11 minus AR-6 (MEDIUM x23 / LOW x6) and AR-7 (FIXED) - because **AR-1 merges
+  two audit-doc HIGH findings**: doc #3 (`seq[n:] = []` invisible) and doc #5 (the
+  grammar-closed claim). 9 plan rows carry 10 findings. AR-GAP is WITHDRAWN and carries none.
+
+| # | id | unit | R1 runs on a user's box? | R2 user-supplied trigger? | bucket |
+|---|---|---|---|---|---|
+| 1 | W-CR1 | `hooks/capped_report.py` (detector: `_max_names` blind to AnnAssign/tuple targets) | yes, weekly `--selftest` sweep | **no** - needs a new cap added to unbluff's own `hooks/` | V1.4-BACKLOG |
+| 2 | W-CR2 | `hooks/capped_report.py` (detector: bare-Name upper bound only; whole-file skip) | yes, same | **no** - same | V1.4-BACKLOG |
+| 3 | W-CR3 | `hooks/capped_report.py` (detector: blind to 9 of 11 cap spellings) | yes, same | **no** - same | V1.4-BACKLOG |
+| 4 | W-CR4 | `hooks/capped_report.py` (the adjudicated dropped candidate) | yes, same | **no** - same | V1.4-BACKLOG |
+| 5 | W-MC1 | `tools/mutation_check.py` (#10 self-verifies) | **no** - `tools/` is neither wired nor swept | n/a | V1.4-BACKLOG |
+| 6 | W-MC2 | `tools/mutation_check.py` (no verifier of its own) | **no** - same | n/a | V1.4-BACKLOG |
+| 7 | W-RS1 | `run_selftests.py` (`missing_gates()` is dead code; A3 certifies an uncalled copy) | **no** - repo root, not wired, not swept | n/a | V1.4-BACKLOG |
+| 8 | W-RS2 | `run_selftests.py` (`ran` counts hooks whose `--selftest` never executed) | **no** for `run_selftests` - **but see the twin note below** | no - needs a commented-out dispatch in unbluff's source | V1.4-BACKLOG |
+| 9 | W-PP1 | `hooks/pre_push_gate_selftest.py` (`_child()` spawns the selftest module, not the hook) | **yes** - runs under `pre_push_gate --selftest` in the weekly sweep | **no** - subject is unbluff's own gate; the production push path is correct today | V1.4-BACKLOG |
+| 10 | W-PP2 | `hooks/pre_push_gate_selftest.py` (`main()`'s fail-open handler pinned by no test) | **yes** - same | **no** - same | V1.4-BACKLOG |
+| 11 | **W-MA1** | **`hooks/meta_audit_on_stop.py`** - `has_decision_tag` treats ANY bracketed prose containing an allow-word as a decision tag, silently suppressing a genuine hiding line AND removing it from the reported total | **YES** - Stop hook, every turn-end, via `stop_dispatcher` | **YES** - the user's own plan text, e.g. `- PARKED: port the (closed-loop) controller` | **SHIP-BLOCKING** |
+| 12 | AR-9 (doc #1) | `tools/check_mutation_anchors.py` | **no** - `tools/` | n/a | V1.4-BACKLOG |
+| 13 | AR-2 (doc #2) | `hooks/cap_shapes.py` - 86% false positives on ordinary correct Python | yes, weekly sweep | **no** - the guard only ever scans unbluff's own `hooks/`; "unshippable OUTSIDE `hooks/`" blocks a future widening, not a live path | V1.4-BACKLOG |
+| 14 | AR-1a (doc #3) | `hooks/cap_shapes.py` - slice-assignment Store path never inspected | yes | **no** | V1.4-BACKLOG |
+| 15 | AR-10 (doc #4) | `hooks/cap_shapes.py` - clause 4 raise-exemption widening | yes | **no** | V1.4-BACKLOG |
+| 16 | AR-1b (doc #5) | `hooks/cap_shapes.py` - the grammar-closed claim is false | yes | **no** | V1.4-BACKLOG |
+| 17 | AR-3 (doc #6) | `hooks/cap_shapes.py` - `_routed()` exempts a whole function scope | yes | **no** | V1.4-BACKLOG |
+| 18 | AR-8 (doc #7) | `hooks/cap_shapes.py` `verdict()` - the LIVE decision is a one-token disarm | yes | **no** - a one-token edit to unbluff's source | V1.4-BACKLOG |
+| 19 | AR-4 (doc #8) | `hooks/cap_shapes.py` - index-bounds exclusion dead for every `while` | yes | **no** | V1.4-BACKLOG |
+| 20 | AR-5 (doc #9) | `hooks/cap_types.py` - `_name_of` collapses attribute chains | yes | **no** | V1.4-BACKLOG |
+| 21 | AR-11 (doc #10) | `hooks/cap_types.py` - four clause-1/2 vocabulary widenings | yes | **no** | V1.4-BACKLOG |
+
+**W-RS2's TWIN IS LIVE, and this is the finding the classification produced.** `run_selftests`
+accepts `rc == 0` with zero output as proof that a hook's selftest executed. The IDENTICAL rule
+is in `hook_health_check.run_weekly_selftests` - `if proc.returncode == 0: done[name] = "pass"`
+at `hook_health_check.py:227`, with no output marker - and THAT one is a wired SessionStart hook
+running on every user's machine. It stays V1.4-BACKLOG, because disarming it needs an edit to
+unbluff's own source (R2 fails). But when W-RS2 is fixed in v1.4, **the fix must land in both
+places in the same pass**, or the class survives in the copy that ships. Recorded here because
+the estimate this classification replaced could not have surfaced it.
+
+### The prior estimate: right answer, wrong reasons - and the reasons mattered
+
+The estimate carried in was "roughly 1-2 ship-blocking", justified by "`meta_audit_on_stop` is a
+real Stop hook while `mutation_check`, `run_selftests`, `pre_push_gate_selftest` and the cap
+detector are dev-time". Tested rather than inherited: the ANSWER lands in the right place, and
+**two of its four premises are false.**
+
+- `pre_push_gate_selftest` is **not** dev-time. It executes on a user's machine every week, via
+  `pre_push_gate --selftest` in the health sweep. It is backlog for the R2 reason, not the R1 one.
+- the cap detector is **not** dev-time either. `capped_report` is imported by five wired hooks
+  and its `--selftest` is subprocessed weekly on the user's box. It is backlog because its
+  SUBJECT is unbluff's own source, not because it never runs.
+
+The distinction is not pedantry: it is what surfaced W-RS2's live twin, and it is what decides
+which v1.4 fixes ALSO need a user-runtime fix. An unverified estimate that happens to land on
+the right number still cannot answer the next question.
+
+### Accounting - the sixth axis is a LABEL, not a bucket
+
+Five severity systems coexist and must never be summed: the 44-row work-order table (11 HIGH),
+the fail-open class family, the source-coverage findings (SC1-SC4), the B1 build findings
+(`B1-*`, MR-c/e), and the adversarial-review findings (AR-1..AR-11). SHIP-BLOCKING vs
+V1.4-BACKLOG is a **sixth axis that cuts across all of them**. It relabels existing findings and
+introduces none. The table above has 21 rows because there are 21 open HIGH, not because a new
+bucket was opened.
+
+### Resolved and new, same day
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **A8-PP** | - | **RESOLVED 2026-08-06** | **The cap was never the problem; the box was.** Re-measured on a quiet box after stopping `hsscp` and `ArmouryCrate` (the two named non-Claude CPU consumers; `LoadPercentage` went 100 -> ~10). Protocol fixed before the run: control x5, subject x1, control x5. CONTROL (`tools/check_readme_fresh.py`, characterised at 0.099s by M1): **0.086s median before (range 0.083-0.090)** and **0.082s median after (range 0.078-0.085)**, i.e. **0.87x and 0.83x** of that baseline - the box was quiet at BOTH ends, so the subject reading is a measurement rather than another confound. SUBJECT `run_selftests.py`, interleaved between those controls: **49.740s, rc=0, 32/32**. That is **41% of the 120s cap, 2.4x headroom** - the cap is NOT raised, and raising it on the earlier numbers would have meant acting on three readings (113.7s / 180.5s / 212.7s) whose controls read 3.0x / 3.6x / 7.8x. Independently corroborated by a different clock: the pre-push gate then ran the suite itself and reported "tests passed in 48s - allowing push". **Correction to the A8-PP row above: the 120s cap lives in `.claude/fast-test.cmd`, not `.claude/pre-push.cmd`** - the latter does not exist in this repo, so `pre_push_gate` falls through to `fast_test_on_stop.detect()`. Commits `3cea480`, `5b6986a`, `6b64549` PUSHED, no `--no-verify` |
+| **CI-SHALLOW** | **HIGH - and it was RED, not latent** | **FIXED 2026-08-06 (`59fb389`)** | **CI was red on 11 of 11 jobs, every OS and every Python version, across two commits, on a tree that was green locally and passed the pre-push gate. No gate in this repo could see it; it was found by reading `gh run list`.** `actions/checkout@v4` fetches ONE commit. `no_regression` compares each unit against the newest committed blob that DIFFERS from the working tree; in a depth-1 tree that blob is unreachable, so `predecessor()` returned "no committed blob differs from the working tree". The DETECTOR half reads that correctly and prints `SKIPPED - UNCOVERED, not passing`. The WAIVER auditor read the identical condition as "has no predecessor at all, so nothing can be lost" and made it BLOCKING - asserting a fact about the repository that was false. REPRODUCED before fixing (`git clone --depth 1` of this repo exits 1 with the byte-identical message; the full clone exits 0), then again as a hermetic two-commit fixture. **The fix is two halves and neither is sufficient:** (1) `history_truncated()` asks git directly - `is-shallow-repository` plus the partial-clone configs, because a blobless clone hides objects the same way and only one of the two is famous - and `classify_waivers` gains a sixth state, UNKNOWN, non-blocking and printed on its own UNDETERMINED line; (2) all four CI jobs fetch full history, because half 1 alone would have turned CI green by making the gate verify NOTHING there, silently, on every run. `fetch-depth` is set on all four checkouts rather than on the jobs that run a history-dependent gate today, since "which job runs which gate" is exactly the roster this repo keeps finding rotted. TDD: test F written FIRST and watched FAIL on three separate assertions, with its own CONTROL half so a broken fixture cannot read as a fixed bug. Suite 32/32, anchors 127 -> 129 across 128 entries in 29 files, mutations CS1 and CS2 both CAUGHT. **No sixth accounting system is opened for this**: it is one new finding, found this session, counted nowhere in the 21 |
+
+**Status of this section: the classification above has NOT yet had an independent pass.** Per
+`tooling-discipline.md` section 6, a probe written by the author of the thing it probes is a
+smoke test. The rule, the 21 rows and the two premise corrections were all derived by one agent,
+and a ship gate is exactly the class - gate logic, author-written test - that section names as
+requiring an independent lens BEFORE the unit is reported as sound. Treat the counts as
+**PROPOSED** until that pass returns.
