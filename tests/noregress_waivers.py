@@ -10,7 +10,7 @@ WHY A LEDGER AND NOT A FLAG
     the cost of a narrowing equal to the cost of writing down a reason, which is the price
     it should have.
 
-THE FIVE STATES, all enforced by tools/no_regression.py:
+THE SIX STATES, all enforced by tools/no_regression.py:
 
     ACTIVE   the capability is lost against the predecessor RIGHT NOW and a reason is on
              file -> non-blocking, but printed on its own line every run.
@@ -24,6 +24,14 @@ THE FIVE STATES, all enforced by tools/no_regression.py:
              as a registry ghost: a waiver pointing at nothing is a waiver nobody can audit.
     UNUSED   the unit has no predecessor at all, so nothing can be lost -> BLOCKING, since
              the waiver claims to excuse something that cannot happen.
+    UNKNOWN  the CHECKOUT cannot see the past - a --depth or partial clone - so the waiver's
+             state is undeterminable here -> NON-BLOCKING, and printed on its own
+             UNDETERMINED line every run. Added 2026-08-06 after a shallow `actions/checkout`
+             made 11 of 11 CI jobs red on a commit that was green locally: the differing blob
+             existed and was simply never fetched, and "I could not look" was being reported
+             as "there is nothing to look at". It must not be silent either - a gate that
+             quietly passes on a truncated checkout is a gate that cannot fail, which is why
+             CI now fetches full history rather than relying on this state.
 
 ENTRY SHAPE
     {"unit": <repo-relative path>,

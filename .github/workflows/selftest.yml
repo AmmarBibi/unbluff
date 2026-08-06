@@ -5,6 +5,19 @@ on:
     branches: [ main ]
   pull_request:
 
+# CI-SHALLOW, 2026-08-06. `actions/checkout@v4` defaults to fetch-depth: 1, and this repo runs
+# gates that ASK ABOUT THE PAST - tools/no_regression.py compares each unit against the newest
+# committed blob that differs from the working tree. In a one-commit checkout that blob is
+# unreachable, and the gate reported the absence of evidence as a finding: 11 of 11 jobs went
+# red on a commit that was green locally, with a message asserting the unit "has no
+# predecessor" - a statement about the repository that was simply false.
+#
+# no_regression now distinguishes "I could not look" from "there is nothing to look at" and
+# reports the former as UNDETERMINED rather than blocking. That fix alone would have turned CI
+# green by making the gate verify NOTHING here, every run, silently - which is the failure this
+# repo exists to catch, not a fix for it. So the checkout fetches history and the gate does
+# real work in CI; the UNDETERMINED state is the honest fallback for a tree we do not control,
+# never the normal operating mode.
 jobs:
   selftest:
     name: ${{ matrix.os }} / py${{ matrix.python-version }}
@@ -26,7 +39,12 @@ jobs:
           # macOS is deliberately absent: setup-python ships no 3.8 build for the arm64
           # macos-latest runners. Recorded so its absence reads as a decision, not a gap.
     steps:
+      # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all four jobs
+      # on purpose: "which job runs a history-dependent gate" is exactly the kind of roster
+      # that rots, and a per-job answer would be wrong the first time a gate moves.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -43,7 +61,12 @@ jobs:
     name: mutation harness (do the tests bite?)
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all four jobs
+      # on purpose: "which job runs a history-dependent gate" is exactly the kind of roster
+      # that rots, and a per-job answer would be wrong the first time a gate moves.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -59,7 +82,12 @@ jobs:
     name: mutation harness (windows-only mutations)
     runs-on: windows-latest
     steps:
+      # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all four jobs
+      # on purpose: "which job runs a history-dependent gate" is exactly the kind of roster
+      # that rots, and a per-job answer would be wrong the first time a gate moves.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -70,7 +98,12 @@ jobs:
     name: integration (install -> fire -> uninstall)
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all four jobs
+      # on purpose: "which job runs a history-dependent gate" is exactly the kind of roster
+      # that rots, and a per-job answer would be wrong the first time a gate moves.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

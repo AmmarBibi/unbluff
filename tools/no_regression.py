@@ -109,11 +109,34 @@ def _norm(text):
     return text.replace("\r\n", "\n")
 
 
+def history_truncated(repo):
+    """Why this checkout cannot answer questions about the past, or None if it can.
+
+    [CI-SHALLOW, 2026-08-06] `actions/checkout@v4` fetches ONE commit. Every "no committed
+    blob differs" verdict in such a tree is an UNANSWERED QUESTION, not a finding: the
+    differing blob exists on the remote and was simply never fetched. Conflating the two put
+    11 of 11 CI jobs red on a commit that was green locally, and the failure text asserted a
+    fact about the repository ("has no predecessor") that was false.
+
+    Both truncation modes are asked about, because either one hides blobs and only one of
+    them is the famous one: a `--depth` clone, and a partial (blobless/treeless) clone whose
+    objects are fetched lazily from a promisor remote.
+    """
+    if (_git(repo, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
+        return "history is SHALLOW (a --depth clone), so an older blob is unreachable here"
+    for key in ("remote.origin.partialclonefilter", "remote.origin.promisor"):
+        if (_git(repo, "config", "--get", key) or "").strip():
+            return ("history is a PARTIAL clone (%s), so an older blob may be unreachable here"
+                    % key)
+    return None
+
+
 def predecessor(repo, rel, renamed_from=None):
     """(bytes, sha, reason) - the newest committed blob that DIFFERS from the working tree.
 
     Returns (None, None, reason) when there is nothing to compare against. That is a named
-    SKIP, never a pass.
+    SKIP, never a pass - and when the checkout itself cannot see the past, the reason SAYS SO
+    rather than reporting the absence of evidence as evidence of absence.
     """
     live_path = os.path.join(repo, rel.replace("/", os.sep))
     if not os.path.isfile(live_path):
@@ -134,6 +157,11 @@ def predecessor(repo, rel, renamed_from=None):
                 continue
             if _norm(blob) != current:
                 return blob, sha, None
+    truncated = history_truncated(repo)
+    if truncated:
+        # UNANSWERABLE, not empty. Kept distinct from the two definite reasons below so a
+        # caller can tell "I looked and there is nothing" from "I was not able to look".
+        return None, None, truncated
     if not seen_any_commit:
         return None, None, "file has never been committed"
     return None, None, "no committed blob differs from the working tree"
@@ -354,9 +382,18 @@ def compare(repo, rel, corpus_rel, family, renamed_from=None):
 # waivers
 # --------------------------------------------------------------------------------------
 
-def classify_waivers(waivers, results, units, corpora):
-    """(active, settled, problems) - see tests/noregress_waivers.py for the five states."""
-    active, settled, problems = [], [], []
+def classify_waivers(waivers, results, units, corpora, repo=REPO):
+    """(active, settled, problems, unknown) - see tests/noregress_waivers.py for the states.
+
+    `unknown` is the sixth state and the reason this returns four lists rather than three:
+    a checkout that cannot see the past cannot classify a waiver at all, and neither BLOCKING
+    (which is what it used to do, and which put CI red on green code) nor silence (which
+    would make the gate unfailable) is honest about that. It is reported and does not block.
+    """
+    active, settled, problems, unknown = [], [], [], []
+    # Asked ONCE, and compared by identity with the reason predecessor() recorded, so this
+    # never degrades into grepping the message text for a keyword.
+    unanswerable = history_truncated(repo)
     by_unit = dict((r["unit"], r) for r in results)
     for w in waivers:
         unit, cap = w.get("unit"), w.get("capability")
@@ -369,6 +406,11 @@ def classify_waivers(waivers, results, units, corpora):
                             % (unit, cap))
             continue
         res = by_unit.get(unit)
+        if res is not None and unanswerable and res.get("skipped") == unanswerable:
+            unknown.append("%s / %s - state UNDETERMINED: %s. This run neither confirms nor "
+                           "prunes the waiver; re-run against full history."
+                           % (unit, cap, unanswerable))
+            continue
         if res is None or res.get("skipped"):
             problems.append("UNUSED waiver: %s has no predecessor, so nothing can be lost "
                             "(%s)" % (unit, res.get("skipped") if res else "not compared"))
@@ -380,7 +422,7 @@ def classify_waivers(waivers, results, units, corpora):
                             "nobody prunes rots into pre-authorisation" % (unit, cap))
         else:
             settled.append("%s / %s - %s" % (unit, cap, w.get("reason", "no reason given")))
-    return active, settled, problems
+    return active, settled, problems, unknown
 
 
 def _detected_now(res):
@@ -437,7 +479,8 @@ def run(repo=REPO, verbose=True):
             except Broken:
                 corpora[unit] = set()
 
-    active, settled, wproblems = classify_waivers(waivers, results, units, corpora)
+    active, settled, wproblems, wunknown = classify_waivers(waivers, results, units, corpora,
+                                                            repo)
     fails.extend(wproblems)
 
     waived = set()
@@ -483,10 +526,14 @@ def run(repo=REPO, verbose=True):
             missing = [u for u in units if u not in registry]
             print("   UNCOVERED (not passing): %s%s"
                   % (", ".join(missing[:8]), " ..." if len(missing) > 8 else ""))
-        print("-- waivers: %d active, %d settled, %d problem(s)"
-              % (len(active), len(settled), len(wproblems)))
+        print("-- waivers: %d active, %d settled, %d problem(s), %d undetermined (of %d)"
+              % (len(active), len(settled), len(wproblems), len(wunknown), len(waivers)))
         for line in active:
             print("   ACTIVE waiver: %s" % line)
+        for line in wunknown:
+            # Loud, because this is the state in which the gate verified nothing. Silence
+            # here would make a truncated checkout indistinguishable from a clean run.
+            print("   UNDETERMINED waiver: %s" % line)
 
     for f in fails:
         print("NO-REGRESSION FAIL:", f)
@@ -540,6 +587,137 @@ def _scratch_repo():
     return base, det_v2
 
 
+def _shallow_fixture():
+    """A repo whose unit REALLY regressed one commit ago, plus a --depth 1 clone of it.
+
+    Two commits: v1 detects capabilities a+b, v2 detects only b. A waiver excuses 'a'. In the
+    FULL clone the waiver is ACTIVE and the gate passes. In the SHALLOW clone the differing
+    predecessor blob is one commit out of reach - it EXISTS, it is simply not fetched.
+    """
+    base = tempfile.mkdtemp(prefix="nrshal_")
+    for d in ("hooks", "tests", "tools"):
+        os.makedirs(os.path.join(base, d))
+    det_v1 = (
+        "import ast, glob, os\n\n\n"
+        "def slicing_offenders(d):\n"
+        "    out = []\n"
+        "    for p in sorted(glob.glob(os.path.join(d, '*.py'))):\n"
+        "        try:\n"
+        "            t = ast.parse(open(p, encoding='utf-8').read())\n"
+        "        except Exception:\n"
+        "            continue\n"
+        "        for n in ast.walk(t):\n"
+        "            if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice):\n"
+        "                u = n.slice.upper\n"
+        "                if isinstance(u, ast.Name) and u.id.startswith('MAX_'):\n"
+        "                    out.append(p)\n"
+        "    return sorted(set(out))\n\n\n"
+        "def selftest():\n    return 0\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    import sys\n"
+        "    raise SystemExit(selftest() if '--selftest' in sys.argv else 0)\n")
+    det_v2 = det_v1.replace("u.id.startswith('MAX_')", "u.id == 'MAX_B'")
+    files = {
+        os.path.join("hooks", "det.py"): det_v1,
+        os.path.join("tests", "corpus.py"):
+            "ENTRIES = (\n"
+            "    ('a', 'hooks/a.py', True, 'MAX_A = 3\\ndef r(xs):\\n    return xs[:MAX_A]\\n'),\n"
+            "    ('b', 'hooks/b.py', True, 'MAX_B = 3\\ndef r(xs):\\n    return xs[:MAX_B]\\n'),\n"
+            "    ('n', 'hooks/n.py', False, 'def r(xs):\\n    return list(xs)\\n'),\n"
+            ")\n",
+        os.path.join("tests", "noregress_registry.py"):
+            "REGISTRY = {'hooks/det.py': {'corpus': 'tests/corpus.py',\n"
+            "                            'probe': 'cap_detector'}}\n",
+        os.path.join("tests", "noregress_waivers.py"):
+            "WAIVERS = ({'unit': 'hooks/det.py', 'capability': 'a',\n"
+            "            'narrowed_on': '2026-08-06',\n"
+            "            'reason': 'detecting MAX_A was wrong - fixture'},)\n",
+    }
+    for rel, text in files.items():
+        with open(os.path.join(base, rel), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for cmd in (("init",), ("config", "user.email", "t@t"), ("config", "user.name", "t"),
+                ("add", "-A"), ("commit", "-m", "v1")):
+        subprocess.run(("git", "-C", base) + cmd, capture_output=True, text=True)
+    with open(os.path.join(base, "hooks", "det.py"), "w", encoding="utf-8") as fh:
+        fh.write(det_v2)
+    for cmd in (("add", "-A"), ("commit", "-m", "v2")):
+        subprocess.run(("git", "-C", base) + cmd, capture_output=True, text=True)
+
+    holder = tempfile.mkdtemp(prefix="nrclone_")
+    shallow = os.path.join(holder, "r")
+    subprocess.run(("git", "clone", "--depth", "1",
+                    "file://" + base.replace(os.sep, "/"), shallow),
+                   capture_output=True, text=True)
+    return base, holder, shallow
+
+
+def _selftest_shallow_history():
+    """[CI-SHALLOW] 'I could not look' is not 'there is nothing to look at'.
+
+    actions/checkout@v4 fetches ONE commit. On 2026-08-06 that made every one of 11 CI jobs
+    red on a commit that was green locally: the differing predecessor was unreachable, the
+    detector half of this module correctly said SKIPPED, and the waiver auditor read the same
+    condition as "this unit has no predecessor" and blocked. A gate whose verdict depends on
+    the DEPTH OF THE CHECKOUT is not measuring the code.
+
+    The fix must not go the other way either: a shallow run that quietly returns 0 would be a
+    gate that cannot fail. So the third state is REPORTED, and the CI checkout fetches history
+    so the comparison is actually performed there.
+    """
+    fails = []
+    base, holder, shallow = _shallow_fixture()
+    try:
+        if not os.path.isfile(os.path.join(shallow, "hooks", "det.py")):
+            return ["F: the shallow clone fixture did not materialise - nothing was tested"]
+        depth = subprocess.run(("git", "-C", shallow, "rev-list", "--count", "HEAD"),
+                               capture_output=True, text=True).stdout.strip()
+        if depth != "1":
+            return ["F: the fixture clone is %s commits deep, so it does not reproduce "
+                    "actions/checkout@v4 and proves nothing" % depth]
+
+        # control: with full history the waiver is ACTIVE and the gate passes. If this fails
+        # the fixture is wrong, not the code under test.
+        if run(base, verbose=False) != 0:
+            fails.append("F-control: the FULL-history repo must pass with the waiver active; "
+                         "the fixture is broken, so the shallow half proves nothing")
+
+        # the finding itself
+        if run(shallow, verbose=False) != 0:
+            fails.append("F: a --depth 1 checkout BLOCKS on an UNUSED waiver - the predecessor "
+                         "is unreachable, not absent, and the gate must not convert an "
+                         "unanswered question into a blocking verdict")
+
+        # ...and it must not have passed by pretending it verified something
+        units = derive_units(shallow)
+        res = compare(shallow, "hooks/det.py", "tests/corpus.py", "cap_detector")
+        waivers = _load_side(shallow, "tests/noregress_waivers.py").WAIVERS
+        classified = classify_waivers(waivers, [res], units, {"hooks/det.py": {"a", "b", "n"}},
+                                      shallow)
+        if len(classified) < 4:
+            fails.append("F: classify_waivers still returns %d lists - there is no place to "
+                         "report a waiver whose state could not be determined"
+                         % len(classified))
+        else:
+            unknown = classified[3]
+            if not unknown:
+                fails.append("F: the shallow run reported NO unknown waiver - silence and "
+                             "'verified' look identical, which is the failure this gate exists "
+                             "to stop")
+            elif not any("SHALLOW" in u for u in unknown):
+                fails.append("F: the unknown state does not name shallow history as the "
+                             "reason, so a reader cannot tell it from a real absence: %r"
+                             % unknown)
+        _b, _s, reason = predecessor(shallow, "hooks/det.py")
+        if reason and "SHALLOW" not in reason:
+            fails.append("F: predecessor() reported %r on a shallow clone - it must say the "
+                         "history is truncated, not that no blob differs" % reason)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+        shutil.rmtree(holder, ignore_errors=True)
+    return fails
+
+
 def selftest():
     fails = []
 
@@ -591,8 +769,10 @@ def selftest():
     finally:
         shutil.rmtree(base, ignore_errors=True)
 
-    print("-- no-regression selftest: 5 assertions (A derive, B identical-blob walk, "
-          "C narrowing caught, D unusable yardstick, E total loss)")
+    fails += _selftest_shallow_history()
+
+    print("-- no-regression selftest: 6 assertions (A derive, B identical-blob walk, "
+          "C narrowing caught, D unusable yardstick, E total loss, F shallow history)")
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

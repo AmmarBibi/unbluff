@@ -543,6 +543,19 @@ MUTATIONS = [
      "tree instead of an unusable yardstick, so a broken probe reads as no regression",
      [('        if prev_score == 0:\n            raise Broken(',
        '        if False:\n            raise Broken(')], False),
+    # [CI-SHALLOW 2026-08-06] Two halves of one fix, pinned separately because either half
+    # alone restores the failure. This gate was RED on 11 of 11 CI jobs across two commits
+    # while the identical tree was green locally: a --depth 1 checkout cannot reach the
+    # differing blob, and "I could not look" was being reported as "there is nothing to look
+    # at". Both must turn no_regression's test F red.
+    ("tools/no_regression", "CS1", "predecessor() stops naming a truncated checkout, so a "
+     "shallow clone's unreachable blob is reported as a definite absence again",
+     [("    truncated = history_truncated(repo)\n    if truncated:",
+       "    truncated = history_truncated(repo)\n    if False:")], False),
+    ("tools/no_regression", "CS2", "classify_waivers stops routing an undeterminable waiver to "
+     "the UNKNOWN state, so a shallow checkout BLOCKS on a waiver it never examined",
+     [('        if res is not None and unanswerable and res.get("skipped") == unanswerable:',
+       "        if False:")], False),
     # [P14 meta-review] The two defects the 2026-08-06 meta-review PROBED out of this session's
     # own work. Both were invisible to reading and to every existing test.
     ("tools/check_mutation_anchors", "MRa", "the anchor gate's own DECISION is disarmed - a "
