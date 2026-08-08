@@ -2204,3 +2204,60 @@ them.
 |---|---|---|---|
 | **SKIP-1** | **HIGH** | **FIXED 2026-08-08** | **HIGH-1's own recorded fix could not work: an age stamp recomputed on every write measures nothing.** `__started__` was set to TODAY on every call and `_persist()` writes it after every hook, so any session running even one hook refreshed it. One permanently-skipping hook - no `git` on PATH is enough - keeps the slice young forever: the sweep stays due, re-runs only the skipper, and every OTHER hook's recorded `pass` is never re-verified again. A skip is not a `problem`, so the SessionStart line reads `[hook-health] OK` throughout. A hook that breaks in week two is never tested again, behind a green line, permanently. Fixed by carrying the slice's ORIGINAL start date. Fixture written first and watched fail on the exact mechanism; it asserts all three behaviours (the stamp SURVIVES a same-week sweep, a pass is NOT re-run inside the week, a slice older than a week DOES start over) so the fix cannot be a deletion. Mutation `SKIP1` CAUGHT |
 | **BUDGET-1** | **MEDIUM** | **v1.4 backlog, phase 1** | **`hook_health_check`'s own selftest sits at 90-96% of its 10.00s share on a loaded box, so any extra load turns it RED - and when it does, the mutation harness reports `baseline already RED` and SIX mutations prove nothing.** MEASURED with a control rather than assumed: the selftest at `d70f869`, *before* the SKIP-1 fixture existed, cost **9.51s and 9.60s** on this box, while the version *with* the fixture cost **9.33s and 8.98s** - the new test made it cheaper, and the 6.38s figure it was being compared against was a QUIET-box reading from 2026-08-06. Same confound as A8-PP, one layer down. **The share is NOT raised on a loaded-box reading**, exactly as the 120s cap was not raised on a 375.6s reading whose control read 11.15x. Two things need deciding on a quiet box: whether ~9.5s is the true cost (in which case 0.40 of 25s is genuinely too tight for the largest hook), and whether the harness should refuse to run at all when the baseline is red rather than reporting six separate errors that each read like a mutation problem. Confirmed live today: at LoadPercentage 79 the harness errored on 6 of 12; at 19 it ran 12 of 12 clean |
+
+### CORRECTIONS to the RE-SCOPED SHIP GATE section, forced by the review - 2026-08-08
+
+These are the five confirmed findings against the classification ITSELF rather than against code.
+The section above is left standing as written; this supersedes it on each point, because
+rewriting it in place would destroy the record of what the rule got wrong.
+
+**1. R1's entry points were derived from ONE install action, not from what install.py DOES.**
+`desired_groups()` is only half of it: `main()` also calls `install_skill()`, which
+`shutil.copytree()`s all four `SKILL_NAMES` into `~/.claude/skills/<name>/`, bundled scripts
+included (`install.py:203-205`, explicitly "not just SKILL.md"). That lands **3 executable .py**
+on the user's machine, and `SKILL.md:48` tells them to run `audit.py` over their own deliverable.
+`close_skills_guard` - one of the 8 WIRED hooks - **blocks the close until consistency-audit is
+invoked**, so R1 is satisfied through a wired hook rather than a merely documented one, and R2 is
+satisfied by construction: the input is the user's own document. **R1 gains a fourth clause: the
+skill scripts `install.py` installs.** This is the SECOND omission of the same shape - the rule
+already had to hand-add `pre_push_gate` - which is the evidence that the derivation must come
+from install.py's ACTIONS rather than from any one function.
+
+**DOCX-1 was found inside that blind region and is now fixed** (see the row above). The claim in
+the original finding that "no open HIGH sits there today, so no row of the 21 changes" was FALSE,
+and its refuter proved so with a control.
+
+**2. The module universe is 44, not 41.** The 41 excluded `skills/*/scripts/` (3). Restated as a
+DERIVED figure: whatever the closure of install.py's install actions reaches.
+
+**3. "24 of 41 local modules (17 dev-time)" is not reproducible, and never was.** Recomputed
+three ways by the review, then re-verified independently: the section's own stated entry set
+yields **25 of 41 / 16**, not 24 / 17. The missing module is `hooks/hook_health_check_selftest.py`,
+reached by a plain `ast.Import` at `hook_health_check.py:526`. Worse than staleness - `git log -S`
+places the string's introduction at `5bbc8a9`, an ANCESTOR of the split commit `07b0a01`, where
+the universe was still 40 and the correct triple was 24 / 40 / 16. **The triple 24 / 41 / 17 has
+never been simultaneously correct at any commit.** The load-bearing CONCLUSIONS survive
+untouched and were re-verified: `capped_report` is in the closure and is imported by exactly 5
+hooks, so "R1 alone is insufficient" and both premise corrections stand. Only the count was wrong.
+The fix is not "bump 24 to 25" - it is to name WHICH modules and derive the number.
+
+**4. Row 18 is attributed to the file its own source exonerates.** The row names
+`hooks/cap_shapes.py verdict()`; the finding it cites explicitly clears that function. The row's
+BUCKET is unaffected (both candidate units are backlog for the same R2 reason), but a row
+classified against the wrong call graph is a classification that happened to be right.
+
+**5. The gate was only ever applied to items already labelled HIGH.** R1 and R2 carry no severity
+term, but the population was fixed at "the 21 open HIGH", so a user-facing defect already rated
+MEDIUM could never reach the gate that DEFINES user-facing. Both attempts to convert this into a
+shipping defect were refuted on measurement, so it is a **method** correction, not a new blocker:
+the gate's population must be "every open finding", with severity applied after reachability.
+
+**What the pass cost and what it bought.** 20 findings, 20 adjudicated, 12 confirmed. Five of the
+twelve were defects the author's own rule could not see, and **three were live user-facing HIGHs
+that would have shipped** (SUP-1, GLOB-1, SKIP-1) plus DOCX-1 inside the blind region. The single
+most valuable output was not any one finding but the demonstration that the DENOMINATOR was
+wrong: the review was asked to check 21 rows and found what mattered outside them.
+
+| id | sev | owner | item |
+|---|---|---|---|
+| **ENTRY-GUARD** | **MEDIUM** | **v1.4 backlog, phase 1 with the roster-shaped checks** | **Nothing mechanically connects install.py's install ACTIONS to the set of files the repo gates.** The rule missed the skill scripts by reading one function; a future install action will be missed the same way. The durable fix is the discipline already applied to `REQUIRED_HOOKS`, `_LOCAL_HOOKS_FLOOR` and the A2 integration roster: AST-walk `install.py:main()` for every call that writes to the user's machine, expand each to the files it lands, and assert that set is covered by a gate. Not built this session - the hook/guard/gate surface is frozen - and rowed so the next addition to install.py cannot silently widen the blind region again |
