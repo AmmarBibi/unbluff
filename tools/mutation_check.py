@@ -285,6 +285,13 @@ MUTATIONS = [
     ("plan_defer_guard", "M5", "marker keyed by session only again (2nd plan file skipped)",
      [('    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)',
        '    marker = marker_path(state_dir, payload.get("session_id") or "nosession")')], False),
+    # [SKIP-1 2026-08-08] CONFIRMED by the ship-gate adversarial review. HIGH-1's own recorded
+    # fix could not work: an age stamp recomputed on every write measures nothing.
+    ("hook_health_check", "SKIP1", "the slice age stamp is refreshed to today on every sweep, so "
+     "it can never age out - one permanently-skipping hook then freezes every other hook's "
+     "recorded pass forever behind an '[hook-health] OK' line",
+     [("    started_on = slice_started or datetime.date.today().isoformat()",
+       "    started_on = datetime.date.today().isoformat()")], False),
     # [GLOB-1 2026-08-08] CONFIRMED by the ship-gate adversarial review, then reproduced: a
     # matched bracket pair in the INSTALL PATH ('unbluff-main[1]' is what Windows names a
     # re-downloaded zip) made glob match nothing, so the sweep "verified" 0 of 22 hooks, printed

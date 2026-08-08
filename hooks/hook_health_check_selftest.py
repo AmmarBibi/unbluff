@@ -63,6 +63,70 @@ def _selftest_malformed_config() -> list:
     return fails
 
 
+def _selftest_slice_age_stamp_is_not_refreshed() -> list:
+    """[SKIP-1] The age stamp must record when the SLICE began, not when it was last touched.
+
+    HIGH-1 added `__started__` so a sweep that can never complete ages out and starts over.
+    But `started_on` was recomputed as TODAY on every call and `_persist()` wrote it after every
+    hook - so any session that ran even ONE hook refreshed the stamp. With one hook permanently
+    skipping (no git on PATH is enough), the sweep is permanently due, re-runs only the skipper,
+    and refreshes the stamp forever. The other hooks' recorded passes are then NEVER re-verified,
+    while `problems` stays empty and the SessionStart line reads `[hook-health] OK`.
+
+    The fix HIGH-1 recorded is the one thing that could not work: an age stamp that resets on
+    every write measures nothing.
+    """
+    import datetime as _dt
+    import json as _json
+    import tempfile
+    fails = []
+    with tempfile.TemporaryDirectory() as hooks_d, tempfile.TemporaryDirectory() as state:
+        ok_hook = os.path.join(hooks_d, "ok_hook.py")
+        skip_hook = os.path.join(hooks_d, "skip_hook.py")
+        counter = os.path.join(state, "runs.txt").replace("\\", "/")
+        with open(ok_hook, "w", encoding="utf-8") as f:
+            f.write("import sys\n"
+                    "open(%r, 'a').write('x')\n"
+                    "sys.exit(0)\n" % counter)
+        with open(skip_hook, "w", encoding="utf-8") as f:
+            f.write("import sys\nsys.exit(%d)\n" % SKIP_RC)
+        paths = [ok_hook, skip_hook]
+        progress = os.path.join(state, _WEEKLY_PROGRESS)
+
+        run_weekly_selftests(paths, state)
+        if not os.path.isfile(progress):
+            return ["SKIP-1 fixture: no progress file after the first sweep - nothing tested"]
+        first_runs = len(open(counter).read()) if os.path.isfile(counter) else 0
+        if first_runs != 1:
+            fails.append("fixture: ok_hook ran %d times in sweep 1, expected 1" % first_runs)
+
+        # Backdate the slice by three days - still inside the week, so the passes must be KEPT.
+        old = (_dt.date.today() - _dt.timedelta(days=3)).isoformat()
+        saved = _json.load(open(progress, encoding="utf-8"))
+        saved["__started__"] = old
+        _json.dump(saved, open(progress, "w", encoding="utf-8"))
+
+        run_weekly_selftests(paths, state)
+        now = _json.load(open(progress, encoding="utf-8")).get("__started__")
+        if now != old:
+            fails.append("the slice age stamp was REFRESHED from %r to %r by a later sweep - it "
+                         "can therefore never age out, so a permanent skip freezes every "
+                         "recorded pass forever behind an '[hook-health] OK' line" % (old, now))
+        if len(open(counter).read()) != 1:
+            fails.append("a hook already recorded as 'pass' was re-run inside the same week")
+
+        # ...and once the slice IS older than a week, everything must start over.
+        stale = (_dt.date.today() - _dt.timedelta(days=_WEEK_DAYS + 1)).isoformat()
+        saved = _json.load(open(progress, encoding="utf-8"))
+        saved["__started__"] = stale
+        _json.dump(saved, open(progress, "w", encoding="utf-8"))
+        run_weekly_selftests(paths, state)
+        if len(open(counter).read()) != 2:
+            fails.append("a slice older than a week did NOT start over - the passes are frozen "
+                         "permanently, which is the defect the age stamp exists to prevent")
+    return fails
+
+
 def _selftest_glob_metachars_in_install_path() -> list:
     """[GLOB-1] A bracket in the INSTALL PATH must not blind the sweep.
 
@@ -409,6 +473,7 @@ def selftest() -> int:
         if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
             fails.append("progress file not cleared after a completed sweep")
     fails += _selftest_malformed_config()
+    fails += _selftest_slice_age_stamp_is_not_refreshed()
     fails += _selftest_glob_metachars_in_install_path()
     fails += _selftest_shell_builtin_is_not_missing()
     # [P14 D1] share 0.40 = 10.0s. Measured 2026-08-02: 6.53s, 26% of the cap. It runs OTHER

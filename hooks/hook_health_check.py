@@ -174,6 +174,7 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
 
     progress_path = os.path.join(state_dir, _WEEKLY_PROGRESS)
     done = {}
+    slice_started = None          # the date the CURRENT slice began, carried across sessions
     try:
         with open(progress_path, encoding="utf-8") as f:
             saved = json.load(f)
@@ -186,9 +187,17 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
             started = saved.get("__started__")
             if isinstance(started, str) and _days_since(started) < _WEEK_DAYS:
                 done = {k: v for k, v in saved.items() if k != "__started__"}
+                slice_started = started
     except (OSError, ValueError):
         done = {}
-    started_on = datetime.date.today().isoformat()
+    # [SKIP-1] CARRY the slice's original start date. Recomputing it as today on every call made
+    # HIGH-1's age stamp measure nothing: `_persist()` writes it after EVERY hook, so any session
+    # that ran even one hook refreshed it. One permanently-skipping hook (no git on PATH is
+    # enough) is therefore sufficient to keep the slice young forever - the sweep stays due,
+    # re-runs only the skipper, and every OTHER hook's recorded "pass" is never re-verified
+    # again, while `problems` stays empty and the SessionStart line reads OK. An age stamp that
+    # resets on every write is not an age stamp.
+    started_on = slice_started or datetime.date.today().isoformat()
 
     def _persist():
         # After EVERY hook, not after the loop. The whole point is that a session killed
