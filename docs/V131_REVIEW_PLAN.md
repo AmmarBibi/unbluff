@@ -2133,3 +2133,69 @@ one of the 132 entries is now proven somewhere and 0 SURVIVED.
 | **HB1a-FIX** | - | **FIXED 2026-08-06 (`5ce6e7c`)** | **A regression test that could not fail, on the platform it was written to protect.** Mutation `HB1a` came back **SURVIVED on windows-latest** while CAUGHT on the author's own Windows box. Not a flake and not a harness bug: the FIXTURE hardcoded `echo` on the reasoning that it is a cmd.exe builtin with no `echo.exe`. **GitHub's windows-latest runners carry Git for Windows' `usr/bin` on PATH, which ships `echo.EXE`**, so `shutil.which("echo")` resolves there, the unfixed code never emitted a problem, and reverting the fix changed nothing. REPRODUCED LOCALLY rather than inferred from the log - prepending `C:\Program Files\Git\usr\bin` to PATH takes `which("echo")` from `None` to `...\echo.EXE`, the runner's condition exactly - and the repaired mutation was then proven **CAUGHT under that same PATH**, not merely re-pushed. FIX: which builtins are invisible to `which()` is a property of the BOX, so the fixture ASKS the box instead of naming one per platform (pool measured 43 on a normal PATH, 38 under the CI-like PATH, selecting `assoc` in both). **An empty pool is now a FAILURE** - "the branch this test exists for was never exercised" - because a fixture that cannot find a case must never read as one that passed. **This is section 6's corollary, earned again: the commit that introduced the fixture said in its own message that the POSIX half was "proven by CI or nowhere", and CI then proved the WINDOWS half wrong. The author's platform guess and the author's blind spot were the same object** |
 | **MON-JQ** | - | **FIXED 2026-08-06, no repo change** | **A CI watcher that produced ZERO output and exited 0.** The monitor polled `gh run list` and parsed it with `jq`, which is **not installed on this machine**; every poll failed silently, the change-detector compared empty to empty, and the completion check never fired. It ran to the end of its loop and reported "ended without producing output" - which reads exactly like "nothing happened". Section 4's first bullet in a new costume: the failure was in the instrument, and its silence was indistinguishable from a quiet CI. Rewritten with `cut` on the tab-separated output, and it emitted on its first poll. The transferable rule is the one already written down - **a check that cannot fail is not a check** - and the specific one is that a watcher must emit on its own query failure, which this one now does |
 | **PGG-PS** | **MEDIUM** | **v1.4 backlog, phase 1 with the roster-shaped checks** | **`piped_gate_guard` is registered `"matcher": "Bash"`, so it cannot see a gate piped in PowerShell.** Demonstrated by accident this session: `python tools\check_mutation_anchors.py \| Select-Object -First 1` returned `-1` while the gate itself printed OK - the exit code was destroyed exactly as the guard's own docstring describes, and the guard did not fire because the command did not go through the Bash tool. On a Windows box PowerShell is the PRIMARY shell, so the guard is blind on the platform where it is needed most. This is the guard's OWN defect class - a roster (`Bash`) standing in for a concept (a shell) - inside the guard built to catch discarded exit codes. Fix is a matcher widening plus PowerShell status-eaters (`Select-Object -First/-Last`, `Select -First`, `\| head`), and it needs its own corpus entries and mutations. **Not built this session: the surface is frozen** |
+
+## THE CLASSIFICATION WAS REVIEWED AND IS REFUTED - 2026-08-08
+
+The counts in "RE-SCOPED SHIP GATE, 2026-08-06" were marked PROPOSED pending an independent
+pass. That pass has run and **the classification does not survive it**.
+
+**Runs:** `wf_c9822f7b-865` (5 lenses + 9 refuters, session ended mid-run) and `wf_5741d0aa-244`
+(the 11 missing refuters). Recovered from disk - `resumeFromRunId` is session-scoped, but the
+runs write as they go, so nothing was lost. Recovery tooling: `unbluff-review-recovery/`
+(`harvest_review.py`, `pair_verdicts.py`, `merge_runs.py`).
+
+**Coverage: 20 findings produced, 20 adjudicated, 0 dropped. 12 CONFIRMED, 8 REFUTED.**
+Both runs left the working tree byte-identical to its pre-run snapshot (`4f1f466d`), verified.
+
+### What the review established
+
+**"SHIP-BLOCKING 1 of 21" is wrong - but not in the way it looks.** Every run-2 verdict answered
+`moves_a_row_to_ship_blocking = false`: **no row of the 21 moves.** The rule was applied
+correctly to that population. The population was the problem - the 21 was too narrow, and R1 was
+under-derived - so the classification was **incomplete rather than mis-applied**. That
+distinction is worth keeping, because it says the method was sound and the inputs were not.
+
+| # | confirmed finding | unit | status |
+|---|---|---|---|
+| 1 | `_is_superseded` freezes an ACTIVE user plan file - `run()` returns `(0, '')` at every turn end | `meta_audit_on_stop.py` | **FIXED `d6e7ad2`** (SUP-1) |
+| 2 | a bracket in the install path makes every sweep in the repo blind; the sweep then vacuously "completes" and writes a 7-day pass marker | 13 sites, 11 files | **FIXED `d70f869`** (GLOB-1) |
+| 3 | one SKIP freezes every `pass` forever, so the weekly sweep stops re-verifying behind an `[hook-health] OK` line | `hook_health_check.py` | **OPEN - next** |
+| 4 | `install.py` copies executable Python into `~/.claude/skills`; that surface is in neither the entry-point list nor the 41-module universe, and a live user-facing HIGH was demonstrated inside it | `install.py` | **OPEN** |
+| 5 | one character outside the console codepage replaces the entire problem list with a crash warning naming none of them | `hook_health_check.py` | **OPEN (MEDIUM)** |
+| 6 | the rule was applied ONLY to items already labelled HIGH, so user-facing MEDIUMs never met the gate that defines "user-facing" | the rule | **OPEN (doc)** |
+| 7 | row 18 is attributed to the file and function the finding it cites explicitly EXONERATES | plan row 18 | **OPEN (doc)** |
+| 8 | the entry points and the 41-module denominator both exclude the four skills `install.py` installs | the rule | **OPEN (doc)** |
+| 9 | "24 of 41 local modules (17 dev-time)" is not reproducible; the triple 24/41/17 has never been simultaneously correct at ANY commit | the evidence paragraph | **OPEN (doc)** |
+| 10 | three citations do not resolve; two line numbers stale by four | the section | **OPEN (doc, LOW)** |
+
+Findings 1-5 are code; 6-10 are the classification itself. **The ship gate is not met and v1.3.1
+does not ship** until 3, 4 and 5 are closed and 6-10 corrected.
+
+**8 REFUTED, and the refutations are informative rather than merely negative.** Notably: "any
+`.py` the user drops in `hooks/` is fed to the 86%-false-positive detector" was refuted because
+9 of the 13 rows it named are `cap_shapes`/`cap_types`, whose selftest does not run that path on
+user files; and "CONTRIBUTING.md instructs users to make the exempted edit" was corrected to
+MEDIUM rather than sustained as a falsification of R2.
+
+### The lesson this pass actually taught
+
+The section's own closing paragraph said the counts must be treated as PROPOSED because "a probe
+written by the author of the thing it probes is a smoke test". That was correct, and the pass
+proves the cost of the alternative: **five of the twelve confirmed findings are defects the
+author's own rule could not see, and two of them are live user-facing HIGHs that would have
+shipped.** The single most valuable output was not any one finding but the demonstration that
+the DENOMINATOR was wrong - the review was asked to check 21 rows and found the defects outside
+them.
+
+### Instrument failures during the recovery, recorded because they are the pattern
+
+- The first harvester matched lens NAMES against journal keys that are CONTENT HASHES, found
+  none, and announced all five lenses missing while three were listed directly above. Fixed.
+- The merge script looked for a `verdict` key in run 2's journal; the agent returns a BARE
+  verdict and the wrapper is added by the script, so it found 0 of 11 - and said so loudly
+  instead of quietly reporting 9. That noise is the only reason it was caught.
+- A heredoc turned `\b` into a literal BACKSPACE in the SUP-1 mutation anchor. The gotcha is
+  already a written rule; it still needed `repr()` to catch it in practice.
+- `git push | tail -3` reported `PUSH_EXIT=0` for a push that FAILED. That is `piped_gate_guard`'s
+  exact defect class, committed by its own author, for the third time this session - and it is
+  what row **PGG-PS** is about.
