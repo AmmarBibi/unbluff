@@ -62,7 +62,7 @@ def norm(p: str) -> str:
 def our_hook_names(hooks_dir: str | None = None) -> set:
     """Basenames of THIS repo's hooks. Derived from the filesystem; never a literal list."""
     d = hooks_dir or _HOOKS_DIR
-    return {os.path.basename(p) for p in glob.glob(os.path.join(d, "*.py"))}
+    return {os.path.basename(p) for p in glob.glob(os.path.join(glob.escape(d), "*.py"))}
 
 
 def _json_commands(path: str) -> list:

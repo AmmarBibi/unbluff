@@ -118,7 +118,7 @@ def redeclared_caps(hooks_dir: str = HERE) -> list:
     the guard is not guarding, and silence there is the whole disease.
     """
     problems = []
-    for path in sorted(glob.glob(os.path.join(hooks_dir, "*.py"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(hooks_dir), "*.py"))):
         if os.path.abspath(path) == os.path.abspath(__file__):
             continue
         try:
@@ -190,7 +190,7 @@ def budget_coverage(hooks_dir: str = HERE) -> tuple:
     covered hooks in a tuple here would be the fifth hardcoded roster this repo has dug out.
     """
     selftestable, budgeted = [], []
-    for path in sorted(glob.glob(os.path.join(hooks_dir, "*.py"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(hooks_dir), "*.py"))):
         name = os.path.basename(path)
         if os.path.abspath(path) == os.path.abspath(__file__):
             continue
@@ -272,7 +272,7 @@ def selftest() -> int:
     _budgeted, _selftestable, _missing = budget_coverage()
     print("-- selftest_budget: cap %ds, default share %.2f, %d hook(s) checked for a "
           "re-declared cap" % (SELFTEST_TIMEOUT_S, DEFAULT_SHARE,
-                               len(glob.glob(os.path.join(HERE, "*.py"))) - 1))
+                               len(glob.glob(os.path.join(glob.escape(HERE), "*.py"))) - 1))
     print("-- budget coverage: %d of %d selftestable hook(s) self-budget"
           % (len(_budgeted), len(_selftestable)))
     if _missing:

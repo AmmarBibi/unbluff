@@ -94,12 +94,12 @@ def selftestable_hooks(hooks_dir: str = None) -> list:
     detector; run_selftests.py imports it rather than keeping a second copy that can drift.
     """
     d = hooks_dir or _HOOKS_DIR
-    return [p for p in sorted(glob.glob(os.path.join(d, "*.py"))) if has_selftest(p)]
+    return [p for p in sorted(glob.glob(os.path.join(glob.escape(d), "*.py"))) if has_selftest(p)]
 
 
 def all_hook_files(hooks_dir: str = None) -> list:
     """Every hook file, self-testable or not - the DENOMINATOR, so a shrinking sample shows."""
-    return sorted(glob.glob(os.path.join(hooks_dir or _HOOKS_DIR, "*.py")))
+    return sorted(glob.glob(os.path.join(glob.escape(hooks_dir or _HOOKS_DIR), "*.py")))
 
 
 def floor_violations(hooks_dir: str = None) -> list:

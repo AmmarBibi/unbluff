@@ -63,6 +63,45 @@ def _selftest_malformed_config() -> list:
     return fails
 
 
+def _selftest_glob_metachars_in_install_path() -> list:
+    """[GLOB-1] A bracket in the INSTALL PATH must not blind the sweep.
+
+    glob treats `[...]` as a character class, so every `glob.glob(os.path.join(dir, "*.py"))`
+    in this repo returns NOTHING when `dir` contains a matched bracket pair - and the directory
+    is whatever the user cloned into. `unbluff-main[1]` is the name Windows gives a re-
+    downloaded zip, so this is not an exotic path.
+
+    The consequence was silent and total: all_hook_files() and selftestable_hooks() returned 0,
+    the weekly sweep "verified" 0 of 22 hooks, and hook-health printed OK and wrote a marker
+    suppressing the sweep for a further seven days. A gate that cannot see anything cannot fail.
+
+    The repo already knew this class - a MEDIUM row records `proj[v1]` making
+    check_review_freshness see 0 of 35 tracked files - and fixed it in that one file. glob.escape
+    appeared NOWHERE in the tree, so every other site still had it. Fixed as a class.
+    """
+    import tempfile
+    fails = []
+    for dirname in ("[personal]", "unbluff-main[1]", "a?b", "plain"):
+        with tempfile.TemporaryDirectory() as td:
+            d = os.path.join(td, dirname, "hooks")
+            try:
+                os.makedirs(d)
+            except OSError:
+                continue          # the OS refuses this name; not a defect in us
+            for name in ("a_hook.py", "b_hook.py"):
+                with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                    f.write('import sys\nif "--%s" in sys.argv:\n    print("SELFTEST OK")\n'
+                            % "selftest")
+            if len(all_hook_files(d)) != 2:
+                fails.append("all_hook_files() sees %d of 2 hooks under a directory named %r - "
+                             "the sweep is blind and still reports OK"
+                             % (len(all_hook_files(d)), dirname))
+            if len(selftestable_hooks(d)) != 2:
+                fails.append("selftestable_hooks() sees %d of 2 under %r"
+                             % (len(selftestable_hooks(d)), dirname))
+    return fails
+
+
 def _selftest_shell_builtin_is_not_missing() -> list:
     """[HB-1] A hook command the shell CAN run must not be reported as a missing executable.
 
@@ -167,8 +206,8 @@ def selftest() -> int:
     # that is what this asserts. Any second `def has_selftest` or `_DISPATCH_RE` is a twin.
     _root = os.path.dirname(_HOOKS_DIR)
     _twins = []
-    for _p in (all_hook_files() + sorted(glob.glob(os.path.join(_root, "*.py")))
-               + sorted(glob.glob(os.path.join(_root, "tools", "*.py")))):
+    for _p in (all_hook_files() + sorted(glob.glob(os.path.join(glob.escape(_root), "*.py")))
+               + sorted(glob.glob(os.path.join(glob.escape(_root), "tools", "*.py")))):
         # `_m.__file__`, NOT `__file__`. The exclusion must name the module that OWNS
         # _DISPATCH_RE, and after the 2026-08-06 split `__file__` here is the SIBLING - so the
         # parent itself was reported as the twin. A9's class ("a canonicalisation is only
@@ -370,6 +409,7 @@ def selftest() -> int:
         if os.path.exists(os.path.join(st, _WEEKLY_PROGRESS)):
             fails.append("progress file not cleared after a completed sweep")
     fails += _selftest_malformed_config()
+    fails += _selftest_glob_metachars_in_install_path()
     fails += _selftest_shell_builtin_is_not_missing()
     # [P14 D1] share 0.40 = 10.0s. Measured 2026-08-02: 6.53s, 26% of the cap. It runs OTHER
     # hooks' selftests inside its own, so it is legitimately heavier than a leaf hook and

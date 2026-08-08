@@ -338,7 +338,7 @@ def _cached_index(sources: "list[str]", root: str, state_dir: str,
         values = index_sources(sources, root, exclude)
         try:
             os.makedirs(state_dir, exist_ok=True)
-            for old in glob.glob(os.path.join(state_dir, "%s-index-*.json" % HOOK_NAME)):
+            for old in glob.glob(os.path.join(glob.escape(state_dir), "%s-index-*.json" % HOOK_NAME)):
                 if os.path.abspath(old) != os.path.abspath(cache):
                     try:
                         os.remove(old)

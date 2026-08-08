@@ -114,7 +114,7 @@ def classify_tools(tools_dir: str, gates=AUX_GATES, not_a_gate=NOT_A_GATE) -> tu
     list rots into cover for whatever gets added next.
     """
     gate_basenames = {parts[-1] for _l, parts, _e in gates if parts[0] == "tools"}
-    present = {os.path.basename(p) for p in glob.glob(os.path.join(tools_dir, "*.py"))}
+    present = {os.path.basename(p) for p in glob.glob(os.path.join(glob.escape(tools_dir), "*.py"))}
     return (sorted(present - gate_basenames - set(not_a_gate)),
             sorted(set(not_a_gate) - present))
 

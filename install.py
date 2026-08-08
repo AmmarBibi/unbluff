@@ -269,7 +269,7 @@ def main() -> int:
         # the third copy of the roster was simply never converted.
         import glob as _glob
         required = set(REQUIRED_HOOKS)
-        required.update(os.path.basename(p) for p in _glob.glob(os.path.join(HOOKS_DIR, "*.py")))
+        required.update(os.path.basename(p) for p in _glob.glob(os.path.join(_glob.escape(HOOKS_DIR), "*.py")))
         missing = [s for s in sorted(required)
                    if not os.path.exists(os.path.join(HOOKS_DIR, s))]
         if missing:

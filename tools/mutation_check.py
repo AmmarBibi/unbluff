@@ -285,9 +285,24 @@ MUTATIONS = [
     ("plan_defer_guard", "M5", "marker keyed by session only again (2nd plan file skipped)",
      [('    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)',
        '    marker = marker_path(state_dir, payload.get("session_id") or "nosession")')], False),
+    # [GLOB-1 2026-08-08] CONFIRMED by the ship-gate adversarial review, then reproduced: a
+    # matched bracket pair in the INSTALL PATH ('unbluff-main[1]' is what Windows names a
+    # re-downloaded zip) made glob match nothing, so the sweep "verified" 0 of 22 hooks, printed
+    # OK, and wrote a marker suppressing itself for a further week. Both halves pinned, because
+    # either one alone restores a blind sweep. Fixed repo-wide - 13 sites - not just here: the
+    # repo already had this class fixed in check_review_freshness ALONE, which is why it was
+    # still live everywhere else.
+    ("hook_health_check", "GLOB1a", "selftestable_hooks stops escaping the directory, so a "
+     "bracket in the install path silently reduces the weekly sweep to zero hooks",
+     [('sorted(glob.glob(os.path.join(glob.escape(d), "*.py"))) if has_selftest(p)]',
+       'sorted(glob.glob(os.path.join(d, "*.py"))) if has_selftest(p)]')], False),
+    ("hook_health_check", "GLOB1b", "all_hook_files stops escaping the directory, so the "
+     "DENOMINATOR silently goes to zero and every coverage ratio reads as complete",
+     [('sorted(glob.glob(os.path.join(glob.escape(hooks_dir or _HOOKS_DIR), "*.py")))',
+       'sorted(glob.glob(os.path.join(hooks_dir or _HOOKS_DIR, "*.py")))')], False),
     ("hook_health_check", "18", "the weekly sweep goes back to a hardcoded roster",
      [('    d = hooks_dir or _HOOKS_DIR\n    return [p for p in sorted(glob.glob(os.path.join('
-       'd, "*.py"))) if has_selftest(p)]',
+       'glob.escape(d), "*.py"))) if has_selftest(p)]',
        "    d = hooks_dir or _HOOKS_DIR\n"
        "    return [os.path.join(d, n) for n in _LOCAL_HOOKS_FLOOR]")], False),
     # The twin lands in a DIFFERENT file from the test that catches it - which is precisely
@@ -471,7 +486,8 @@ MUTATIONS = [
     # rule and the corpus score will not move, because the corpus has no entry for a live
     # false positive that no longer exists.
     ("cap_shapes", "B8", "the twin-guard stops seeing a hook that grew its own cap",
-     [("    offenders = []\n    for path in sorted(glob.glob(os.path.join(hooks_dir, \"*.py\"))):",
+     [("    offenders = []\n    for path in sorted(glob.glob(os.path.join(glob.escape(hooks_dir)"
+       ", \"*.py\"))):",
        "    offenders = []\n    for path in []:")], False),
     ("cap_shapes", "B9", "an unparseable file is silently skipped again (fail-open)",
      [('        except SyntaxError as exc:\n            offenders.append("%s: does not parse '

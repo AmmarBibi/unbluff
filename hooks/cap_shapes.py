@@ -471,7 +471,7 @@ def _module_sites(module, tree, clause1, clause2, clause3, use_roster=True, keys
 def slicing_offenders(hooks_dir, clause1=True, clause2=True, clause3=True,
                       use_roster=True, keys=None):
     offenders = []
-    for path in sorted(glob.glob(os.path.join(hooks_dir, "*.py"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(hooks_dir), "*.py"))):
         module = os.path.splitext(os.path.basename(path))[0]
         if module in SANCTIONED_MODULES:
             continue

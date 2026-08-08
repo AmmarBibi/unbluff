@@ -79,7 +79,7 @@ def units(repo: str = REPO) -> list:
     """
     found = set()
     for pattern in UNIT_GLOBS:
-        for p in glob.glob(os.path.join(repo, *pattern.split("/"))):
+        for p in glob.glob(os.path.join(glob.escape(repo), *pattern.split("/"))):
             if os.path.isfile(p):
                 found.add(os.path.relpath(p, repo).replace("\\", "/"))
     tracked = _tracked(repo)
