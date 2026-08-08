@@ -180,8 +180,20 @@ def count_unpushed(cwd: str) -> int:
 # A DECLARATION, not a mention: the token has to open a line (heading, bullet, blockquote,
 # bold or a "Status:" prefix). `"superseded" in head.lower()` matched an ACTIVE plan whose
 # header said "Replaces PLAN_V2.md, which is superseded" - and skipped the entire file (P13 B4).
+# [SUP-1] Only MARKED declaration forms freeze a file. The predecessor's prefix class
+# `[#>*\-\s]*` is `*`-quantified, so it matched the empty string, a bullet, a blockquote and
+# leading whitespace alike: any of the first five lines merely OPENING with the word froze the
+# WHOLE file and made run() return (0, ''). P13 B4 fixed the word appearing MID-line and left
+# this half - an ACTIVE plan whose header names its own archive ("Superseded approaches are
+# documented below") was silently skipped at every turn-end.
+#
+# Accepted: a heading, bold, a Status:/State: prefix, or case-sensitively ALL-CAPS SUPERSEDED.
+# The `(?-i:...)` scopes case-sensitivity to that last alternative only, so lowercase prose
+# cannot reach it while the shouted form still works without a marker.
+# MEASURED against a 13-case matrix before adopting: predecessor 6 of 13, this 13 of 13.
 _SUPERSEDED_DECL_RE = re.compile(
-    r"^\s*(?:[#>*\-\s]*)(?:status\s*[:\-]\s*)?\**\s*superseded\b", re.IGNORECASE)
+    r"^\s*(?:#+\s*\**\s*|\*\*\s*|(?:status|state)\s*[:\-]\s*\**\s*)superseded\b"
+    r"|(?-i:^\s*\**\s*SUPERSEDED\b)", re.IGNORECASE)
 
 
 def _is_superseded(text: str) -> bool:
@@ -405,6 +417,35 @@ def _selftest_pipeline() -> list[str]:
         if code != 2 or "PARKED" not in msg:
             fails.append("an ACTIVE plan that only MENTIONS 'superseded' (in prose and in a "
                          f"filename) was skipped entirely: code={code} msg={msg!r}")
+    # [SUP-1] P13 B4 fixed the word MID-LINE and left it OPENING a line. `[#>*\-\s]*` is
+    # `*`-quantified, so it matches the empty string, a bullet, a blockquote and leading
+    # whitespace alike - any of the first five lines merely STARTING with the word froze the
+    # WHOLE file and returned (0, ''). An ACTIVE plan naming its own archive in its header is
+    # ordinary, and this hook then reported nothing at every turn-end for that project.
+    # Each of these is a DECLARATION-shaped line only to a reader who is not looking.
+    for opener in ("- superseded designs are listed in the appendix",
+                   "Superseded approaches are documented below.",
+                   "> superseded ideas we rejected, for the record",
+                   "* superseded drafts live in old/",
+                   "   - Superseded: only the parser section"):
+        with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as state:
+            with open(os.path.join(proj, "MASTER_PLAN.md"), "w", encoding="utf-8") as f:
+                f.write("# MASTER PLAN - ACTIVE\n%s\n\n- PARKED: investigate cache misses\n"
+                        % opener)
+            code, msg = run({"session_id": "s6", "cwd": proj}, state)
+            if code != 2 or "PARKED" not in msg:
+                fails.append("an ACTIVE plan whose header line %r merely OPENS with the word "
+                             "was frozen entirely: code=%s msg=%r" % (opener, code, msg))
+    # ...and the real declaration forms must STILL freeze, or the fix is just a deletion.
+    for decl in ("# SUPERSEDED", "## Superseded by v2", "**Superseded** by the v2 plan",
+                 "Status: superseded", "State - superseded", "SUPERSEDED - see plan_v2.md"):
+        with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as state:
+            with open(os.path.join(proj, "MASTER_PLAN.md"), "w", encoding="utf-8") as f:
+                f.write("%s\n\n- PARKED: ancient item\n" % decl)
+            code, msg = run({"session_id": "s7", "cwd": proj}, state)
+            if code != 0:
+                fails.append("a genuine declaration %r no longer freezes the file: code=%s"
+                             % (decl, code))
     return fails
 
 

@@ -440,6 +440,15 @@ MUTATIONS = [
        '\\s*[)\\]]",\n                               re.IGNORECASE)',
        '_ALLOW_BRACKET_RE = re.compile(rf"[(\\[]\\s*(?:{_TAG_ALT})[^)\\]]{{0,32}}[)\\]]", '
        're.IGNORECASE)')], False),
+    # [SUP-1 2026-08-08] CONFIRMED by the adversarial review of the ship-gate classification:
+    # P13 B4 fixed the word appearing MID-line and left it OPENING one. The anchor and its
+    # replacement were sliced out of the file and out of git rather than retyped - a heredoc
+    # turned this exact string's \b into a BACKSPACE on the first attempt.
+    ("meta_audit_on_stop", "SUP1", "the superseded declaration goes back to a `*`-quantified "
+     "prefix class, so any of the first five lines merely OPENING with the word freezes the "
+     "whole plan file and run() returns (0, '') at every turn end",
+     [('_SUPERSEDED_DECL_RE = re.compile(\n    r"^\\s*(?:#+\\s*\\**\\s*|\\*\\*\\s*|(?:status|state)\\s*[:\\-]\\s*\\**\\s*)superseded\\b"\n    r"|(?-i:^\\s*\\**\\s*SUPERSEDED\\b)", re.IGNORECASE)',
+       '_SUPERSEDED_DECL_RE = re.compile(\n    r"^\\s*(?:[#>*\\-\\s]*)(?:status\\s*[:\\-]\\s*)?\\**\\s*superseded\\b", re.IGNORECASE)')], False),
     ("meta_audit_on_stop", "B4", "_is_superseded back to a substring match anywhere in the head",
      [("    return any(_SUPERSEDED_DECL_RE.match(line) for line in text.splitlines()[:5])",
        '    return "superseded" in "\\n".join(text.splitlines()[:5]).lower()')], False),
