@@ -3,7 +3,68 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
-## [1.3.1] - 2026-07-31
+## [1.3.1] - 2026-08-08
+
+The 1.3.1 notes below were written on 2026-07-31 and the release was never tagged. Eight further
+days went into it, summarised here first.
+
+### Added
+- **`hooks/piped_gate_guard.py`** (PreToolUse, the suite's first) - blocks a Bash command that
+  pipes a GATE into `head`/`tail`/`grep`, because the pipeline returns the last command's status
+  and the gate's real result is discarded. It caught its own author four times in one session's
+  history. **Known limit, scheduled:** it is registered `matcher: "Bash"` and is therefore blind
+  to PowerShell.
+- **`hooks/timing_claim_guard.py`** - flags a duration written as MEASURED with no control marker.
+  Narrow by measurement, not by taste: it fires on 18 of 109 duration lines across the docs.
+
+### Fixed
+- **`hook_health_check` no longer reports a WORKING hook as broken.** A shell builtin such as
+  `echo` - the canonical trivial hook, and a cmd.exe builtin with no `echo.exe` - was reported as
+  "executable not on PATH" at every SessionStart. A guard that fires on a correct config gets
+  disabled, which is worse than none.
+- **A bracket in the install path no longer blinds every sweep in the repo.** `glob` treats
+  `[...]` as a character class, so a clone in `unbluff-main[1]` - the name Windows gives a
+  re-downloaded zip - made the weekly sweep verify **0 of 22 hooks**, print OK, and write a marker
+  suppressing itself for another week. Fixed at all 13 call sites in 9 files.
+- **The weekly sweep re-verifies again.** Its age stamp was recomputed on every write, so one
+  permanently-skipping hook - no `git` on PATH is enough - kept the slice young forever and every
+  other hook's recorded pass was never re-checked, behind an `[hook-health] OK` line.
+- **`meta_audit_on_stop` no longer goes silent on an active plan.** Two separate defects: a
+  bracketed allow-word anywhere in a line ("port the (closed-loop) controller") suppressed a
+  genuine parked item AND removed it from the reported total; and any of the first five lines
+  merely OPENING with "superseded" froze the whole file, so a plan whose header said "Superseded
+  approaches are documented below" was skipped at every turn end.
+- **`consistency-audit` reads Word text boxes.** The docx reader preferred python-docx, which
+  cannot see `w:txbxContent`, so **installing the recommended optional dependency made the audit
+  read less** - the same document reported CLEAN as `.docx` and flagged a fabricated number as
+  `.md`. One reader now. **Known limit:** headers, footers and footnotes are still not read.
+- **`no_regression` works on a shallow clone.** `actions/checkout` fetches one commit, and the
+  gate read "the predecessor blob is unreachable" as "there is no predecessor", turning 11 of 11
+  CI jobs red on a tree that was green locally. It now distinguishes the two, and CI fetches
+  history so the gate does real work rather than silently verifying nothing.
+
+### Changed
+- `hook_health_check`'s selftest moved to a sibling module to keep the hook body under the
+  800-line rule; the suite count is unchanged.
+- `tests/test_integration.py` derives the expected hook-group set from `install.py` instead of
+  asserting a hardcoded count, and compares SETS rather than a number.
+
+### Known and scheduled, not silently omitted
+`BUDGET-1` (the largest hook's selftest runs at 90-96% of its share on a loaded box),
+`ENC-1` (hooks print under the process codepage), `PDF-1` (three PDF readers, agreement
+unasserted), `PGG-PS`, `INT-WIN`, `INT-MUT`, `ENTRY-GUARD`, and the v1.4 disarm findings
+`AR-8`..`AR-11`. All carry a phase in `docs/V131_REVIEW_PLAN.md`.
+
+### Verification
+Suite 32/32; integration 30/30; 139 mutation anchors across 138 entries in 30 files; the full
+mutation sweep proves **136 of 138 on each platform, 2 posix-only, 0 unproven, 0 SURVIVED**, with
+CI green across 14 jobs on 11 OS/Python combinations. The ship gate for this release was
+independently reviewed rather than self-certified: that review **refuted** the first
+classification, and the four user-facing HIGHs it confirmed are the fixes listed above.
+
+---
+
+## [1.3.1 notes as written] - 2026-07-31
 
 From adjudicating 48 review findings that four adversarial passes had produced and **never
 resolved** - neither confirmed nor refuted - because the review harness itself capped
