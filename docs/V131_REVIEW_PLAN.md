@@ -2290,3 +2290,49 @@ that I had fixed an instance and left its class.
 | id | sev | owner | item |
 |---|---|---|---|
 | **PDF-1** | **MEDIUM** | **v1.4 backlog, phase 1 - with `ENC-1`, both are environment-dependent output** | **DOCX-1's class survives in the PDF path, and there it has THREE readers instead of two.** `extract._pdf_to_text` tries poppler's `pdftotext -layout`, then PyMuPDF (`fitz`), then `pdfminer`, first success wins - so **which reader the user happens to have installed determines what the audit can see**, and nothing anywhere asserts the three agree. That is precisely the defect DOCX-1 was: the docx path preferred python-docx, python-docx could not see `w:txbxContent`, and the SAME document scored "1 number found -> CLEAN" under one reader and "2 found, 1 unmatched, flags 999.9" under the other. The pdf path is strictly worse-positioned - three readers, and `pdftotext -layout` vs a layout-blind extractor differ on tables by construction, which is exactly where numbers live in a report. **Recorded as a meta-review finding rather than as part of DOCX-1 because it is the class, and DOCX-1's fix was the instance:** unifying the docx readers removed a divergence and left an identical one two functions below. The fix is the same shape - one reader, or a differential assertion that the available readers agree on a fixture containing a table and a text-anchored number - and it needs a PDF fixture plus at least two readers present to be meaningful, which is why it is scheduled rather than asserted now. **Not built this session, and not because it is inconvenient: with only one reader installed on this box a differential test would pass vacuously**, and a fixture that cannot find a case must never read as one that passed (the rule `HB1a` earned) |
+
+## RECOMMENDED ORDER for v1.4 - refreshed 2026-08-08, supersedes every earlier ordering
+
+Materiality decides ORDER, never WHETHER. Every row below is scheduled; nothing here is optional.
+
+**Phase 0 - the four disarm findings.** Still first, unchanged, and still the most serious thing
+in the backlog: `AR-8` (the LIVE cap-guard decision is a one-token disarm with all 30 gates
+green), `AR-9` (`check_mutation_anchors.main()` untested - M1's own guard carrying MR-a's shape),
+`AR-10` (clause 4's raise-exemption widens), `AR-11` (four clause-1/2 vocabulary widenings). Each
+needs the `check_readme_fresh.verdict()` treatment: extract the decision to a pure function and
+assert every branch.
+
+**Phase 0b - NEW, and it goes before the AR MEDIUM/LOW work rather than after it.** `AR6-ROWS`:
+emit a DERIVED index of all 32 AR MEDIUM/LOW findings from the source doc. Until it exists, "the
+AR MEDIUMs are scheduled" is a claim no gate can check, and the 2026-08-08 source-coverage audit
+found three of them counted nowhere at all. Cheap, and it makes the rest of the phase auditable.
+
+**Phase 1 - the environment-dependent output class.** These four are one family: what the user
+sees depends on their machine, and every one of them is silent.
+1. `ENC-1` - 24 of 24 hooks print under the process codepage. Design critique first: the answer
+   is almost certainly the 8 wired process entry points, not 24 copies of a block.
+2. `PDF-1` - three PDF readers, agreement unasserted. DOCX-1's class, unfixed. Needs a fixture
+   and two readers present, or it passes vacuously.
+3. `PGG-PS` - `piped_gate_guard` is `matcher: "Bash"` and blind to PowerShell, the primary shell
+   on the author's own box. Its own defect class, inside the guard built to catch it.
+4. `INT-WIN` - mirror the integration job on `windows-latest`. It hid both HB-1 and A2, and P13 F
+   already made this exact call for the mutation jobs.
+5. `BUDGET-1` - re-measure `hook_health_check`'s selftest on a QUIET box before touching the
+   share, then decide whether 0.40 of 25s is genuinely too tight for the largest hook.
+6. `ENTRY-GUARD` - derive the gated set from `install.py`'s install ACTIONS. This is what let
+   DOCX-1 hide; without it the next install action widens the blind region the same way.
+7. then `AR-1` .. `AR-5`, then the roster-shaped checks.
+
+**Phase 2** - `INT-MUT` (the 30-scenario integration suite has zero mutations), `SC1`, `M-M12`,
+`B1-C2FLOW` then `B1-SCOPE`, and the `mutation_check` remainder.
+
+**Phase 3** - the 26 AR MEDIUM (now correctly counted) worked through the phase-0b index.
+
+**Phase 4** - `M2`, `M3`, `A4-narrow`, `A9`, `F-L8`, `C2`, `N2`, `SC2`, `SC4`, `N3-DUP`, `MR-e`,
+the 6 AR LOW, and AR finding #12's stale citations.
+
+**The ordering principle this refresh applies, and it changed the order.** Phase 1 is no longer
+"whatever was left" - it is grouped by DEFECT CLASS rather than by unit, because this session's
+evidence is that the class is what recurs: `GLOB-1` was live in 9 files after being fixed in one,
+`ENC-1` is 24 of 24, and `PDF-1` is `DOCX-1` two functions later. Fixing by unit is what left
+each of those half-done.
