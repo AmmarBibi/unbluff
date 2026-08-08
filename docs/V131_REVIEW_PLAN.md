@@ -2158,7 +2158,7 @@ distinction is worth keeping, because it says the method was sound and the input
 | # | confirmed finding | unit | status |
 |---|---|---|---|
 | 1 | `_is_superseded` freezes an ACTIVE user plan file - `run()` returns `(0, '')` at every turn end | `meta_audit_on_stop.py` | **FIXED `d6e7ad2`** (SUP-1) |
-| 2 | a bracket in the install path makes every sweep in the repo blind; the sweep then vacuously "completes" and writes a 7-day pass marker | 13 sites, 11 files | **FIXED `d70f869`** (GLOB-1) |
+| 2 | a bracket in the install path makes every sweep in the repo blind; the sweep then vacuously "completes" and writes a 7-day pass marker | 13 sites, 9 files | **FIXED `d70f869`** (GLOB-1) |
 | 3 | one SKIP freezes every `pass` forever, so the weekly sweep stops re-verifying behind an `[hook-health] OK` line | `hook_health_check.py` | **OPEN - next** |
 | 4 | `install.py` copies executable Python into `~/.claude/skills`; that surface is in neither the entry-point list nor the 41-module universe, and a live user-facing HIGH was demonstrated inside it | `install.py` | **OPEN** |
 | 5 | one character outside the console codepage replaces the entire problem list with a crash warning naming none of them | `hook_health_check.py` | **OPEN (MEDIUM)** |
