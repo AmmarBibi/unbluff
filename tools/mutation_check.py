@@ -285,6 +285,29 @@ MUTATIONS = [
     ("plan_defer_guard", "M5", "marker keyed by session only again (2nd plan file skipped)",
      [('    marker = marker_path(state_dir, payload.get("session_id") or "nosession", path)',
        '    marker = marker_path(state_dir, payload.get("session_id") or "nosession")')], False),
+    # [DOCX-1 2026-08-08] The first mutations to reach a SHIPPED SKILL script. install.py
+    # copytree()s skills/ onto the user's machine and close_skills_guard BLOCKS the close until
+    # consistency-audit is invoked, so this file is squarely in the shipped path - it was simply
+    # outside the ship gate's entry-point derivation. Verified through the skill's own gate.
+    ("skills/consistency-audit/scripts/extract", "DOCX1a",
+     "the docx reader prefers python-docx again, so Word TEXT BOXES go unread and the audit "
+     "certifies a deliverable clean for a number it never looked at - installing the "
+     "recommended optional dependency makes it read LESS",
+     [("        return _docx_to_text_stdlib(path)",
+       '        raise ExtractError("forced fallback")')], False,
+     "skills/consistency-audit/scripts/audit"),
+    ("skills/consistency-audit/scripts/extract", "DOCX1b",
+     "runs are collected per-paragraph with .iter() again, so a nested text-box paragraph is "
+     "counted TWICE and every number the audit reports on such a document is inflated",
+     [('    own: Dict[int, List[str]] = {}\n'
+       '    for run in root.iter(_WORD_NS + "t"):\n'
+       '        para = _nearest_para(run)\n'
+       '        if para is not None:\n'
+       '            own.setdefault(id(para), []).append(run.text or "")',
+       '    own: Dict[int, List[str]] = {}\n'
+       '    for para in root.iter(_WORD_NS + "p"):\n'
+       '        own[id(para)] = [n.text or "" for n in para.iter(_WORD_NS + "t")]')], False,
+     "skills/consistency-audit/scripts/audit"),
     # [SKIP-1 2026-08-08] CONFIRMED by the ship-gate adversarial review. HIGH-1's own recorded
     # fix could not work: an age stamp recomputed on every write measures nothing.
     ("hook_health_check", "SKIP1", "the slice age stamp is refreshed to today on every sweep, so "

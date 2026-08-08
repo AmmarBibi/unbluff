@@ -62,18 +62,39 @@ def _read_text(path: str) -> str:
 
 
 def _docx_to_text(path: str) -> str:
-    """docx -> text. Prefer python-docx; fall back to unzipping document.xml."""
-    try:  # best fidelity if the user has python-docx
+    """docx -> text. ONE reader, because two readers disagreed and the better-equipped one
+    read LESS.
+
+    [DOCX-1] This preferred python-docx and took `document.paragraphs + document.tables`,
+    which excludes `w:txbxContent` - Word text boxes and callouts. The zero-dependency
+    fallback below DOES reach them, so INSTALLING the recommended optional dependency made
+    this audit read less, silently. Measured against an identical .md control: "2 numbers
+    found, 1 unmatched, flags 999.9" as markdown versus "1 number found, 0 unmatched ->
+    CLEAN" as .docx. The audit certified a deliverable clean for a number it never read, and
+    printed a shrunken denominator with no notice - the two failures this whole skill exists
+    to catch, in the skill.
+
+    The XML walk is now the primary path because it is strictly MORE complete: table cells,
+    text boxes and any other container are all just `w:p` in `word/document.xml`. python-docx
+    remains as a fallback for a package the zip/XML path cannot open at all.
+
+    Known and NOT covered by either path: headers, footers and footnotes live in separate
+    parts (`word/header1.xml` etc.) and are read by neither. Stated so the limit is a
+    recorded decision rather than a surprise.
+    """
+    try:
+        return _docx_to_text_stdlib(path)
+    except ExtractError:
+        pass  # unusual package - let python-docx try before giving up
+    try:
         import docx  # type: ignore
     except ImportError:
-        return _docx_to_text_stdlib(path)
+        raise ExtractError("Could not read docx %r: not a readable OOXML package, and "
+                           "python-docx is not installed to try harder" % (path,))
     try:
         document = docx.Document(path)
-    except Exception as exc:  # corrupt file etc. - fall back before giving up
-        try:
-            return _docx_to_text_stdlib(path)
-        except Exception:
-            raise ExtractError("Could not read docx %r: %s" % (path, exc))
+    except Exception as exc:  # noqa: BLE001  - corrupt file etc.
+        raise ExtractError("Could not read docx %r: %s" % (path, exc))
     parts = [p.text for p in document.paragraphs]
     for table in document.tables:
         for row in table.rows:
@@ -95,10 +116,29 @@ def _docx_to_text_stdlib(path: str) -> str:
         root = ET.fromstring(xml)
     except ET.ParseError as exc:
         raise ExtractError("Malformed docx XML in %r: %s" % (path, exc))
-    lines: List[str] = []
-    for para in root.iter(_WORD_NS + "p"):
-        text = "".join(node.text or "" for node in para.iter(_WORD_NS + "t"))
-        lines.append(text)
+    # [DOCX-1] Bucket each run under its NEAREST `w:p` ancestor. `para.iter(w:t)` descends into
+    # NESTED paragraphs - a text box lives inside an anchor `w:p` - so the outer paragraph
+    # collected the inner runs AND `root.iter(w:p)` yielded the inner paragraph again, emitting
+    # the same text twice. That inflates every count this audit reports on such a document.
+    # ElementTree has no parent links, so the map is built once.
+    parent = {child: node for node in root.iter() for child in node}
+
+    def _nearest_para(node):
+        cur = parent.get(node)
+        while cur is not None:
+            if cur.tag == _WORD_NS + "p":
+                return cur
+            cur = parent.get(cur)
+        return None
+
+    own: Dict[int, List[str]] = {}
+    for run in root.iter(_WORD_NS + "t"):
+        para = _nearest_para(run)
+        if para is not None:
+            own.setdefault(id(para), []).append(run.text or "")
+    # One line per paragraph in document order, so line numbers stay meaningful.
+    lines: List[str] = ["".join(own.get(id(para), []))
+                        for para in root.iter(_WORD_NS + "p")]
     return "\n".join(lines)
 
 

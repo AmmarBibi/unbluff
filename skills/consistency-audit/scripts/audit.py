@@ -315,9 +315,92 @@ def main(argv=None) -> int:
 # Self-test (pure fixtures, temp dirs; never touches real project data)
 # --------------------------------------------------------------------------- #
 
+def _selftest_docx_textbox() -> list:
+    """[DOCX-1] A number in a Word TEXT BOX must be read, and read exactly once.
+
+    Two readers disagreed and the better-equipped one read LESS. `_docx_to_text` preferred
+    python-docx and took `document.paragraphs + document.tables`, which excludes
+    `w:txbxContent` - so INSTALLING the recommended optional dependency made the audit
+    silently blind to text boxes and callouts. Measured against an .md control: identical
+    content scored "2 numbers found, 1 unmatched, flags 999.9" as markdown and "1 number
+    found, 0 unmatched -> CLEAN" as .docx. The audit certified a deliverable clean for a
+    fabricated number it never read, and printed a shrunken denominator with no notice.
+
+    The stdlib fallback was wrong in the OPPOSITE direction: a text box lives inside an anchor
+    `w:p`, so the outer paragraph's `.iter(w:t)` collected the inner runs AND `root.iter(w:p)`
+    yielded the inner paragraph again - the same text twice.
+
+    Reachable through a WIRED hook, not merely a documented one: `close_skills_guard` blocks
+    the close until consistency-audit is invoked, and SKILL.md then tells the user to run this
+    script over their own deliverable.
+    """
+    import tempfile
+    import zipfile
+    fails = []
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="%s"><w:body>'
+        '<w:p><w:r><w:t>Overshoot was 2.31 percent.</w:t></w:r></w:p>'
+        '<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml">'
+        '<w:txbxContent>'
+        '<w:p><w:r><w:t>Callout says 999.9 units.</w:t></w:r></w:p>'
+        '</w:txbxContent></v:shape></w:pict></w:r></w:p>'
+        '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Table holds 4.44.</w:t></w:r></w:p></w:tc>'
+        '</w:tr></w:tbl>'
+        '</w:body></w:document>' % W)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "textbox.docx")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("[Content_Types].xml",
+                       '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/'
+                       'package/2006/content-types"><Default Extension="xml" '
+                       'ContentType="application/xml"/><Override PartName="/word/document.xml" '
+                       'ContentType="application/vnd.openxmlformats-officedocument.'
+                       'wordprocessingml.document.main+xml"/></Types>')
+            z.writestr("_rels/.rels",
+                       '<?xml version="1.0"?><Relationships xmlns="http://schemas.'
+                       'openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" '
+                       'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+                       'relationships/officeDocument" Target="word/document.xml"/>'
+                       '</Relationships>')
+            z.writestr("word/document.xml", document_xml)
+        try:
+            text = extract.deliverable_to_text(path)
+        except Exception as exc:                                    # noqa: BLE001
+            return ["DOCX-1: deliverable_to_text raised on a minimal docx: %r" % (exc,)]
+        for needle, why in (("2.31", "an ordinary paragraph"),
+                            ("999.9", "a TEXT BOX - what the docx path never read"),
+                            ("4.44", "a table cell")):
+            if needle not in text:
+                fails.append("DOCX-1: %r (%s) missing from the extracted text - the audit would "
+                             "certify a deliverable clean for a number it never read"
+                             % (needle, why))
+        for needle in ("2.31", "999.9", "4.44"):
+            if text.count(needle) > 1:
+                fails.append("DOCX-1: %r appears %d times - nested paragraphs are double-counted,"
+                             " which inflates every count the audit reports"
+                             % (needle, text.count(needle)))
+        # The readers must AGREE. A divergence is how "install the optional dependency and the
+        # audit reads less" arose in the first place.
+        try:
+            import docx as _docx_mod                                # noqa: F401
+        except ImportError:
+            pass
+        else:
+            stdlib_text = extract._docx_to_text_stdlib(path)
+            for needle in ("2.31", "999.9", "4.44"):
+                if (needle in text) != (needle in stdlib_text):
+                    fails.append("DOCX-1: the python-docx path and the stdlib path disagree on "
+                                 "%r - whichever one the user's environment happens to select "
+                                 "changes the verdict" % needle)
+    return fails
+
+
 def selftest() -> int:
     import tempfile
     fails = []
+    fails += _selftest_docx_textbox()
 
     # 1) number extraction + tagging
     nums = extract.find_numbers("Overshoot was 94.8% (see Figure 3) in 2021; settled in 8.65 s.")
