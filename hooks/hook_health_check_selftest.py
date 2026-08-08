@@ -78,52 +78,87 @@ def _selftest_slice_age_stamp_is_not_refreshed() -> list:
     """
     import datetime as _dt
     import json as _json
+    import subprocess as _sp
     import tempfile
+
+    class _FakeProc:
+        def __init__(self, rc):
+            self.returncode, self.stdout, self.stderr = rc, "", ""
+
+    class _CountingSubprocess:
+        """Proxies the real module, but counts run() calls instead of spawning.
+
+        Six real spawns took hook_health_check's own selftest from 6.4s to 9.2s of its 10.0s
+        share - 93%, which the mutation harness then tipped over, reporting `baseline already
+        RED` for six unrelated mutations. Raising the share to fit the test would be weakening
+        an invariant to fit a scan; the test is made cheap instead. The DECISION under test is
+        the age stamp, not the spawn, so stubbing here removes cost without removing coverage.
+
+        Rebinding goes through `_m.subprocess` per this module's REBINDING RULE - production
+        resolves `subprocess.run` from the PARENT's globals at call time, so a bare local name
+        here would patch nothing.
+        """
+        SubprocessError = _sp.SubprocessError
+        DEVNULL = _sp.DEVNULL
+
+        def __init__(self):
+            self.calls = []
+
+        def run(self, cmd, **kw):
+            path = cmd[1]
+            self.calls.append(os.path.basename(path))
+            return _FakeProc(SKIP_RC if "skip" in os.path.basename(path) else 0)
+
     fails = []
     with tempfile.TemporaryDirectory() as hooks_d, tempfile.TemporaryDirectory() as state:
         ok_hook = os.path.join(hooks_d, "ok_hook.py")
         skip_hook = os.path.join(hooks_d, "skip_hook.py")
-        counter = os.path.join(state, "runs.txt").replace("\\", "/")
-        with open(ok_hook, "w", encoding="utf-8") as f:
-            f.write("import sys\n"
-                    "open(%r, 'a').write('x')\n"
-                    "sys.exit(0)\n" % counter)
-        with open(skip_hook, "w", encoding="utf-8") as f:
-            f.write("import sys\nsys.exit(%d)\n" % SKIP_RC)
+        for p in (ok_hook, skip_hook):
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("# fixture\n")
         paths = [ok_hook, skip_hook]
         progress = os.path.join(state, _WEEKLY_PROGRESS)
 
-        run_weekly_selftests(paths, state)
-        if not os.path.isfile(progress):
-            return ["SKIP-1 fixture: no progress file after the first sweep - nothing tested"]
-        first_runs = len(open(counter).read()) if os.path.isfile(counter) else 0
-        if first_runs != 1:
-            fails.append("fixture: ok_hook ran %d times in sweep 1, expected 1" % first_runs)
+        fake = _CountingSubprocess()
+        real = _m.subprocess
+        _m.subprocess = fake
+        try:
+            runs = lambda: fake.calls.count("ok_hook.py")   # noqa: E731
+            run_weekly_selftests(paths, state)
+            if not os.path.isfile(progress):
+                return ["SKIP-1 fixture: no progress file after sweep 1 - nothing was tested"]
+            if runs() != 1:
+                fails.append("fixture: ok_hook ran %d times in sweep 1, expected 1" % runs())
 
-        # Backdate the slice by three days - still inside the week, so the passes must be KEPT.
-        old = (_dt.date.today() - _dt.timedelta(days=3)).isoformat()
-        saved = _json.load(open(progress, encoding="utf-8"))
-        saved["__started__"] = old
-        _json.dump(saved, open(progress, "w", encoding="utf-8"))
+            # Backdate the slice by three days - still inside the week, so passes must be KEPT.
+            old = (_dt.date.today() - _dt.timedelta(days=3)).isoformat()
+            saved = _json.load(open(progress, encoding="utf-8"))
+            saved["__started__"] = old
+            _json.dump(saved, open(progress, "w", encoding="utf-8"))
 
-        run_weekly_selftests(paths, state)
-        now = _json.load(open(progress, encoding="utf-8")).get("__started__")
-        if now != old:
-            fails.append("the slice age stamp was REFRESHED from %r to %r by a later sweep - it "
-                         "can therefore never age out, so a permanent skip freezes every "
-                         "recorded pass forever behind an '[hook-health] OK' line" % (old, now))
-        if len(open(counter).read()) != 1:
-            fails.append("a hook already recorded as 'pass' was re-run inside the same week")
+            run_weekly_selftests(paths, state)
+            now = _json.load(open(progress, encoding="utf-8")).get("__started__")
+            if now != old:
+                fails.append("the slice age stamp was REFRESHED from %r to %r by a later sweep - "
+                             "it can therefore never age out, so a permanent skip freezes every "
+                             "recorded pass forever behind an '[hook-health] OK' line"
+                             % (old, now))
+            if runs() != 1:
+                fails.append("a hook already recorded as 'pass' was re-run inside the same week "
+                             "(%d runs)" % runs())
 
-        # ...and once the slice IS older than a week, everything must start over.
-        stale = (_dt.date.today() - _dt.timedelta(days=_WEEK_DAYS + 1)).isoformat()
-        saved = _json.load(open(progress, encoding="utf-8"))
-        saved["__started__"] = stale
-        _json.dump(saved, open(progress, "w", encoding="utf-8"))
-        run_weekly_selftests(paths, state)
-        if len(open(counter).read()) != 2:
-            fails.append("a slice older than a week did NOT start over - the passes are frozen "
-                         "permanently, which is the defect the age stamp exists to prevent")
+            # ...and once the slice IS older than a week, everything must start over.
+            stale = (_dt.date.today() - _dt.timedelta(days=_WEEK_DAYS + 1)).isoformat()
+            saved = _json.load(open(progress, encoding="utf-8"))
+            saved["__started__"] = stale
+            _json.dump(saved, open(progress, "w", encoding="utf-8"))
+            run_weekly_selftests(paths, state)
+            if runs() != 2:
+                fails.append("a slice older than a week did NOT start over (%d runs) - the "
+                             "passes are frozen permanently, which is the defect the age stamp "
+                             "exists to prevent" % runs())
+        finally:
+            _m.subprocess = real
     return fails
 
 
