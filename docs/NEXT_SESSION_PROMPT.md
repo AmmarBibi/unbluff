@@ -9,13 +9,23 @@ Paste the block below to start.
 ---
 
 ```
-unbluff - STEP 1 of the v1.0 finish plan (the NEW step 1). Repo C:\Users\ammar\Downloads\unbluff.
+unbluff - STEP 3 of the v1.0 finish plan, RESUMING mid-step.
+Repo C:\Users\ammar\Downloads\unbluff.
 
-=== STATE, verified live 2026-08-09 ===
+=== STATE, verified live 2026-08-09 (paused here) ===
 
-HEAD 00fc9ba on main, = origin/main, 0 unpushed. Tree clean apart from docs/audits/.
-run_selftests: 32/32 PASS. Integration 30/30 (ubuntu only). Mutation 138 entries / 30 units,
-139 anchors all matching. v1.3.1 is the latest tag (56f8932); HEAD is one commit past it.
+HEAD c488ab3 on main, PUSHED, = origin/main. run_selftests 33/33 exit 0.
+Mutation harness 152 entries. Criterion 4 CLOSED.
+
+FIRST THING TO DO ON RESUME, in this order:
+  1. `git -C . status --porcelain` and `git log --oneline -6`. Expect a clean tree at c488ab3
+     with eab22f0 / 3b386d5 / dd25f1e / c488ab3 as the session's four commits.
+  2. `gh run list --limit 3` - CI was NOT yet confirmed green on c488ab3 when the session
+     paused. Check it before trusting anything below.
+  3. A full local mutation sweep was STILL RUNNING at the pause and its result was never read.
+     Re-run it clean: `python tools/mutation_check.py` with nothing else executing. The last
+     COMPLETED clean sweep was at 150 entries (148 executed, 0 SURVIVED); the harness is now
+     at 152, so that figure predates IT-1/IT-2/EG-1/EG-2 landing. Do not cite it as current.
 
 === THE GOAL ===
 
@@ -76,10 +86,18 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
                     first 2 mutations. `unit_path` fixed so repo-ROOT files are mutable at all.
                     Full detail + everything it surfaced: ledger sections D, E1, J2, L.
 
-  STEP 3  The criterion-2 defect queue.
-          - INSTALL-TAUTOLOGY (CRITICAL): install.py's partial-checkout guard globs the very
-            directory it validates, so it can never detect a missing file. 9 of 25 hooks
-            unguarded, 5 of them imported by production hooks.
+  STEP 3  The criterion-2 defect queue. IN PROGRESS - two items closed 2026-08-09.
+          [DONE] INSTALL-TAUTOLOGY (CRITICAL). The guard globbed hooks/*.py into its required
+            set then asserted those files exist - the same statement twice, so real coverage
+            was the hardcoded floor alone: 16 of 25, 9 unguarded, 5 imported by production
+            hooks. Roster is now the AST IMPORT CLOSURE of the wired entry points. 16 of 25
+            -> 25 of 25 detected. install.py gained its FIRST --selftest and is registered as
+            the `install-guard` gate (suite 32 -> 33). Pinned by IT-1/IT-2. Ledger section N.
+          [DONE] ENTRY-GUARD, fixed WITH it as K3 required. install_skill() warned and
+            CONTINUED on a missing skill dir, so install exited 0 and close_skills_guard - a
+            WIRED hook - then blocked every close demanding a skill the user never got.
+            Derived from what a SKILL.md TELLS THE USER TO RUN plus its import closure.
+            Pinned by EG-1/EG-2. One shared _import_closure serves both rosters.
           - ENC-1: 0 of 25 hooks reconfigure stdout. cp1252 + non-ASCII path = half-printed
             report then exit 0. Silent, not a visible crash.
           - PGG-PS: piped_gate_guard is registered matcher "Bash"; never fires for PowerShell.

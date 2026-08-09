@@ -72,7 +72,7 @@ denominator.**
 | item | sev | state | carrier / why |
 |---|---|---|---|
 | 42 open confirmed findings, 12 units | mixed | **SCHEDULED** | forward-plan step 3. Bounded by the ledger, never by the tool's UNRESOLVED line |
-| `INSTALL-TAUTOLOGY` - the partial-checkout guard is a no-op; 9 of 25 hooks unguarded, 5 imported by production hooks | **CRITICAL** | **SCHEDULED** | step 3. Reproduced live: delete `hooks/transcript_util.py` -> `install.py` exits 0 -> `close_skills_guard.py` raises `ModuleNotFoundError` |
+| `INSTALL-TAUTOLOGY` - the partial-checkout guard is a no-op; 9 of 25 hooks unguarded, 5 imported by production hooks | **CRITICAL** | **BUILT** 2026-08-09 - see section N | step 3. Reproduced live: delete `hooks/transcript_util.py` -> `install.py` exits 0 -> `close_skills_guard.py` raises `ModuleNotFoundError` |
 | `ENC-1` - 0 of 25 hooks reconfigure stdout; cp1252 + non-ASCII path = half-printed report then **exit 0** | HIGH | **SCHEDULED** | step 3. Carried from the 08-08 ledger; **worse than recorded there** - silent, not a visible crash |
 | `PGG-PS` - `piped_gate_guard` registered `matcher: "Bash"`; never fires for PowerShell users | HIGH | **SCHEDULED** | step 3. Two-part: matcher AND the guard's POSIX-only vocabulary |
 | `SKILLDIR-DESTROY` - install/uninstall destroys a user's pre-existing same-named skill directory | HIGH | **SCHEDULED** | step 3 |
@@ -285,6 +285,29 @@ unchanged.
 
 ---
 
+## N. STEP 3 progress - the criterion-2 defect queue (2026-08-09, HEAD `c488ab3`)
+
+**Two items closed, both CRITICAL-adjacent and both the same shape: a roster not derived from
+what the code does.** The ledger said to fix them together (K3) and they were.
+
+| item | state | evidence |
+|---|---|---|
+| `INSTALL-TAUTOLOGY` (**CRITICAL**) | **BUILT** | The guard globbed `hooks/*.py` into its required set then asserted those files exist - the same statement twice, so the globbed half could never report a missing name and real coverage was the hardcoded floor alone: **16 of 25**, 9 unguarded, 5 imported by production hooks. The roster is now the **AST import closure** of the wired entry points; a module that fails to resolve with the hook dirs off `sys.path` is a LOCAL file that is missing - the one case a listing structurally cannot report. **16 of 25 -> 25 of 25** detected. Pinned by `IT-1`/`IT-2`, both CAUGHT |
+| `ENTRY-GUARD` | **BUILT** | `install_skill()` printed "skipping" and CONTINUED on a missing skill dir, so install exited 0 and then `close_skills_guard` - a WIRED hook - blocked every session close demanding a skill the user never received. Now guarded, derived from what a `SKILL.md` TELLS THE USER TO RUN plus its import closure (globbing `scripts/*.py` would reproduce the tautology one directory over). One shared `_import_closure` serves both rosters. Pinned by `EG-1`/`EG-2`, both CAUGHT |
+| `install.py` had NO `--selftest` and was a registered gate NOWHERE | **BUILT** | The structural reason the tautology survived every review: nothing ever asked the file a user literally runs a question. Now exposes `--selftest` and is EXPLICITLY registered in `run_selftests.py` as `install-guard`, per that file's own rule that name-pattern detection is a backstop. Suite is 33 gates, was 32 |
+| the probe deletes each file IN TURN, not a hand-picked victim | **BUILT** | 26 hook + 7 skill deleted-file cases, denominator printed. A roster-shaped guard probed only with names already ON its roster proves nothing about the names that are not - which is exactly how the 9 stayed invisible |
+| carriers, named so this is greppable at resume | **BUILT** | `install.py`: `missing_hook_files()`, `missing_skill_files()`, `_import_closure()` (one walk, two rosters), `_resolves_outside()`, `selftest()`. `run_selftests.py`: the `install-guard` AUX_GATES entry. `tools/mutation_check.py`: `IT-1`, `IT-2`, `EG-1`, `EG-2` |
+| the `sys.path` blocking is pinned by the ONE case that decides it | **BUILT** | For a DELETED file the blocking is inert, so a delete-only probe would have left it unpinned. It matters TRANSITIVELY (`capped_report -> cap_shapes -> cap_types`): with the dir on `sys.path` and no blocking, a PRESENT intermediate reads as external and is never traversed. Removing the blocking makes the probe red with that exact message |
+
+### N1. Newly surfaced by step 3 - SCHEDULED, not fixed
+
+| gap | state | detail |
+|---|---|---|
+| `readme-fresh` gates the selftest COUNT but not the LIST | **SCHEDULED** - step 5 | Adding the 33rd gate turned it red on the count, and rebuilding the transcript revealed it had been stale **by six gates** - `cap_shapes`, `cap_types`, `piped_gate_guard`, `timing_claim_guard`, `corpus-scorer` were listed nowhere while the gate reported OK. Same family as the ungated "CI is N jobs" number already scheduled there. Verified at close that the list now matches a real run exactly, in both directions |
+| a live re-instance of the "HARNESS ERRORs count as executed" finding (M2) | **SCHEDULED** - step 3 | `IT-1`'s anchor drifted the moment the walk was extracted into `_import_closure`. The harness reported HARNESS ERROR rather than passing quietly - which is the only reason it was caught - but still printed "6 of 6 mutations executed" over a run in which one proved nothing |
+
+---
+
 ## M. INDEPENDENT adversarial review of step 2 - run `wf_feb7202e-8fe`
 
 The repo's own rule 6: *never let the author write the only probe.* Step 2 changed a CHECKING
@@ -487,5 +510,5 @@ gates.** The rule missed the skill scripts by reading one function; a future ins
 be missed the same way. Durable fix: AST-walk `install.py:main()` for every call that writes to
 the user's machine, expand each to the files it lands, and assert that set is covered by a gate.
 
-**State: SCHEDULED, step 3.** Note this is the same shape as `INSTALL-TAUTOLOGY` (section B) -
-both are "the roster is not derived from what the code actually does". **Fix them together.**
+**State: BUILT 2026-08-09 - see section N.** Same shape as `INSTALL-TAUTOLOGY` (section B), and
+they were fixed together as this row required.
