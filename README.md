@@ -151,16 +151,17 @@ integration test below on Linux, macOS and Windows:
 
 ```text
 $ python run_selftests.py
-capped_report: OK  close_skills_guard: OK  duplicate_registration_check: OK
-fast_test_on_stop: OK  hook_health_check: OK  hook_layers: OK  memory_hygiene_guard: OK
-meta_audit_on_stop: OK  numbers_match_on_write: OK  plan_defer_guard: OK
+cap_shapes: OK  cap_types: OK  capped_report: OK  close_skills_guard: OK
+duplicate_registration_check: OK  fast_test_on_stop: OK  hook_health_check: OK
+hook_layers: OK  memory_hygiene_guard: OK  meta_audit_on_stop: OK
+numbers_match_on_write: OK  piped_gate_guard: OK  plan_defer_guard: OK
 post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  selftest_budget: OK
-show_your_proof: OK
-stop_dispatcher: OK  transcript_util: OK  usage_snip_prompt: OK
-consistency-audit-skill: OK  examples-settings-fresh: OK  python-floor: OK
-skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
-no-regression: OK  hook-provenance: OK  mutation-anchors: OK
-all 32 selftests passed
+show_your_proof: OK  stop_dispatcher: OK  timing_claim_guard: OK  transcript_util: OK
+usage_snip_prompt: OK
+consistency-audit-skill: OK  examples-settings-fresh: OK  install-guard: OK
+python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
+no-regression: OK  hook-provenance: OK  mutation-anchors: OK  corpus-scorer: OK
+all 33 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

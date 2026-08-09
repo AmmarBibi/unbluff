@@ -41,6 +41,12 @@ AUX_GATES = (
      ("--selftest",)),
     # examples/settings.json is what people copy when wiring by hand; it went stale twice
     ("examples-settings-fresh", ("tools", "regen_example_settings.py"), ("--check",)),
+    # [INSTALL-TAUTOLOGY] install.py - the file a user literally RUNS - was a registered gate
+    # NOWHERE and exposed no --selftest at all, which is how its partial-checkout guard sat
+    # tautological (glob the directory, then assert those same files exist) through every
+    # review while its comment called itself DERIVED. 9 of 25 hook files were unguarded, 5 of
+    # them imported by production hooks.
+    ("install-guard", ("install.py",), ("--selftest",)),
     # the README advertises a Python floor; CI only exercises files it actually runs
     ("python-floor", ("tools", "check_python_floor.py"), ()),
     # a hook can name a skill the repo does not ship (close_skills_guard shipped requiring

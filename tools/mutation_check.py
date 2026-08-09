@@ -501,6 +501,29 @@ MUTATIONS = [
      [("def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES:",
        "def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES[:1]:")],
      False, "tests/test_integration"),
+    # ---- INSTALL-TAUTOLOGY (CRITICAL, criterion 2). The partial-checkout guard globbed
+    # hooks/*.py into its required set and then asserted those files exist - the same statement
+    # twice, so the globbed half could never report a single missing name. Real coverage was the
+    # hardcoded floor alone: 16 of 25, leaving 9 unguarded and 5 of those imported by production
+    # hooks. Both mutations verify through install.py's OWN new --selftest, which is reachable
+    # only because unit_path gained the repo-root fallback earlier this session.
+    ("install", "IT-1", "the partial-checkout guard goes back to globbing the directory it "
+     "validates (a tautology: 9 of 25 hook files unguarded)",
+     [("    required = set(REQUIRED_HOOKS)   # floor: the entry points install.py wires + documents",
+       "    import glob as _glob\n"
+       "    required = set(REQUIRED_HOOKS)\n"
+       "    required.update(os.path.basename(p)\n"
+       "                    for p in _glob.glob(os.path.join(_glob.escape(hooks_dir), '*.py')))\n"
+       "    return [s for s in sorted(required) "
+       "if not os.path.exists(os.path.join(hooks_dir, s))]\n"
+       "    _unused = set(REQUIRED_HOOKS)")],
+     False, "install"),
+    ("install", "IT-2", "_resolves_outside stops removing the hook dirs from sys.path, so a "
+     "PRESENT intermediate reads as external and its transitive deps drop out",
+     [("    blocked = {os.path.normcase(os.path.abspath(hooks_dir)),\n"
+       "               os.path.normcase(os.path.abspath(HOOKS_DIR))}",
+       "    blocked = set()")],
+     False, "install"),
     # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
     # input is indistinguishable from one reporting a clean bill of health.
     ("stop_dispatcher", "C1", "a crashed hook is recorded as a clean rc=0 again",

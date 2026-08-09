@@ -234,8 +234,164 @@ def resolve_events(only: str, without: str) -> set:
     return chosen
 
 
+def _resolves_outside(name: str, blocked: set) -> bool:
+    """True if `name` imports from OUTSIDE the hook dirs - i.e. stdlib or third-party.
+
+    The hook directories are removed from `sys.path` for the lookup, which is the whole trick:
+    with them on the path a PRESENT local module resolves and looks external, and the guard
+    would stop requiring exactly the files it is supposed to be protecting.
+    """
+    import importlib.util
+    saved = sys.path[:]
+    sys.path = [p for p in sys.path
+                if os.path.normcase(os.path.abspath(p or ".")) not in blocked]
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, AttributeError, ValueError, TypeError):
+        return False
+    finally:
+        sys.path = saved
+
+
+def missing_hook_files(hooks_dir: str) -> list:
+    """Hook files the installed configuration needs but which are NOT present.
+
+    DERIVED FROM THE IMPORT CLOSURE of the wired entry points - never from a directory listing.
+
+    [INSTALL-TAUTOLOGY, fixed 2026-08-09] The previous implementation globbed `hooks/*.py` into
+    the required set and then asserted that each of those files exists. Those two statements are
+    the same statement: a file the glob just found is a file that exists, so the globbed portion
+    could never contribute a single missing name and the guard's real coverage was the hardcoded
+    `REQUIRED_HOOKS` floor alone - 16 of 25 files, leaving 9 unguarded, 5 of them imported by
+    production hooks. Deleting `hooks/transcript_util.py` let install print "Done." while
+    `close_skills_guard` died with ModuleNotFoundError on the user's next turn. The comment above
+    it called the check "DERIVED", which is precisely why nobody looked again.
+
+    A directory listing can only ever answer "what is here". The question is "what does the code
+    NEED", and only the imports know that - so the roster is walked out of the AST, and a module
+    that fails to resolve with the hook dirs off `sys.path` is a LOCAL file that is missing,
+    which is the one case a listing structurally cannot report.
+    """
+    import ast
+    blocked = {os.path.normcase(os.path.abspath(hooks_dir)),
+               os.path.normcase(os.path.abspath(HOOKS_DIR))}
+    required = set(REQUIRED_HOOKS)   # floor: the entry points install.py wires + documents
+    seen = set()
+    queue = [n for n in sorted(required)]
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            with open(os.path.join(hooks_dir, name), encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue   # a file that is missing or unparsable is REPORTED below, not crashed on
+        mods = []
+        for node in ast.walk(tree):   # ast.walk, so imports nested in functions count too
+            if isinstance(node, ast.Import):
+                mods += [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                mods.append(node.module.split(".")[0])
+        for m in mods:
+            cand = m + ".py"
+            if cand in required or _resolves_outside(m, blocked):
+                continue
+            required.add(cand)
+            queue.append(cand)
+    return [s for s in sorted(required) if not os.path.exists(os.path.join(hooks_dir, s))]
+
+
+def selftest() -> int:
+    """Verify the partial-checkout guard actually detects a partial checkout.
+
+    install.py had NO selftest at all - the most user-facing file in the repo, the one a user
+    literally runs, was a registered gate nowhere. That is why the defect below survived every
+    review: nothing ever asked this file a question.
+    """
+    fails = []
+    checked = 0
+    with tempfile.TemporaryDirectory() as td:
+        scratch = os.path.join(td, "hooks")
+        shutil.copytree(HOOKS_DIR, scratch,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+
+        # A full checkout must be clean, or every case below is meaningless.
+        base = missing_hook_files(scratch)
+        if base:
+            fails.append("a COMPLETE hooks/ reported missing files %r - the guard's baseline is "
+                         "broken, so nothing it says about a partial checkout can be trusted"
+                         % (base,))
+
+        # DERIVED, not a hand-picked victim: delete each hooks/*.py in turn and require the
+        # guard to name it. A roster-shaped guard that is only ever probed with a name already
+        # ON its roster proves nothing about the names that are not.
+        names = sorted(f for f in os.listdir(scratch) if f.endswith(".py"))
+        undetected = []
+        for name in names:
+            path = os.path.join(scratch, name)
+            with open(path, "rb") as f:
+                body = f.read()
+            os.remove(path)
+            try:
+                checked += 1
+                if name not in missing_hook_files(scratch):
+                    undetected.append(name)
+            finally:
+                with open(path, "wb") as f:
+                    f.write(body)
+        if undetected:
+            fails.append("the partial-checkout guard did NOT detect %d of %d deleted hook "
+                         "file(s): %r. install would print 'Done.' over a checkout that cannot "
+                         "run - the dispatchers import these at runtime"
+                         % (len(undetected), len(names), undetected))
+
+        # The sys.path blocking in _resolves_outside, pinned by the ONE case where it decides
+        # the answer. For a DELETED file the blocking is inert - find_spec misses it either way -
+        # so a probe that only deletes leaves that code unpinned, which is how unpinned code
+        # ships. It matters TRANSITIVELY: with the hooks dir on sys.path and no blocking, a
+        # PRESENT intermediate resolves as "external", is never traversed, and everything
+        # reachable only through it drops out of the required set silently.
+        #
+        # Chain used, derived by picking a leaf reached only via present intermediates:
+        # a wired hook -> capped_report -> cap_shapes -> cap_types.
+        leaf = "cap_types.py"
+        if os.path.exists(os.path.join(scratch, leaf)):
+            with open(os.path.join(scratch, leaf), "rb") as f:
+                body = f.read()
+            os.remove(os.path.join(scratch, leaf))
+            sys.path.insert(0, scratch)     # the state that makes the blocking load-bearing
+            try:
+                checked += 1
+                if leaf not in missing_hook_files(scratch):
+                    fails.append("with the hooks dir ON sys.path, a transitively-required file "
+                                 "(%s, reached via capped_report -> cap_shapes) went UNDETECTED "
+                                 "- the present intermediates resolved as external and were "
+                                 "never traversed" % leaf)
+            finally:
+                sys.path.remove(scratch)
+                with open(os.path.join(scratch, leaf), "wb") as f:
+                    f.write(body)
+        else:
+            fails.append("the sys.path-blocking probe could not find its anchor %r - re-derive "
+                         "the chain rather than leaving this case silently unrun" % leaf)
+
+    # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
+    # that passed, which is the failure this whole repo is about.
+    print("  [install-guard] %d deleted-file case(s) checked" % checked)
+    if not checked:
+        fails.append("the partial-checkout probe ran ZERO cases - it is checking nothing")
+    for f in fails:
+        print("SELFTEST FAIL:", f)
+    print("SELFTEST OK" if not fails else "SELFTEST FAILED")
+    return 0 if not fails else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Install unbluff into ~/.claude")
+    ap.add_argument("--selftest", action="store_true",
+                    help="verify the partial-checkout guard; exit 1 on failure")
     ap.add_argument("--dry-run", action="store_true", help="show changes without writing")
     ap.add_argument("--uninstall", action="store_true", help="remove this suite's entries")
     ap.add_argument("--no-skill", action="store_true", help="do not install/remove the skills")
@@ -244,6 +400,9 @@ def main() -> int:
     ap.add_argument("--without", default="", metavar="a,b",
                     help="install every group except these")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     if args.only and args.without:
         sys.exit("ERROR: use --only or --without, not both.")
@@ -261,17 +420,7 @@ def main() -> int:
 
     # Sanity: the hook files must exist before we point settings at them.
     if install:
-        # [MEDIUM-1] DERIVED, with the tuple as a floor only. REQUIRED_HOOKS was a hardcoded
-        # 14-name roster and today's transcript_util.py was the one hooks/*.py absent from it,
-        # so a partial checkout missing it would let install print "Done." while
-        # close_skills_guard tracebacks rc=1 and show_your_proof dies inside the dispatcher.
-        # This exact class was already fixed in run_selftests.py and hook_health_check.py -
-        # the third copy of the roster was simply never converted.
-        import glob as _glob
-        required = set(REQUIRED_HOOKS)
-        required.update(os.path.basename(p) for p in _glob.glob(os.path.join(_glob.escape(HOOKS_DIR), "*.py")))
-        missing = [s for s in sorted(required)
-                   if not os.path.exists(os.path.join(HOOKS_DIR, s))]
+        missing = missing_hook_files(HOOKS_DIR)
         if missing:
             sys.exit(f"ERROR: missing hook files in {HOOKS_DIR}: {missing}\n"
                      f"(Partial checkout? The Stop and PostToolUse dispatchers import their sub-hooks.)")
