@@ -69,7 +69,7 @@ The 2026-08-06 ledger predates all three.
 | `tests/test_integration.py` | **30/30**, rc=0 |
 | `tools/check_mutation_anchors.py` | **139 anchors / 138 entries / 30 files**, rc=0 |
 | `tools/mutation_check.py` (filtered, per unit) | SUP1, GLOB1a/b, SKIP1, DOCX1a/b all CAUGHT |
-| full cross-platform sweep | **CI - in progress at the time of writing.** Not recorded as green here; a number read off a still-running producer is not a measurement |
+| full cross-platform sweep | **GREEN.** Resolved after this ledger was first written: run 31256233075 on the TAGGED commit `fb7982f`, 14 of 14 jobs, verified job-by-job rather than from the run summary. Both sweeps 136 of 138, 2 posix-only, 0 unproven, 0 SURVIVED; `pre_push_gate #30` and `fast_test_on_stop #D10c` CAUGHT on ubuntu |
 
 ## E. Justified exclusions
 
