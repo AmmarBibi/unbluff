@@ -118,12 +118,13 @@ collapse, plus 8 id-linked.**
 `CHANGELOG.md:56` ("All carry a phase in `docs/V131_REVIEW_PLAN.md`") stays TRUE if the file
 keeps its phases. The file gets a HISTORY header instead of a rewrite.
 
-**Two CRITICAL rows that made this necessary:**
+**Two CRITICAL rows that made this necessary - both CLOSED 2026-08-09 (step 1):**
 
 | item | state | why |
 |---|---|---|
-| 4 confirmed findings whose ONLY carrier is the plan's `CORRECTIONS` prose | **SCHEDULED** - step 1 | `coverage_ledger_2026-08-08.md` records rows 7/8/10/11 as BUILT and names the carrier "CORRECTIONS item N". The ledger **points at** them; it does not contain them. **Re-homing them into this ledger is step 1's job and is NOT yet done** - recorded as SCHEDULED so it cannot be forgotten |
-| the R1/R2 rule - the only operational definition of "reachable by a user" | **SCHEDULED** - step 1 | criterion 2 is stated in exactly those words and is undefined anywhere else in the repo |
+| **6** confirmed findings whose ONLY carrier was the plan's `CORRECTIONS` prose | **BUILT** 2026-08-09 | Now carried verbatim in **section K2**. `coverage_ledger_2026-08-08.md` recorded rows 3/6/7/8/10/11 as BUILT naming "CORRECTIONS item N" - it *pointed at* them and never contained them. That ledger now carries a supersession note directing readers to K2. **Six rows, not four:** re-homing found two more than the original finding named |
+| the R1/R2 rule - the only operational definition of "reachable by a user" | **BUILT** 2026-08-09 | Now **section K1**, with the fourth R1 clause folded in from CORRECTIONS item 1. Lifting the base rule alone would have moved a three-clause version of a four-clause rule. Verified after the lift that all four R1 clauses, R2, the population rule and the residual-risk limit survived |
+| the HISTORY header | **BUILT** 2026-08-09 | `V131_REVIEW_PLAN.md` now opens with a HISTORY block and four reading warnings: the five accounting systems that must never be summed (247 occurrences / 217 distinct / 15 reused ids), superseded arithmetic left standing on purpose, the self-contradicting SKIP-1 row, and that the file is a shipped hook's calibration corpus |
 
 ---
 
@@ -198,3 +199,96 @@ FINALIZED-EXCLUSION until this pass. This is the failure class a grep cannot fin
 **Method note:** these were found by enumerating each source mechanically and testing whether the
 ledger names it - not by re-reading the ledger. Re-reading the ledger would have agreed with
 itself, which is precisely why that is not the procedure.
+
+---
+
+## K. RE-HOMED from V131_REVIEW_PLAN.md (2026-08-09, forward-plan step 1)
+
+Everything below previously existed **only** inside `docs/V131_REVIEW_PLAN.md`. It is reproduced
+here so this ledger CONTAINS it rather than pointing at it. Source lines are cited for
+traceability; the plan file is retained as history and is no longer the carrier.
+
+### K1. The R1/R2 rule - the operational definition of "reachable by a user"
+
+DoD **criterion 2** is stated in exactly these words ("No defect reachable by a user who installs
+it and uses it") and is made mechanically decidable ONLY here. Verbatim from
+`V131_REVIEW_PLAN.md:1975-2004`, **with the fourth R1 clause from CORRECTIONS item 1 folded in** -
+lifting the base rule alone would have moved a three-clause version of a four-clause rule.
+
+A finding is **SHIP-BLOCKING** iff BOTH hold. Otherwise it is **V1.4-BACKLOG**.
+
+- **R1 EXECUTION** - the defective code RUNS on an installed user's machine, via an entry point
+  this repo wires or documents. The entry points, **derived rather than listed**:
+  1. the 8 script paths `install.py:desired_groups()` writes into `~/.claude/settings.json`
+     (parsed out of the AST, not transcribed): `rate_prompt`, `hook_health_check`,
+     `duplicate_registration_check`, `usage_snip_prompt`, `stop_dispatcher`,
+     `post_tooluse_dispatcher`, `close_skills_guard`, `piped_gate_guard`;
+  2. `hooks/pre_push_gate.py` - NOT wired by `install.py`, but the README documents it as a real
+     git hook the user installs (`--install-global` sets `core.hooksPath`). Excluding it because
+     `install.py` does not name it would be an artifact of the rule, not a fact about the user;
+  3. **`hook_health_check`'s weekly sweep**, which runs `subprocess.run([sys.executable, path,
+     "--selftest"])` over every `hooks/*.py` at SessionStart (`hook_health_check.py:223`). Every
+     hook selftest therefore EXECUTES on a user's box, weekly. `tools/*` and `tests/*` are not
+     swept;
+  4. **the skill scripts `install.py` installs.** `main()` calls `install_skill()`, which
+     `shutil.copytree()`s all four `SKILL_NAMES` into `~/.claude/skills/<name>/`, bundled scripts
+     included (`install.py:203-205`, explicitly "not just SKILL.md"). That lands **3 executable
+     .py** on the user's machine, and `SKILL.md:48` tells them to run `audit.py` over their own
+     deliverable. `close_skills_guard` - one of the 8 WIRED hooks - blocks the close until
+     consistency-audit is invoked, so R1 is satisfied through a wired hook rather than a merely
+     documented one.
+- **R2 TRIGGER** - the input that exposes it is something the USER supplies: their repo, their
+  `settings.json`, their plan documents, their transcript, their git state. **NOT a modification
+  of unbluff's own source.**
+
+**Neither half alone is sufficient, and this is the load-bearing part.** A pure import-closure of
+the entry points reaches most of the local modules, including the entire cap detector -
+`capped_report` is imported by five wired hooks. But `capped_report` only CALLS
+`cap_shapes.slicing_offenders` / `verdict` / `exemption_problems` from inside `selftest()`, and
+that selftest's subject is unbluff's own `hooks/` directory, whose contents are byte-identical on
+every machine. A user who never edits unbluff's source cannot change that verdict, so R1 is
+satisfied and R2 is not. Conversely R2 alone would admit `tools/mutation_check.py`, which never
+runs on a user's machine at all.
+
+**Population rule (CORRECTIONS item 5):** R1 and R2 carry no severity term. The gate's population
+is **every open finding**, with severity applied AFTER reachability - never "the open HIGHs".
+
+**Known limit, carried as residual risk R3:** clause 4 was only added after an independent review
+found a defect (DOCX-1) inside the region the three-clause rule could not see. That was the
+SECOND omission of the same shape - the rule had already had to hand-add `pre_push_gate`.
+**There is no proof clause 4 is the last one.** Criterion 2 therefore means "no defect reachable
+through the paths R1/R2 enumerates, as of this enumeration", and the README WON'T-FIX section
+must say so.
+
+### K2. The five CORRECTIONS - now carried here, not pointed at
+
+`coverage_ledger_2026-08-08.md` records rows 3, 7, 8, 10 and 11 as **BUILT** naming
+"CORRECTIONS item N" as the carrier. Those items lived only at `V131_REVIEW_PLAN.md:2208-2259`.
+
+| # | correction | carries 08-08 row |
+|---|---|---|
+| 1 | R1's entry points were derived from ONE install action, not from what `install.py` DOES. **R1 gains a fourth clause: the skill scripts `install.py` installs.** DOCX-1 was found inside that blind region and is fixed. The original claim that "no open HIGH sits there today, so no row of the 21 changes" was FALSE, and its refuter proved so with a control. | 6, 10 |
+| 2 | **The module universe is 44, not 41.** The 41 excluded `skills/*/scripts/` (3). Restated as a DERIVED figure: whatever the closure of `install.py`'s install actions reaches. | 10 |
+| 3 | **"24 of 41 local modules (17 dev-time)" is not reproducible, and never was.** The section's own stated entry set yields **25 of 41 / 16**. The missing module is `hooks/hook_health_check_selftest.py`, reached by a plain `ast.Import` at `hook_health_check.py:526`. `git log -S` places the string's introduction at `5bbc8a9`, an ANCESTOR of the split commit `07b0a01`, where the universe was still 40 and the correct triple was 24 / 40 / 16. **The triple 24 / 41 / 17 has never been simultaneously correct at any commit.** Load-bearing conclusions survive and were re-verified: `capped_report` is in the closure and is imported by exactly 5 hooks, so "R1 alone is insufficient" and both premise corrections stand. The fix is not "bump 24 to 25" - it is to name WHICH modules and derive the number. | 11 |
+| 4 | **Row 18 is attributed to the file its own source exonerates.** The row names `hooks/cap_shapes.py verdict()`; the finding it cites explicitly clears that function. The row's BUCKET is unaffected (both candidate units are backlog for the same R2 reason), but a row classified against the wrong call graph is a classification that happened to be right. | 8 |
+| 5 | **The gate was only ever applied to items already labelled HIGH.** R1 and R2 carry no severity term, but the population was fixed at "the 21 open HIGH", so a user-facing defect already rated MEDIUM could never reach the gate that DEFINES user-facing. Both attempts to convert this into a shipping defect were refuted on measurement, so it is a **method** correction: population = every open finding. | 7 |
+
+**Row 3 of the 08-08 ledger** ("SHIP-BLOCKING is at least 2, not 1") was carried by "the count
+correction is in the same section". That count correction is item 3 above.
+
+**What the pass cost and bought** - retained because it is the evidence for the independent-lens
+rule: 20 findings, 20 adjudicated, 12 confirmed. Five of the twelve were defects the author's own
+rule could not see, and **three were live user-facing HIGHs that would have shipped** (SUP-1,
+GLOB-1, SKIP-1) plus DOCX-1 inside the blind region. The most valuable output was not any one
+finding but the demonstration that **the DENOMINATOR was wrong**: the review was asked to check
+21 rows and found what mattered outside them.
+
+### K3. ENTRY-GUARD - the durable mechanism this section implies
+
+**Nothing mechanically connects `install.py`'s install ACTIONS to the set of files the repo
+gates.** The rule missed the skill scripts by reading one function; a future install action will
+be missed the same way. Durable fix: AST-walk `install.py:main()` for every call that writes to
+the user's machine, expand each to the files it lands, and assert that set is covered by a gate.
+
+**State: SCHEDULED, step 3.** Note this is the same shape as `INSTALL-TAUTOLOGY` (section B) -
+both are "the roster is not derived from what the code actually does". **Fix them together.**

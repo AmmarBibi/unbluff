@@ -1,5 +1,35 @@
 # v1.3.1 plan - adversarial review findings
 
+> # HISTORY - NOT A LIVE WORKLIST
+>
+> **Status as of 2026-08-09.** This file is retained as the record of how the v1.3.1 review
+> reasoned. It is **not** the current plan and **not** the current ledger. The live documents are:
+>
+> - `docs/NEXT_SESSION_PROMPT.md` - the single canonical recommended order
+> - `docs/audits/coverage_ledger_2026-08-09.md` - the current BUILT / SCHEDULED / EXCLUDED state
+>
+> **The collapse of this file is CANCELLED** (it discharges no v1.0 criterion, and
+> `CHANGELOG.md:56` stays true while the file keeps its phases). Everything that was carried
+> *only* here has been lifted out: the **R1/R2 rule** and its four-clause entry-point derivation
+> is now `coverage_ledger_2026-08-09.md` **section K1**, and the five **CORRECTIONS** blocks are
+> **section K2**. Read those, not these.
+>
+> ## Reading warnings - earned, not decorative
+>
+> 1. **This document contains FIVE separate accounting systems and they must never be summed.**
+>    A mechanical enumeration finds 247 item-occurrences across numbered findings, refuted
+>    bullets, candidate bullets, id-bearing prose findings and table rows - 217 distinct after id
+>    dedup, because **15 ids are reused for different findings**.
+> 2. **Superseded arithmetic is left standing on purpose.** The CORRECTIONS section supersedes
+>    the RE-SCOPED SHIP GATE section on each point rather than rewriting it, so the record of
+>    what the rule got wrong survives. Numbers above a correction may be false; the correction is
+>    authoritative. The triple "24 of 41 (17 dev-time)" **has never been correct at any commit**.
+> 3. **At least one row contradicts itself** (SKIP-1's open/closed state differs between two
+>    places roughly thirty lines apart). Do not resolve such a contradiction mechanically by
+>    whichever line you read first - check the ledger.
+> 4. **This file is also the calibration corpus for a shipped hook.** Treat edits to it as
+>    touching test data, not just documentation.
+
 Source: 4-lens adversarial review, run `wf_b5ea865a-a33`, 2026-07-29. 43 agents, 39 findings, **34 confirmed**, 5 refuted.
 Lenses: silent-failure, cross-platform, test-quality, adversarial-input. Every finding below survived a refuter instructed to default to `refuted=true`.
 

@@ -8,6 +8,17 @@ none of the three.
 `piped_gate_guard`, `timing_claim_guard` and `tooling-discipline.md` section 6 - all three are
 recorded here for the first time.**
 
+> **SUPERSEDED 2026-08-09 by `coverage_ledger_2026-08-09.md`.**
+>
+> **Carrier correction - this is why the supersession matters.** Rows 3, 6, 7, 8, 10 and 11
+> below are marked BUILT naming "CORRECTIONS item N" as their carrier. Those items existed only
+> as prose inside `docs/V131_REVIEW_PLAN.md`. This ledger *pointed at* them and never contained
+> them, so deleting that file would have reverted six BUILT rows to open while this page still
+> read BUILT - a green line over a broken thing, committed against the product's own record.
+>
+> **They are now carried verbatim in `coverage_ledger_2026-08-09.md` section K2**, and the
+> R1/R2 rule those rows correct is in section K1. Read the carrier there, not here.
+
 ## A. The independent review of the ship-gate classification
 
 Runs `wf_c9822f7b-865` (5 lenses + 9 refuters) and `wf_5741d0aa-244` (the remaining 11 refuters).
