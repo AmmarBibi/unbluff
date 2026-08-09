@@ -95,8 +95,22 @@ jobs:
         run: python tools/mutation_check.py
 
   integration:
-    name: integration (install -> fire -> uninstall)
-    runs-on: ubuntu-latest
+    # This job had NEVER run outside ubuntu, while `selftest` above carried a 3-OS matrix all
+    # along - so "install -> fire -> uninstall" was proven on ONE platform while CHANGELOG 1.1.1
+    # asserted three. Of the four jobs here this is the one that most needed the matrix:
+    # install.py writes command strings into settings.json, copytrees skill directories and
+    # removes them again, which is exactly the behaviour that differs across path semantics,
+    # filesystems and process spawning. One platform was the wrong denominator for it above all.
+    #
+    # fail-fast: false, as in `selftest` - a red on one OS must not cancel the other two and
+    # leave their result unknown. An unknown is not a pass, and this repo exists to keep those
+    # two things distinguishable.
+    name: integration ${{ matrix.os }} (install -> fire -> uninstall)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all four jobs
       # on purpose: "which job runs a history-dependent gate" is exactly the kind of roster

@@ -298,7 +298,15 @@ no longer appears anywhere in the data it was computed from. `show_your_proof` c
   group (`plan_defer_guard` on PostToolUse) and a 2nd skill (`source-coverage`). The shipped hook,
   skill, and installer were all correct - only the test's own expectation was stale. Updated the group
   count, added coverage for the `source-coverage` skill, and added a scenario that fires
-  `plan_defer_guard` end to end. All 21 integration scenarios now pass on Linux/macOS/Windows.
+  `plan_defer_guard` end to end. All 21 integration scenarios now pass in CI.
+
+  **CORRECTION, 2026-08-09.** This entry originally ended "pass on Linux/macOS/Windows". That
+  was false the day it was written and stayed false for eight weeks: the three-OS matrix
+  belonged to the `selftest` job, while `integration` was `runs-on: ubuntu-latest` and had
+  never executed on any other platform. The claim is corrected in place rather than deleted -
+  a changelog that quietly edits away its own false statements is precisely the failure this
+  project exists to catch. The `integration` job gained the three-OS matrix in v1.4.0; before
+  that, Linux was the only platform on which any integration scenario had ever run.
 
 ## [1.1.0] - 2026-07-15
 

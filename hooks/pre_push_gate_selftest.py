@@ -15,11 +15,211 @@ rebind therefore goes through `_m.<name> = ...`, and every read of a rebindable 
 
 from __future__ import annotations
 
+import shutil
+
 import pre_push_gate as _m
 
 # Snapshot the parent's namespace so the test bodies can use bare names (including the
 # underscored helpers `from x import *` would skip). READS only - see the rebinding rule above.
 globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})
+
+# ------------------------------------------------------------- sh delegation accounting
+# Three checks below execute a `#!/bin/sh` shim through an external shell. Each used to catch
+# OSError, print "SELFTEST SKIP: sh unavailable" and CONTINUE - so on any box where `sh` is not
+# on PATH, three of this gate's own tests verified NOTHING while the suite printed SELFTEST OK
+# and exited 0, and run_selftests reported 32/32 over it.
+#
+# That box is not hypothetical and the skip is not rare. MEASURED 2026-08-09 on a stock Windows
+# machine: `Get-Command sh` finds nothing, while THREE copies of sh.exe sit inside the Git
+# install the same machine uses for every command this suite runs. All three sites skipped; the
+# suite exited 0. The delegation paths are the ones that decide whether a user's own repo-local
+# hooks keep firing, so "untested" here is not a small gap.
+#
+# A fixture that finds no case must FAIL, not pass. `_SH_SITES` records every delegation site
+# and whether it actually RAN; selftest() prints the denominator and fails on any shortfall.
+_SH_SITES = []
+
+# The sites this suite is REQUIRED to exercise. Declared rather than derived because these are
+# literal call sites, not a discoverable population - and a roster that is merely COUNTED
+# cannot tell a deleted site from a skipped one. Set equality makes both red.
+_SH_SITES_REQUIRED = frozenset({
+    "dispatcher-delegation",   # 8b  - post-commit shim delegating to a repo-local hook
+    "pre-push-dispatcher",     # 16  - the GLOBAL_SHIM pre-push branch that runs the gate
+    "worktree-delegation",     # 17  - delegation from inside a linked worktree
+})
+
+
+def _sh_site(name: str, ran: bool) -> None:
+    """Record one sh-delegation site. Called exactly once per site, whatever the outcome."""
+    _SH_SITES.append((name, bool(ran)))
+
+
+def _sh_delegation_fails(sites, required):
+    """The failures implied by an sh-delegation ledger. PURE, so it can be driven directly.
+
+    Inline in `selftest()` this logic could only ever be exercised on a machine with no shell at
+    all - which is to say never, on any machine that gets as far as running this suite. Its
+    failure branches would be permanently unreachable, and an unreachable guard is
+    indistinguishable from a deleted one: a mutation removing it would survive on every runner.
+    Extracted, `_selftest_sh_accounting` drives all three branches with synthetic ledgers on
+    every platform, so deleting any of them goes red everywhere.
+
+    Three states are kept apart on purpose - a site that SKIPPED, a site never REACHED, and a
+    site nobody registered - because collapsing them is exactly how "3 of 3" would keep printing
+    after a site had been deleted.
+    """
+    seen = {n for n, _ in sites}
+    skipped = sorted(n for n, ok in sites if not ok)
+    missing = sorted(required - seen)
+    extra = sorted(seen - required)
+    fails = []
+    if missing:
+        fails.append("sh-delegation site(s) never REACHED: %r - the fixture found no case, so "
+                     "this suite cannot say whether delegation works there" % (missing,))
+    if extra:
+        fails.append("unregistered sh-delegation site(s) %r - add them to _SH_SITES_REQUIRED, "
+                     "or the roster under-counts while printing a full denominator" % (extra,))
+    if skipped:
+        fails.append("no POSIX shell was found, so sh delegation is UNTESTED at %d of %d "
+                     "site(s): %r. These sites decide whether a user's own repo-local hooks "
+                     "keep firing - a skip here is this suite reporting a pass over a question "
+                     "it never asked" % (len(skipped), len(required), skipped))
+    return fails
+
+
+def _selftest_sh_accounting() -> list:
+    """The delegation accounting must go red on each degraded ledger - on EVERY platform.
+
+    This is the probe that makes the guard above mutation-testable. Without it the only machine
+    that could prove the guard works is one with no shell, and such a machine never reaches
+    here.
+    """
+    fails = []
+    req = frozenset({"alpha", "beta"})
+    cases = [
+        ("all executed", [("alpha", True), ("beta", True)], False),
+        ("one skipped", [("alpha", True), ("beta", False)], True),
+        ("one never reached", [("alpha", True)], True),
+        ("an unregistered site", [("alpha", True), ("beta", True), ("gamma", True)], True),
+        ("empty ledger", [], True),
+    ]
+    for label, sites, want_fail in cases:
+        got = _sh_delegation_fails(sites, req)
+        if bool(got) != want_fail:
+            fails.append("sh-accounting %r: expected %s, got %r"
+                         % (label, "a failure" if want_fail else "no failure", got))
+    # DENOMINATOR, printed - a case list that silently emptied would otherwise read as a pass.
+    print("  [sh-accounting] %d degraded-ledger case(s) checked" % len(cases))
+    if not cases:
+        fails.append("the sh-accounting case list is EMPTY - this guard is checking nothing")
+    return fails
+
+
+def _sh_candidates(git_exe):
+    """Every shell path worth probing for a given git location, nearest first. PURE.
+
+    Separated from the filesystem so the WALK is testable without needing a machine that
+    happens to have the awkward layout - see `_selftest_sh_candidates`. Left inside
+    `_resolve_sh` it could only be checked on a box that presents the failing layout, and CI's
+    Windows runner presents the benign one, so a mutation reverting the walk to a single level
+    would have SURVIVED every job while being a real defect.
+    """
+    out = []
+    if not git_exe:
+        return out
+    d = os.path.dirname(os.path.abspath(git_exe))
+    for _ in range(4):  # bounded: no git layout nests its shell deeper than this
+        for rel in (("usr", "bin", "sh"), ("bin", "sh"),
+                    ("usr", "bin", "sh.exe"), ("bin", "sh.exe")):
+            out.append(os.path.join(d, *rel))
+        parent = os.path.dirname(d)
+        if parent == d:  # filesystem root
+            break
+        d = parent
+    return out
+
+
+def _selftest_sh_candidates() -> list:
+    """The candidate walk must reach the shell from every git layout a box can present.
+
+    MEASURED 2026-08-09 on one stock install: git.exe exists at BOTH `<root>/cmd/git.exe` and
+    `<root>/mingw64/bin/git.exe`, and which one PATH resolves first is not this code's choice.
+    The obvious derivation `<dir of git>/../usr/bin/sh` is right for the first and WRONG for the
+    second - it points into `mingw64`, which has no `usr/bin/sh` - so on a box carrying three
+    copies of a shell it would report having none. This pins the walk that covers both, on every
+    platform, without either layout needing to exist on the machine running it.
+    """
+    fails = []
+    layouts = {
+        "cmd": ("R", "cmd", "git.exe"),
+        "bin": ("R", "bin", "git.exe"),
+        "mingw64": ("R", "mingw64", "bin", "git.exe"),
+    }
+    want = os.path.normpath(os.path.abspath(os.path.join("R", "usr", "bin", "sh.exe")))
+    for label, parts in sorted(layouts.items()):
+        cands = [os.path.normpath(c)
+                 for c in _sh_candidates(os.path.abspath(os.path.join(*parts)))]
+        if want not in cands:
+            fails.append("git layout %r: the shell at %r is not among the %d candidate(s) "
+                         "probed - a real install with this layout would report 'no shell "
+                         "available' and skip three delegation tests" % (label, want, len(cands)))
+    # DENOMINATOR, printed - a layout list that silently emptied would otherwise read as a pass.
+    print("  [sh-candidates] %d git layout(s) checked" % len(layouts))
+    if not layouts:
+        fails.append("the sh-candidates layout list is EMPTY - this guard is checking nothing")
+    return fails
+
+
+def _resolve_sh():
+    """A WORKING POSIX shell, found by asking the box. Returns (path or None, paths tried).
+
+    Deliberately names no platform. The question is not "am I on Windows" - it is "does this
+    machine have a shell that can run a `#!/bin/sh` shim", and only the machine can answer it.
+
+    Order: `sh` on PATH; then git's own shell; then `bash`, which runs a `#!/bin/sh` script
+    correctly. The git step is the one that matters, because git SHIPS a POSIX shell - it needs
+    one for its own hooks - so any box that can run the git commands in this suite has a shell
+    available even when PATH does not expose one.
+
+    The ancestors of git's directory are WALKED rather than deriving the single
+    `<dir of git>/../usr/bin/sh`, and that is load-bearing. MEASURED 2026-08-09 on a stock
+    install: git.exe exists at BOTH `<root>/cmd/git.exe` (parent IS the root, so one level up
+    works) and `<root>/mingw64/bin/git.exe` (parent is `mingw64`, which has no `usr/bin/sh.exe`
+    - the root is two levels up). Which of them PATH resolves first is not this code's choice,
+    so the one-level derivation would report "no shell available" on a machine carrying three
+    copies of one.
+    """
+    tried = []
+
+    def _works(path):
+        """A path is not a shell until it BEHAVES like one.
+
+        The probe asks for exit 7, not exit 0: a binary that ignores its arguments and exits
+        cleanly would satisfy `-c "exit 0"`, and the entire point of this function is to refuse
+        things that merely LOOK like a shell. Resolving a path is not the same as having one.
+        """
+        if not path:
+            return False
+        tried.append(path)
+        try:
+            return subprocess.run([path, "-c", "exit 7"], capture_output=True,
+                                  timeout=30).returncode == 7
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    cand = shutil.which("sh")
+    if _works(cand):
+        return cand, tried
+
+    for c in _sh_candidates(shutil.which("git")):
+        if os.path.isfile(c) and _works(c):
+            return c, tried
+
+    cand = shutil.which("bash")
+    if _works(cand):
+        return cand, tried
+
+    return None, tried
 
 def _selftest_undispatched_disclosure() -> list:
     """[P13 D8] --install-global may drop a hook name for cost, but never in silence."""
@@ -93,6 +293,12 @@ def _selftest_shim_self_reference() -> list:
 def selftest() -> int:
     import tempfile
     fails = []
+
+    # Resolved ONCE, and the candidates probed are printed: a resolver that silently found
+    # nothing and a resolver that was never asked look identical in a wall of output.
+    sh_exe, sh_tried = _resolve_sh()
+    print("  [sh-delegation] shell: %s (%d candidate(s) probed: %s)"
+          % (sh_exe or "NONE FOUND", len(sh_tried), ", ".join(sh_tried) or "(none)"))
 
     def _repo(stack):
         d = _tmpdir(stack)
@@ -190,14 +396,18 @@ def selftest() -> int:
             pass
 
         def _dispatch() -> int:
+            if not sh_exe:
+                return -1
             try:
-                return subprocess.run(["sh", disp], cwd=r, capture_output=True, timeout=60).returncode
+                return subprocess.run([sh_exe, disp], cwd=r, capture_output=True,
+                                      timeout=60).returncode
             except (OSError, subprocess.SubprocessError):
                 return -1
 
         rc = _dispatch()
+        _sh_site("dispatcher-delegation", rc != -1)
         if rc == -1:
-            print("SELFTEST SKIP: sh unavailable, dispatcher delegation untested")
+            print("SELFTEST SKIP: no POSIX shell, dispatcher delegation untested (FAILS below)")
         else:
             if rc != 0:
                 fails.append(f"dispatcher should exit 0 when delegating, got {rc}")
@@ -455,21 +665,27 @@ def selftest() -> int:
             pp_disp = os.path.join(shim_dir, "pre-push")
             with open(pp_disp, "w", encoding="utf-8", newline="\n") as f:
                 f.write(render_shim())
-            try:
-                p = subprocess.run(["sh", pp_disp], cwd=ppdir, capture_output=True, text=True,
-                                   timeout=90, env=env, encoding="utf-8", errors="replace")
-                sh_ok = True
-            except (OSError, subprocess.SubprocessError):
-                sh_ok = False
+            p = None
+            sh_ok = False
+            if sh_exe:
+                try:
+                    p = subprocess.run([sh_exe, pp_disp], cwd=ppdir, capture_output=True,
+                                       text=True, timeout=90, env=env, encoding="utf-8",
+                                       errors="replace")
+                    sh_ok = True
+                except (OSError, subprocess.SubprocessError):
+                    sh_ok = False
+            _sh_site("pre-push-dispatcher", sh_ok)
             if not sh_ok:
-                print("SELFTEST SKIP: sh unavailable, pre-push dispatcher branch untested")
+                print("SELFTEST SKIP: no POSIX shell, pre-push dispatcher branch untested "
+                      "(FAILS below)")
             else:
                 if p.returncode == 0 or "BLOCKED" not in (p.stderr or ""):
                     fails.append("pre-push dispatcher did NOT run the gate on failing tests "
                                  "(rc=%r err=%r)" % (p.returncode, (p.stderr or "")[:160]))
                 with open(ppcmd, "w", encoding="utf-8") as f:
                     f.write('python -c "pass"\n')
-                p2 = subprocess.run(["sh", pp_disp], cwd=ppdir, capture_output=True, text=True,
+                p2 = subprocess.run([sh_exe, pp_disp], cwd=ppdir, capture_output=True, text=True,
                                     timeout=90, env=env, encoding="utf-8", errors="replace")
                 if p2.returncode != 0:
                     fails.append("pre-push dispatcher blocked a passing repo (rc=%r err=%r)"
@@ -512,14 +728,21 @@ def selftest() -> int:
                 wdisp = os.path.join(wdisp_dir, "post-commit")
                 with open(wdisp, "w", encoding="utf-8", newline="\n") as f:
                     f.write(render_shim())
-                try:
-                    subprocess.run(["sh", wdisp], cwd=wt_path, capture_output=True, timeout=60,
-                                   env=env)
-                    if not os.path.exists(os.path.join(wt_path, "WT_HOOK_RAN")):
-                        fails.append("dispatcher did NOT delegate inside a linked worktree - "
-                                     "every repo-local hook is silently bypassed there")
-                except (OSError, subprocess.SubprocessError):
-                    print("SELFTEST SKIP: sh unavailable, worktree delegation untested")
+                wt_ran = False
+                if sh_exe:
+                    try:
+                        subprocess.run([sh_exe, wdisp], cwd=wt_path, capture_output=True,
+                                       timeout=60, env=env)
+                        wt_ran = True
+                    except (OSError, subprocess.SubprocessError):
+                        wt_ran = False
+                _sh_site("worktree-delegation", wt_ran)
+                if not wt_ran:
+                    print("SELFTEST SKIP: no POSIX shell, worktree delegation untested "
+                          "(FAILS below)")
+                elif not os.path.exists(os.path.join(wt_path, "WT_HOOK_RAN")):
+                    fails.append("dispatcher did NOT delegate inside a linked worktree - "
+                                 "every repo-local hook is silently bypassed there")
                 # 18: --install must not crash, and must write where git actually looks
                 rc_i = 99
                 try:
@@ -621,6 +844,20 @@ def selftest() -> int:
             fails.append("git knows client hooks with no dispatcher: %s" % missing_names)
 
     fast_test.STATE_DIR = real_state
+
+    # DENOMINATOR, printed: the sh-delegation sites must have RUN, not merely been attempted.
+    # The adjudication itself lives in _sh_delegation_fails so it can be driven with synthetic
+    # ledgers on a machine that HAS a shell - see the note there.
+    _skipped = sorted(n for n, ok in _SH_SITES if not ok)
+    _missing = sorted(_SH_SITES_REQUIRED - {n for n, _ in _SH_SITES})
+    print("  [sh-delegation] %d of %d required site(s) executed%s"
+          % (len(_SH_SITES_REQUIRED) - len(_skipped) - len(_missing), len(_SH_SITES_REQUIRED),
+             "" if not (_skipped or _missing)
+             else "; NOT executed: " + ", ".join(_skipped + _missing)))
+    fails += _sh_delegation_fails(_SH_SITES, _SH_SITES_REQUIRED)
+
+    fails += _selftest_sh_accounting()
+    fails += _selftest_sh_candidates()
     fails += _selftest_undispatched_disclosure()
     fails += _selftest_shim_self_reference()
     for f in fails:

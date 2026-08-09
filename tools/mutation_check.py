@@ -403,6 +403,29 @@ MUTATIONS = [
     ("pre_push_gate", "D8", "--install-global stops disclosing the hook names it drops",
      [("    return tuple(sorted(all_client_hook_candidates() & HIGH_FREQUENCY_HOOKS))",
        "    return ()")], False),
+    # ---- STEP2 SH: the three sh-delegation paths. Until 2026-08-09 each caught OSError,
+    # printed "SELFTEST SKIP: sh unavailable" and CONTINUED, so on any box without `sh` on PATH
+    # three of this gate's own tests verified nothing while the suite exited 0 and
+    # run_selftests reported 32/32. All four mutations below are cross-platform on purpose: a
+    # guard whose failure branch is only reachable on a shell-less machine is a guard no runner
+    # can prove, which is the shape of defect this repo exists to catch.
+    ("pre_push_gate_selftest", "SH-1", "the shell resolver goes back to finding nothing",
+     [("    tried = []\n\n    def _works(path):",
+       "    tried = []\n    return None, tried\n\n    def _works(path):")],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-2", "a skipped delegation site stops being a failure",
+     [('    if skipped:\n        fails.append("no POSIX shell was found',
+       '    if False:\n        fails.append("no POSIX shell was found')],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-3", "a delegation site that was never REACHED stops failing",
+     [('    if missing:\n        fails.append("sh-delegation site(s) never REACHED',
+       '    if False:\n        fails.append("sh-delegation site(s) never REACHED')],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-4", "the candidate walk collapses to the one-level "
+     "derivation that misses the mingw64 layout",
+     [("    for _ in range(4):  # bounded: no git layout nests its shell deeper than this",
+       "    for _ in range(1):  # bounded: no git layout nests its shell deeper than this")],
+     False, "pre_push_gate"),
     # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
     # input is indistinguishable from one reporting a clean bill of health.
     ("stop_dispatcher", "C1", "a crashed hook is recorded as a clean rc=0 again",
