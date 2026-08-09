@@ -509,20 +509,36 @@ MUTATIONS = [
     # only because unit_path gained the repo-root fallback earlier this session.
     ("install", "IT-1", "the partial-checkout guard goes back to globbing the directory it "
      "validates (a tautology: 9 of 25 hook files unguarded)",
-     [("    required = set(REQUIRED_HOOKS)   # floor: the entry points install.py wires + documents",
+     # ANCHOR UPDATED 2026-08-09: the walk moved into _import_closure when the skill roster
+     # became a second caller, so the old anchor stopped matching. The harness reported
+     # HARNESS ERROR rather than passing quietly, which is the only reason it was noticed -
+     # the same way P14 B3 was caught.
+     [("    required = _import_closure(hooks_dir, REQUIRED_HOOKS)",
        "    import glob as _glob\n"
        "    required = set(REQUIRED_HOOKS)\n"
        "    required.update(os.path.basename(p)\n"
-       "                    for p in _glob.glob(os.path.join(_glob.escape(hooks_dir), '*.py')))\n"
-       "    return [s for s in sorted(required) "
-       "if not os.path.exists(os.path.join(hooks_dir, s))]\n"
-       "    _unused = set(REQUIRED_HOOKS)")],
+       "                    for p in _glob.glob(os.path.join(_glob.escape(hooks_dir), '*.py')))")],
      False, "install"),
     ("install", "IT-2", "_resolves_outside stops removing the hook dirs from sys.path, so a "
      "PRESENT intermediate reads as external and its transitive deps drop out",
-     [("    blocked = {os.path.normcase(os.path.abspath(hooks_dir)),\n"
+     [("    blocked = {os.path.normcase(os.path.abspath(src_dir)),\n"
        "               os.path.normcase(os.path.abspath(HOOKS_DIR))}",
        "    blocked = set()")],
+     False, "install"),
+    # ---- ENTRY-GUARD, the sibling INSTALL-TAUTOLOGY had to be fixed with (ledger K3).
+    ("install", "EG-1", "a missing SKILL.md stops being reported, so install ships "
+     "close_skills_guard demanding a skill the user never received",
+     [('        if not os.path.exists(md):\n'
+       '            missing.append(os.path.join(name, "SKILL.md"))\n'
+       '            continue',
+       '        if not os.path.exists(md):\n'
+       '            continue')],
+     False, "install"),
+    ("install", "EG-2", "the skill-script roster goes back to globbing the directory it "
+     "validates - INSTALL-TAUTOLOGY reproduced one directory over",
+     [('        seeds = sorted(set(re.findall(r"scripts/([A-Za-z0-9_]+\\.py)", text)))',
+       '        seeds = sorted(os.path.basename(p) for p in __import__("glob").glob(\n'
+       '            os.path.join(skills_dir, name, "scripts", "*.py")))')],
      False, "install"),
     # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
     # input is indistinguishable from one reporting a clean bill of health.

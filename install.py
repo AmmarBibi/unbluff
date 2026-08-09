@@ -195,8 +195,12 @@ def install_skill(dry_run: bool) -> None:
         src = os.path.join(SKILLS_DIR, name)
         dest = os.path.join(SKILLS_DEST_DIR, name)
         if not os.path.isdir(src):
-            print(f"  ! skill source missing ({src}); skipping")
-            continue
+            # Not a warning. close_skills_guard is WIRED and requires all four by name, so
+            # "skipping" here ships a hook that blocks every close with an unsatisfiable
+            # demand. main()'s ENTRY-GUARD check normally catches this first; this is the
+            # backstop for any other caller.
+            sys.exit(f"ERROR: skill source missing ({src}) - refusing to install a partial set. "
+                     f"close_skills_guard requires all of {list(SKILL_NAMES)}.")
         if dry_run:
             print(f"  would copy skill -> {dest}")
             continue
@@ -272,22 +276,32 @@ def missing_hook_files(hooks_dir: str) -> list:
     that fails to resolve with the hook dirs off `sys.path` is a LOCAL file that is missing,
     which is the one case a listing structurally cannot report.
     """
+    required = _import_closure(hooks_dir, REQUIRED_HOOKS)
+    return [s for s in sorted(required) if not os.path.exists(os.path.join(hooks_dir, s))]
+
+
+def _import_closure(src_dir: str, seeds) -> set:
+    """`seeds` plus every local .py they import, transitively. ONE implementation, two callers.
+
+    Shared by the hook roster and the skill-script roster because they are the same question
+    asked of two directories, and a second copy of this walk is the twin defect this repo hunts.
+    """
     import ast
-    blocked = {os.path.normcase(os.path.abspath(hooks_dir)),
+    blocked = {os.path.normcase(os.path.abspath(src_dir)),
                os.path.normcase(os.path.abspath(HOOKS_DIR))}
-    required = set(REQUIRED_HOOKS)   # floor: the entry points install.py wires + documents
+    required = set(seeds)
     seen = set()
-    queue = [n for n in sorted(required)]
+    queue = sorted(required)
     while queue:
         name = queue.pop()
         if name in seen:
             continue
         seen.add(name)
         try:
-            with open(os.path.join(hooks_dir, name), encoding="utf-8") as f:
+            with open(os.path.join(src_dir, name), encoding="utf-8") as f:
                 tree = ast.parse(f.read())
         except (OSError, SyntaxError, UnicodeDecodeError):
-            continue   # a file that is missing or unparsable is REPORTED below, not crashed on
+            continue   # a file that is missing or unparsable is REPORTED by the caller
         mods = []
         for node in ast.walk(tree):   # ast.walk, so imports nested in functions count too
             if isinstance(node, ast.Import):
@@ -300,7 +314,44 @@ def missing_hook_files(hooks_dir: str) -> list:
                 continue
             required.add(cand)
             queue.append(cand)
-    return [s for s in sorted(required) if not os.path.exists(os.path.join(hooks_dir, s))]
+    return required
+
+
+def missing_skill_files(skills_dir: str) -> list:
+    """Skill files install.py will LAND on the user's machine but which are not present.
+
+    [ENTRY-GUARD, the sibling of INSTALL-TAUTOLOGY - the ledger says fix them together]
+    `install_skill()` printed "! skill source missing; skipping" and CONTINUED, so a checkout
+    missing a skill directory installed cleanly and exited 0 - and then `close_skills_guard`,
+    one of the eight WIRED hooks, demanded all four skills by name and blocked every session
+    close with a demand the user could not satisfy. A warning is not a guard.
+
+    Derived, and deliberately NOT from a directory listing: the required scripts are the ones a
+    `SKILL.md` TELLS THE USER TO RUN, plus their import closure. Globbing `scripts/*.py` would
+    reproduce INSTALL-TAUTOLOGY exactly - it would only ever find the files that are there.
+    SKILL.md names `scripts/audit.py`; `audit.py` imports `extract` and `sources`; all three are
+    therefore required, and none of the three is named in any hand-written list.
+    """
+    import re
+    missing = []
+    for name in SKILL_NAMES:
+        md = os.path.join(skills_dir, name, "SKILL.md")
+        if not os.path.exists(md):
+            missing.append(os.path.join(name, "SKILL.md"))
+            continue
+        try:
+            with open(md, encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        seeds = sorted(set(re.findall(r"scripts/([A-Za-z0-9_]+\.py)", text)))
+        if not seeds:
+            continue
+        scripts_dir = os.path.join(skills_dir, name, "scripts")
+        for rel in sorted(_import_closure(scripts_dir, seeds)):
+            if not os.path.exists(os.path.join(scripts_dir, rel)):
+                missing.append(os.path.join(name, "scripts", rel))
+    return missing
 
 
 def selftest() -> int:
@@ -377,9 +428,49 @@ def selftest() -> int:
             fails.append("the sys.path-blocking probe could not find its anchor %r - re-derive "
                          "the chain rather than leaving this case silently unrun" % leaf)
 
+    # ENTRY-GUARD: the same probe against the OTHER thing install.py lands - the skills.
+    skill_checked = 0
+    with tempfile.TemporaryDirectory() as td:
+        sk = os.path.join(td, "skills")
+        shutil.copytree(SKILLS_DIR, sk,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        if missing_skill_files(sk):
+            fails.append("a COMPLETE skills/ reported missing files %r - baseline broken"
+                         % (missing_skill_files(sk),))
+        # DERIVED: every SKILL.md, and every bundled script reachable from one, deleted in turn.
+        victims = []
+        for name in SKILL_NAMES:
+            victims.append(os.path.join(sk, name, "SKILL.md"))
+            sdir = os.path.join(sk, name, "scripts")
+            if os.path.isdir(sdir):
+                victims += [os.path.join(sdir, f) for f in sorted(os.listdir(sdir))
+                            if f.endswith(".py")]
+        undetected_s = []
+        for path in victims:
+            if not os.path.exists(path):
+                continue
+            with open(path, "rb") as f:
+                body = f.read()
+            os.remove(path)
+            try:
+                skill_checked += 1
+                if not missing_skill_files(sk):
+                    undetected_s.append(os.path.relpath(path, sk))
+            finally:
+                with open(path, "wb") as f:
+                    f.write(body)
+        if undetected_s:
+            fails.append("the skill guard did NOT detect %d of %d deleted skill file(s): %r. "
+                         "install would exit 0 while close_skills_guard - a WIRED hook - "
+                         "demands all of %r and blocks every session close"
+                         % (len(undetected_s), len(victims), undetected_s, list(SKILL_NAMES)))
+
     # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
     # that passed, which is the failure this whole repo is about.
-    print("  [install-guard] %d deleted-file case(s) checked" % checked)
+    print("  [install-guard] %d hook + %d skill deleted-file case(s) checked"
+          % (checked, skill_checked))
+    if not skill_checked:
+        fails.append("the skill-guard probe ran ZERO cases - it is checking nothing")
     if not checked:
         fails.append("the partial-checkout probe ran ZERO cases - it is checking nothing")
     for f in fails:
@@ -424,6 +515,15 @@ def main() -> int:
         if missing:
             sys.exit(f"ERROR: missing hook files in {HOOKS_DIR}: {missing}\n"
                      f"(Partial checkout? The Stop and PostToolUse dispatchers import their sub-hooks.)")
+        # ENTRY-GUARD: the skills are the OTHER thing install.py lands on the user's machine
+        # (R1 clause 4). Missing ones used to warn and continue, which installs
+        # close_skills_guard demanding a skill the user never received.
+        if not args.no_skill:
+            missing_skills = missing_skill_files(SKILLS_DIR)
+            if missing_skills:
+                sys.exit(f"ERROR: missing skill files in {SKILLS_DIR}: {missing_skills}\n"
+                         f"(Partial checkout? close_skills_guard requires all of "
+                         f"{list(SKILL_NAMES)} and would block every session close.)")
 
     settings = load_settings()
     updated = apply_changes(json.loads(json.dumps(settings)), install, events)  # work on a copy
