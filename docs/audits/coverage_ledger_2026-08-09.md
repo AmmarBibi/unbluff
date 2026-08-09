@@ -334,6 +334,21 @@ a filtered run (8 of 8 for this unit, which the harness itself prints as "proves
 the 140 entries not considered"). A "148 clean" figure would therefore be an INFERENCE, and is
 not claimed. The authoritative full-sweep number for 148 entries is CI's, on ubuntu and windows.
 
+**That number, now measured - CI run `31310388615` on `3b386d5`, conclusion `success`, 16 jobs,
+0 failed:**
+
+| job | result |
+|---|---|
+| `mutation harness (do the tests bite?)` - ubuntu | **146 of 148 executed, 0 skipped, 2 not-runnable-here, 0 unproven** |
+| `mutation harness (windows-only mutations)` - windows | **146 of 148 executed, 0 skipped, 2 not-runnable-here, 0 unproven** |
+
+**The two not-runnable pairs are DISJOINT, verified rather than assumed** - ubuntu cannot run
+`fast_test_on_stop` `D10`/`D10b` (Windows-only), windows cannot run `pre_push_gate` `#30` and
+`fast_test_on_stop` `D10c` (POSIX-only). Across the pair, **all 148 execute and none survives**.
+That complementarity is the entire reason the second mutation job exists, and it is checked here
+rather than trusted, because "146 of 148" printed twice would otherwise read as two identical
+gaps instead of two halves of a whole.
+
 **`SH-8` exists because the durability check found the gap:** the UNAVAILABLE tri-state - the fix
 for the false alarm step 2 introduced - was asserted by a probe but pinned by no mutation. By this
 repo's own standard (mutation-test every fix; SURVIVED means the test is decorative) an
