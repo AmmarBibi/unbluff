@@ -1,19 +1,21 @@
 # Next session start prompt
 
-**Supersedes the 2026-07-31 version, which pointed at plan sections P11/P12. That work is done
-and v1.3.1 is shipped.** Paste the block below to start.
+**Supersedes the 2026-08-08 version.** That version's Steps 1-4 and this file's Steps 1-6 were two
+competing orderings; the 2026-08-09 meta-review merged them. **This is the single canonical
+recommended order.** Step 1 of the old plan (the promise inventory) is DONE.
+
+Paste the block below to start.
 
 ---
 
 ```
-unbluff - STEP 1 of the finish plan. Repo C:\Users\ammar\Downloads\unbluff.
+unbluff - STEP 1 of the v1.0 finish plan (the NEW step 1). Repo C:\Users\ammar\Downloads\unbluff.
 
-=== STATE, all verified 2026-08-08 ===
+=== STATE, verified live 2026-08-09 ===
 
-HEAD fb7982f on main, = origin/main, 0 unpushed, tree clean. v1.3.1 is TAGGED and pushed, and CI
-is GREEN on the tagged commit itself (14/14 jobs, 11 OS/Python combinations, both mutation
-sweeps: 136 of 138 per platform, 2 posix-only, 0 unproven, 0 SURVIVED). Suite 32/32, integration
-30/30, anchors 139 across 138 entries in 30 files.
+HEAD 00fc9ba on main, = origin/main, 0 unpushed. Tree clean apart from docs/audits/.
+run_selftests: 32/32 PASS. Integration 30/30 (ubuntu only). Mutation 138 entries / 30 units,
+139 anchors all matching. v1.3.1 is the latest tag (56f8932); HEAD is one commit past it.
 
 === THE GOAL ===
 
@@ -39,43 +41,93 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
   MEDIUM/LOW rows from the roadmap entirely. The ONLY way any of them comes back is if criterion
   1 finds a README claim that depends on it - in which case the choice is fix it or delete the
   claim.
-* The v1.3.1 ship gate ("no HIGH in the shipped hook path") is retired; it did its job.
-  Criteria 1-4 above replace it.
-* The 2,200-line docs/V131_REVIEW_PLAN.md is HISTORY, not a live worklist. Read it for context,
-  do not grow it. Step 3 collapses it.
+* The v1.3.1 ship gate ("no HIGH in the shipped hook path") is retired. Criteria 1-4 replace it.
+* docs/V131_REVIEW_PLAN.md (2,338 lines - NOT 2,200) is HISTORY. **The collapse is CANCELLED.**
+  It discharges no criterion, and CHANGELOG.md:56 stays true if the file keeps its phases. It
+  gets a HISTORY header, not a rewrite. 40 of its 247 items must survive - see ledger section F.
+* The v1.0 milestone ships as tag **v1.4.0**. `v1.0.0` has existed since 2026-07-13 (b8d3f9e);
+  "v1.0" stays a milestone LABEL in prose and the CHANGELOG explains it.
+* Claim DISPOSITION gets its own step and runs BEFORE any step that edits README/SKILL.md.
 
-=== THIS SESSION: STEP 1 - the promise inventory. The ONLY deliverable ===
+=== THE RECOMMENDED ORDER - the single canonical list ===
 
-Extract EVERY behavioural claim from README.md and the four skills/*/SKILL.md files. For each
-claim, name the test, gate or selftest that proves it - or mark it UNPROVEN.
+  [DONE 2026-08-09] Promise inventory. N=243 claims, 85 PROVEN, 158 UNPROVEN, 0 pending.
+                    docs/audits/promise_inventory_2026-08-09.md
 
-  - Print the DENOMINATOR: N claims found, M proven, K unproven. That number is the whole point:
-    it converts the remaining work from open-ended into finite.
-  - A claim is behavioural if it asserts what the software DOES ("blocks X", "fires on Y",
-    "never Z", "runs at most weekly"). Prose about motivation is not a claim.
-  - "Proven" means a specific named test/gate would FAIL if the claim became false. If you cannot
-    name it, it is UNPROVEN. Do not credit a claim to a test that merely touches the same file.
-  - Output: docs/audits/promise_inventory_2026-08-XX.md, a claim -> proof matrix.
+  STEP 1  Re-home what only exists inside V131_REVIEW_PLAN.md, and correct the record.
+          - Lift the R1/R2 rule + its four-clause entry-point derivation into the ledger. It is
+            the ONLY operational definition of "reachable by a user", and criterion 2 is stated
+            in exactly those words.
+          - Move the five CORRECTIONS blocks into the ledger. coverage_ledger_2026-08-08.md
+            records 4 confirmed findings as BUILT naming "CORRECTIONS item N" as the carrier -
+            the ledger points at them, it does not contain them.
+          - Add the HISTORY header + "these five accounting systems must never be summed".
+          No code. Half a session.  [criterion 2's definition; unblocks everything else]
 
-DO NOT FIX ANYTHING THIS SESSION. The inventory IS the deliverable, and it defines the scope of
-everything after it. Fixing while inventorying is how the denominator gets lost.
+  STEP 2  Make the platform evidence real.
+          - Give the `integration` job the matrix the `selftest` job already has:
+            [ubuntu-latest, macos-latest, windows-latest]. Same edit size as INT-WIN, closes
+            criterion 4 instead of two thirds of it.
+          - Make pre_push_gate's three `SELFTEST SKIP: sh unavailable` paths ASK THE BOX (resolve
+            git's bundled sh.exe) and FAIL when neither is found. A fixture that finds no case
+            must fail, not pass.
+          - Fix CHANGELOG 1.1.1's false claim that the integration suite passes on all three
+            platforms - it has never run anywhere but ubuntu.
+          NOTE: there is no macOS MUTATION sweep either; say so rather than overstating.
+          [criterion 4. Do this BEFORE step 5 - it converts all 35 platform-caveated PROVEN rows]
 
-Good Workflow candidate (parallel extraction: README + 4 SKILL files, then one adjudicator).
-ASK ME FOR A USAGE SNIP before any fan-out.
+  STEP 3  The criterion-2 defect queue.
+          - INSTALL-TAUTOLOGY (CRITICAL): install.py's partial-checkout guard globs the very
+            directory it validates, so it can never detect a missing file. 9 of 25 hooks
+            unguarded, 5 of them imported by production hooks.
+          - ENC-1: 0 of 25 hooks reconfigure stdout. cp1252 + non-ASCII path = half-printed
+            report then exit 0. Silent, not a visible crash.
+          - PGG-PS: piped_gate_guard is registered matcher "Bash"; never fires for PowerShell.
+          - SKILLDIR-DESTROY, FASTTEST-BLOCK, CA-SELFREF, --dry-run, settings.json backup.
+          - The 42 open confirmed findings (NOT 5 - check_review_freshness masks 37 because a
+            unit that is both STALE and has open findings is labelled only STALE).
+          - Gate-ledger coverage: 4 of 5 gate tiers write no record at all.
+          - Buy ONE INDEPENDENT adversarial pass over the R1 dispositions. Non-negotiable: the
+            author's probe set and the author's blind spot are the same object.
+          [criterion 2]
 
-=== THEN, in later sessions ===
+  STEP 4  Build criterion 3 for real.
+          4a: a PAYLOAD-DRIVEN scorer. The existing machinery scores 0 of 16 REQUIRED_HOOKS -
+              13 read sys.stdin and none expose slicing_offenders(), the only entrypoint
+              score_corpus.py calls. "The corpus machinery already exists" was FALSE.
+          4b: one corpus of ordinary correct work per input class.
+          Fix FASTTEST-BLOCK first (step 3) - it is a false alarm that would be measured.
+          Settle the denominator: the repo's own detectors say 25 / 24 / 22.
+          [criterion 3. Largest unknown in the estimate - RE-ESTIMATE AFTER THIS LANDS]
 
-  Step 2: measure each hook's false-alarm rate on ordinary correct Python (criterion 3). The
-          corpus machinery already exists - tests/cap_spelling_corpus.py, tools/score_corpus.py.
-  Step 3: INT-WIN (mirror the ubuntu-only integration job on windows-latest - it hid two live
-          defects), then collapse V131_REVIEW_PLAN.md into a short ROADMAP.md + GitHub issues.
-  Step 4: cut v1.0, and write the WON'T-FIX rule into the README so the product's claims and its
-          behaviour match.
+  STEP 5  Disposition: one pass over all 243 rows into a MACHINE-READABLE claim ledger.
+          Every row gets exactly one of KEEP-PROVEN / KEEP-BUILD-PROOF / DELETE /
+          OUT-OF-SCOPE-INSTRUCTION, and the four counts are PRINTED BY THE TOOL and sum to 243.
+          Every KEEP-BUILD-PROOF row gets a MUTATION anchor, not a text anchor - a freshness gate
+          proves the sentence still exists, never that it is still true.
+          Record BOTH denominators for the SKILL.md population question (~76 rows turn on it).
+          Zero source files edited in this step - decisions only.
+          [criterion 1, decision half + the only mechanism that keeps criterion 1 true]
 
-Estimated 3-4 sessions total. If a session ends with the estimate GROWN, say so explicitly
-rather than quietly re-planning.
+  STEP 6  Execute the dispositions, write the WON'T-FIX section, cut v1.4.0.
+          - Apply every DELETE and build every KEEP-BUILD-PROOF proof.
+          - Document the two shipped hooks that appear ONLY in CHANGELOG - one of them blocks the
+            user's Bash commands.
+          - Fix install.py --help (it promises per-hook --only/--without; the flags are per-EVENT).
+          - The WON'T-FIX section states the residual risks plainly: criterion 2 means "no defect
+            reachable through the paths R1/R2 enumerates, as of this enumeration"; criterion 4 is
+            proven on three clean CI images, not on machines; criterion 3's rate is published WITH
+            its corpus provenance and never as "never fires"; nothing here proves a stranger can
+            use it, and the feedback path is <named>.
+          - CHANGELOG entry naming the four criteria and their evidence; annotated tag v1.4.0;
+            confirm the CI badge is green ON the tagged commit.
+          [criterion 1 edit half + the DoD's own closing clause + release mechanics]
 
-=== WORKING RULES - unchanged, all earned ===
+Estimated 7 sessions from here. The old 3-4 was made before the population had ever been
+measured and was wrong by ~2.5x. If a session ends with the estimate GROWN, say so explicitly
+rather than quietly re-planning. Step 4's size is genuinely unknown - RE-ESTIMATE AFTER IT LANDS.
+
+=== WORKING RULES - unchanged, all earned. NONE of these may be dropped ===
 
 Regression test FIRST and watch it FAIL. Mutation-test every fix; SURVIVED means the test is
 decorative. Treat every PRESCRIBED fix as a HYPOTHESIS - one scored 7 of 12 and failed on its own
@@ -91,24 +143,35 @@ watcher is not a green result.
 
 === USEFUL POINTERS ===
 
+  docs/audits/coverage_ledger_2026-08-09.md - CURRENT BUILT / SCHEDULED / EXCLUDED state.
+    Supersedes the 08-08 ledger. Sections A-D are the four criteria; J is the source-coverage gaps.
+  docs/audits/promise_inventory_2026-08-09.md - the 243-row claim -> proof matrix.
+  docs/audits/plan_audit_2026-08-09.md - the 7 plan issues. READ ITS CORRECTIONS BLOCK FIRST;
+    the body carries superseded numbers on purpose, to preserve the record of the error.
+  docs/audits/consistency_2026-08-09.md, meta_review_2026-08-09.md - the 2026-08-09 close ritual.
   unbluff-review-recovery\ - harvest_review.py, pair_verdicts.py, merge_runs.py, and
     final_adjudication.json (20 findings, 12 confirmed, 8 refuted). Recovers a Workflow's results
     from disk after a session ends, since resumeFromRunId is session-scoped.
-  docs/audits/coverage_ledger_2026-08-08.md - current BUILT / SCHEDULED / EXCLUDED state.
-  docs/audits/consistency_2026-08-08.md - the last consistency pass.
 
 === AT CLOSE ===
 
 Invoke the four audit skills (consistency-audit, completeness-audit, source-coverage,
 meta-review) via the Skill tool and COMPLETE each procedure, including refreshing the coverage
-ledger. In the last session each of the four found something real, so this is not a formality.
+ledger. On 2026-08-09 all four found something real - consistency found a live `[]` placeholder
+and a tool self-reference defect, source-coverage found two unreconciled populations, and
+meta-review found the gate ledger covers 1 of 5 tiers. This is not a formality.
 ```
 
 ---
 
 ## One thing to watch
 
-If step 1 returns a large `UNPROVEN` count, the instinct will be to start fixing immediately.
-Resist it. The inventory is the scope document, and its value is being **complete** before
-anything is touched - a partial inventory reads as a floor and you plan against a denominator
-that is really larger.
+The 2026-08-08 version warned: *if step 1 returns a large UNPROVEN count, the instinct will be to
+start fixing immediately - resist it.* That warning held; the inventory is complete and nothing
+was fixed while it was being built.
+
+**The 2026-08-09 successor warning:** the plan audit published false numbers because it read the
+inventory **while the inventory was still being regenerated**. Every derived figure it quoted
+came from an intermediate state. The rule already existed - *a number read off a still-running
+producer is not a measurement* - and the audit that was checking compliance with the rules broke
+it. When steps 2-6 produce numbers, re-read the producer **after it has exited**, or cite nothing.
