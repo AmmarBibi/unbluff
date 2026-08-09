@@ -42,10 +42,28 @@ def unit_path(root: str, name: str) -> str:
     A bare name is a hook (`hooks/<name>.py`) - the original and still commonest form. A name
     containing "/" is repo-relative (`tools/check_review_freshness`), which is what lets this
     harness reach the gate tooling.
+
+    A bare name that is NOT a hook falls back to the repo ROOT. Without that fallback the two
+    files in `COPY_FILES` - `install.py` and `run_selftests.py` - had no addressable form at
+    all: a bare name went to `hooks/`, and a repo-relative name needs a "/" they do not have.
+    The harness copied them into every scratch tree and could not mutate either, so the single
+    most user-facing file in the repo - the one a user actually runs - was uncoverable BY
+    CONSTRUCTION while the summary line printed a clean total. That is the INSTALL-TAUTOLOGY
+    shape again: a roster not derived from what the code does.
+
+    `hooks/` is probed FIRST so every pre-existing entry resolves exactly as before - this is
+    strictly additive, and a name present in both places keeps its old meaning rather than
+    silently changing target.
     """
     if "/" in name:
         return os.path.normpath(os.path.join(root, *(name + ".py").split("/")))
-    return os.path.join(root, "hooks", name + ".py")
+    hooked = os.path.join(root, "hooks", name + ".py")
+    if os.path.isfile(hooked):
+        return hooked
+    rooted = os.path.join(root, name + ".py")
+    if os.path.isfile(rooted):
+        return rooted
+    return hooked  # absent either way: report against the conventional location
 
 
 def missing_anchors(live_text: str, edits) -> list:
@@ -426,6 +444,63 @@ MUTATIONS = [
      [("    for _ in range(4):  # bounded: no git layout nests its shell deeper than this",
        "    for _ in range(1):  # bounded: no git layout nests its shell deeper than this")],
      False, "pre_push_gate"),
+    # ---- SH-5..SH-7 pin the three defects an INDEPENDENT adversarial review found in SH-1..SH-4
+    # (run wf_feb7202e-8fe, 24 findings produced / 24 adjudicated / 14 confirmed). Every one of
+    # them was a property the original guards ASSERTED but did not PIN, so each mutation below
+    # would have survived on every platform before the fix - which is what the review measured.
+    ("pre_push_gate_selftest", "SH-5", "the raw usr/bin shell is preferred over the "
+     "environment-setting bin/sh again (MEASURED: raw = no coreutils on PATH)",
+     [('        for rel in (("bin", "sh"), ("usr", "bin", "sh"),\n'
+       '                    ("bin", "sh.exe"), ("usr", "bin", "sh.exe")):',
+       '        for rel in (("usr", "bin", "sh"), ("bin", "sh"),\n'
+       '                    ("usr", "bin", "sh.exe"), ("bin", "sh.exe")):')],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-6", "the extension-less shell candidates are dropped "
+     "(they were asserted by NOTHING before the review)",
+     [('        for rel in (("bin", "sh"), ("usr", "bin", "sh"),\n'
+       '                    ("bin", "sh.exe"), ("usr", "bin", "sh.exe")):',
+       '        for rel in (("bin", "sh.exe"), ("usr", "bin", "sh.exe")):')],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-8", "UNAVAILABLE collapses back into 'skipped', turning an "
+     "environment incapability into a selftest FAILURE (the false alarm step 2 introduced)",
+     [("    skipped = sorted(n for n, ok in sites if ok is False)\n"
+       "    unavailable = sorted(n for n, ok in sites if ok is None)",
+       "    skipped = sorted(n for n, ok in sites if not ok)\n"
+       "    unavailable = []")],
+     False, "pre_push_gate"),
+    ("pre_push_gate_selftest", "SH-7", "the delegation numerator goes back to subtraction, "
+     "which under-reports and can print a negative count",
+     [("    ran = {n for n, ok in sites if ok is True} & required",
+       "    ran = range(len(required) - len([1 for _n, o in sites if o is False]) - "
+       "len(required - {n for n, _ in sites}))")],
+     False, "pre_push_gate"),
+    # ---- INT-MUT: the integration suite's FIRST mutation coverage. 30 scenarios had zero, so
+    # a scenario that silently stopped asserting - exactly what A2 did until it drifted - would
+    # keep printing "30/30 scenarios passed", which is this repo's own definition of the absence
+    # of evidence. That gap mattered more after step 2, not less: criterion 4 is now claimed
+    # BUILT on three platforms on the strength of this suite, and running an unverified suite on
+    # three runners multiplies it rather than verifying it.
+    #
+    # The plan recorded INT-MUT as BLOCKED ("mutation_check verifies through a unit's
+    # --selftest, so either test_integration.py grows one (it is a script, not a unit) or the
+    # harness learns to verify through a command"). That premise is REFUTED by measurement:
+    # test_integration.py ignores argv entirely and exits 0 on pass / 1 on fail, so
+    # `python tests/test_integration.py --selftest` already satisfies the verify contract
+    # unchanged. Measured 2026-08-09: rc=0. No harness change was needed.
+    #
+    # DENOMINATOR: 2 of 30 scenario-groups are pinned here, not 30. This closes INT-MUT's
+    # "zero mutations" state and proves the mechanism; full per-scenario coverage stays
+    # SCHEDULED in the ledger.
+    ("install", "INT-1", "install_skill stops copying bundled scripts (SKILL.md only again)",
+     [('        shutil.copytree(src, dest, dirs_exist_ok=True,\n'
+       '                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))',
+       '        os.makedirs(dest, exist_ok=True)\n'
+       '        shutil.copy2(os.path.join(src, "SKILL.md"), os.path.join(dest, "SKILL.md"))')],
+     False, "tests/test_integration"),
+    ("install", "INT-2", "install_skill ships only the first skill (the v1.1.1 drift)",
+     [("def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES:",
+       "def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES[:1]:")],
+     False, "tests/test_integration"),
     # ---- P13 C: the malformed-input cluster. A checker that crashes or goes quiet on bad
     # input is indistinguishable from one reporting a clean bill of health.
     ("stop_dispatcher", "C1", "a crashed hook is recorded as a clean rc=0 again",

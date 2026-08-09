@@ -49,9 +49,24 @@ _SH_SITES_REQUIRED = frozenset({
 })
 
 
-def _sh_site(name: str, ran: bool) -> None:
-    """Record one sh-delegation site. Called exactly once per site, whatever the outcome."""
-    _SH_SITES.append((name, bool(ran)))
+def _sh_site(name, ran) -> None:
+    """Record one sh-delegation site. Called exactly once per site, whatever the outcome.
+
+    `ran` is TRI-STATE and the third value is load-bearing:
+      True  - the delegation actually executed
+      False - a shell was expected but the site did not run (a real failure)
+      None  - UNAVAILABLE: the box cannot present this case at all (e.g. `git worktree` is not
+              supported here), so the fixture was never built
+
+    Collapsing None into False turns an environment incapability into a selftest FAILURE, which
+    on such a box makes EVERY pre_push_gate mutation a HARNESS ERROR - the suite would report a
+    defect in the code because of a missing feature in git. This repo already distinguishes the
+    two everywhere else: `SKIP_RC` 77, and `no_regression`'s "I could not look" versus "there is
+    nothing to look at" (see the CI-SHALLOW note in .github/workflows/selftest.yml). "A fixture
+    that finds no case must FAIL" is about a fixture that LOOKED and found nothing - not about a
+    box that cannot be asked the question.
+    """
+    _SH_SITES.append((name, None if ran is None else bool(ran)))
 
 
 def _sh_delegation_fails(sites, required):
@@ -69,7 +84,8 @@ def _sh_delegation_fails(sites, required):
     after a site had been deleted.
     """
     seen = {n for n, _ in sites}
-    skipped = sorted(n for n, ok in sites if not ok)
+    skipped = sorted(n for n, ok in sites if ok is False)
+    unavailable = sorted(n for n, ok in sites if ok is None)
     missing = sorted(required - seen)
     extra = sorted(seen - required)
     fails = []
@@ -87,6 +103,29 @@ def _sh_delegation_fails(sites, required):
     return fails
 
 
+def _sh_delegation_line(sites, required) -> str:
+    """The printed denominator line. PURE, so `_selftest_sh_accounting` can assert the NUMBER.
+
+    The numerator is an INTERSECTION, not a subtraction. It used to be
+    `len(required) - len(skipped) - len(missing)`, which under-reports as soon as an
+    UNREGISTERED site is recorded as skipped (that name is not in `required`, so it was
+    subtracted from a total it never belonged to) and can go NEGATIVE if a site is recorded
+    twice. A denominator line that can print a wrong number is the exact thing this guard exists
+    to prevent, so it is now computed from the set it is describing and pinned by a probe.
+    """
+    ran = {n for n, ok in sites if ok is True} & required
+    skipped = sorted(n for n, ok in sites if ok is False)
+    unavailable = sorted(n for n, ok in sites if ok is None)
+    missing = sorted(required - {n for n, _ in sites})
+    note = ""
+    if skipped or missing:
+        note += "; NOT executed: " + ", ".join(sorted(set(skipped + missing)))
+    if unavailable:
+        note += "; UNAVAILABLE on this box: " + ", ".join(unavailable)
+    return "  [sh-delegation] %d of %d required site(s) executed%s" % (
+        len(ran), len(required), note)
+
+
 def _selftest_sh_accounting() -> list:
     """The delegation accounting must go red on each degraded ledger - on EVERY platform.
 
@@ -96,20 +135,38 @@ def _selftest_sh_accounting() -> list:
     """
     fails = []
     req = frozenset({"alpha", "beta"})
+    # (label, ledger, must_fail, expected NUMERATOR in the printed line)
+    # The numerator is asserted, not just the verdict: the printed denominator and the
+    # adjudication are two different claims, and only the adjudication used to be probed.
     cases = [
-        ("all executed", [("alpha", True), ("beta", True)], False),
-        ("one skipped", [("alpha", True), ("beta", False)], True),
-        ("one never reached", [("alpha", True)], True),
-        ("an unregistered site", [("alpha", True), ("beta", True), ("gamma", True)], True),
-        ("empty ledger", [], True),
+        ("all executed", [("alpha", True), ("beta", True)], False, 2),
+        ("one skipped", [("alpha", True), ("beta", False)], True, 1),
+        ("one never reached", [("alpha", True)], True, 1),
+        ("an unregistered site", [("alpha", True), ("beta", True), ("gamma", True)], True, 2),
+        ("empty ledger", [], True, 0),
+        # UNAVAILABLE is NOT a failure - the box cannot present the case. Collapsing this into
+        # `skipped` turned a missing git feature into a red suite and every pre_push_gate
+        # mutation into a HARNESS ERROR on such a box.
+        ("one unavailable", [("alpha", True), ("beta", None)], False, 1),
+        # The two ledgers that made the OLD subtraction-based numerator wrong. Both required
+        # names ran, so the numerator is 2 in each; the old arithmetic printed 1 and 0.
+        ("unregistered site recorded as skipped",
+         [("alpha", True), ("beta", True), ("gamma", False)], True, 2),
+        ("a site recorded twice", [("alpha", True), ("alpha", True), ("beta", True)], False, 2),
     ]
-    for label, sites, want_fail in cases:
+    for label, sites, want_fail, want_num in cases:
         got = _sh_delegation_fails(sites, req)
         if bool(got) != want_fail:
             fails.append("sh-accounting %r: expected %s, got %r"
                          % (label, "a failure" if want_fail else "no failure", got))
+        line = _sh_delegation_line(sites, req)
+        want_prefix = "  [sh-delegation] %d of %d required site(s) executed" % (want_num, len(req))
+        if not line.startswith(want_prefix):
+            fails.append("sh-accounting %r: printed line should start %r, got %r"
+                         % (label, want_prefix, line))
     # DENOMINATOR, printed - a case list that silently emptied would otherwise read as a pass.
-    print("  [sh-accounting] %d degraded-ledger case(s) checked" % len(cases))
+    print("  [sh-accounting] %d degraded-ledger case(s) checked (verdict + numerator)"
+          % len(cases))
     if not cases:
         fails.append("the sh-accounting case list is EMPTY - this guard is checking nothing")
     return fails
@@ -129,8 +186,19 @@ def _sh_candidates(git_exe):
         return out
     d = os.path.dirname(os.path.abspath(git_exe))
     for _ in range(4):  # bounded: no git layout nests its shell deeper than this
-        for rel in (("usr", "bin", "sh"), ("bin", "sh"),
-                    ("usr", "bin", "sh.exe"), ("bin", "sh.exe")):
+        # ORDER IS LOAD-BEARING: `bin/sh` before `usr/bin/sh`. Git for Windows ships BOTH, and
+        # they are not equivalent - `bin/sh.exe` is the wrapper that sets up the environment,
+        # `usr/bin/sh.exe` is the raw msys2 shell. MEASURED 2026-08-09 from a clean PowerShell
+        # (NOT from inside a Git Bash session, which inherits the environment and hides the
+        # difference - the first attempt at this measurement was confounded exactly that way):
+        #   usr/bin/sh.exe  ->  COREUTILS_MISSING   (`ls` is not on PATH)
+        #   bin/sh.exe      ->  COREUTILS_OK
+        # `python` resolves under both, so the pre-push shim survives either way; anything using
+        # coreutils does not. Picking the raw shell would run a user's repo-local hooks in an
+        # environment git itself never gives them. Pinned by _selftest_sh_candidates, which
+        # asserts the ORDER rather than mere membership - membership passed before this fix.
+        for rel in (("bin", "sh"), ("usr", "bin", "sh"),
+                    ("bin", "sh.exe"), ("usr", "bin", "sh.exe")):
             out.append(os.path.join(d, *rel))
         parent = os.path.dirname(d)
         if parent == d:  # filesystem root
@@ -150,21 +218,43 @@ def _selftest_sh_candidates() -> list:
     platform, without either layout needing to exist on the machine running it.
     """
     fails = []
+    # Both the .exe (Windows) and extension-less (POSIX) shapes are asserted. The extension-less
+    # pair used to be covered by NOTHING: every layout here named a `.exe`, so deleting
+    # ("bin","sh") and ("usr","bin","sh") survived on every platform including both mutation
+    # jobs - the candidate list was half-pinned while the guard printed a full denominator.
     layouts = {
-        "cmd": ("R", "cmd", "git.exe"),
-        "bin": ("R", "bin", "git.exe"),
-        "mingw64": ("R", "mingw64", "bin", "git.exe"),
+        "cmd": (("R", "cmd", "git.exe"), ("R", "usr", "bin", "sh.exe")),
+        "bin": (("R", "bin", "git.exe"), ("R", "usr", "bin", "sh.exe")),
+        "mingw64": (("R", "mingw64", "bin", "git.exe"), ("R", "usr", "bin", "sh.exe")),
+        "posix-usr": (("R", "usr", "bin", "git"), ("R", "usr", "bin", "sh")),
+        "posix-local": (("R", "usr", "local", "bin", "git"), ("R", "bin", "sh")),
     }
-    want = os.path.normpath(os.path.abspath(os.path.join("R", "usr", "bin", "sh.exe")))
-    for label, parts in sorted(layouts.items()):
+    for label, (gparts, wparts) in sorted(layouts.items()):
+        want = os.path.normpath(os.path.abspath(os.path.join(*wparts)))
         cands = [os.path.normpath(c)
-                 for c in _sh_candidates(os.path.abspath(os.path.join(*parts)))]
+                 for c in _sh_candidates(os.path.abspath(os.path.join(*gparts)))]
         if want not in cands:
             fails.append("git layout %r: the shell at %r is not among the %d candidate(s) "
                          "probed - a real install with this layout would report 'no shell "
                          "available' and skip three delegation tests" % (label, want, len(cands)))
+
+    # ORDER, not just membership. `bin/sh` must be preferred over `usr/bin/sh`: on Git for
+    # Windows the former sets up the environment and the latter does not (MEASURED - see
+    # _sh_candidates). Asserting membership alone passed while the resolver picked the raw
+    # shell, which is how that defect survived until an independent review found it.
+    probe = [os.path.normpath(c)
+             for c in _sh_candidates(os.path.abspath(os.path.join("R", "cmd", "git.exe")))]
+    for wrapper, raw in ((("R", "bin", "sh.exe"), ("R", "usr", "bin", "sh.exe")),
+                         (("R", "bin", "sh"), ("R", "usr", "bin", "sh"))):
+        w = os.path.normpath(os.path.abspath(os.path.join(*wrapper)))
+        r = os.path.normpath(os.path.abspath(os.path.join(*raw)))
+        if w in probe and r in probe and probe.index(w) > probe.index(r):
+            fails.append("candidate ORDER wrong: %r is probed before %r. On Git for Windows the "
+                         "usr/bin shell runs WITHOUT git's coreutils on PATH, so a repo-local "
+                         "hook using ls/grep/dirname would fail under it" % (r, w))
+
     # DENOMINATOR, printed - a layout list that silently emptied would otherwise read as a pass.
-    print("  [sh-candidates] %d git layout(s) checked" % len(layouts))
+    print("  [sh-candidates] %d git layout(s) checked, order pinned" % len(layouts))
     if not layouts:
         fails.append("the sh-candidates layout list is EMPTY - this guard is checking nothing")
     return fails
@@ -711,7 +801,12 @@ def selftest() -> int:
                                         capture_output=True, env=genv).returncode:
                 wt_ok = False
             if not wt_ok:
-                print("SELFTEST SKIP: git worktree unavailable")
+                # UNAVAILABLE, not skipped: this box cannot build a linked worktree at all, so
+                # the delegation case was never presented. Recording it False would make a
+                # missing git feature read as a defect in this repo and turn every
+                # pre_push_gate mutation into a HARNESS ERROR here.
+                _sh_site("worktree-delegation", None)
+                print("SELFTEST SKIP: git worktree unavailable (recorded UNAVAILABLE, not run)")
             else:
                 # 17: the dispatcher must still delegate to the repo's own hook
                 hooks_common = os.path.join(wt_host, ".git", "hooks")
@@ -848,12 +943,7 @@ def selftest() -> int:
     # DENOMINATOR, printed: the sh-delegation sites must have RUN, not merely been attempted.
     # The adjudication itself lives in _sh_delegation_fails so it can be driven with synthetic
     # ledgers on a machine that HAS a shell - see the note there.
-    _skipped = sorted(n for n, ok in _SH_SITES if not ok)
-    _missing = sorted(_SH_SITES_REQUIRED - {n for n, _ in _SH_SITES})
-    print("  [sh-delegation] %d of %d required site(s) executed%s"
-          % (len(_SH_SITES_REQUIRED) - len(_skipped) - len(_missing), len(_SH_SITES_REQUIRED),
-             "" if not (_skipped or _missing)
-             else "; NOT executed: " + ", ".join(_skipped + _missing)))
+    print(_sh_delegation_line(_SH_SITES, _SH_SITES_REQUIRED))
     fails += _sh_delegation_fails(_SH_SITES, _SH_SITES_REQUIRED)
 
     fails += _selftest_sh_accounting()

@@ -305,8 +305,9 @@ no longer appears anywhere in the data it was computed from. `show_your_proof` c
   belonged to the `selftest` job, while `integration` was `runs-on: ubuntu-latest` and had
   never executed on any other platform. The claim is corrected in place rather than deleted -
   a changelog that quietly edits away its own false statements is precisely the failure this
-  project exists to catch. The `integration` job gained the three-OS matrix in v1.4.0; before
-  that, Linux was the only platform on which any integration scenario had ever run.
+  project exists to catch. The `integration` job gained the three-OS matrix in commit `eab22f0`
+  (released as v1.4.0); before that, Linux was the only platform on which any integration
+  scenario had ever run.
 
 ## [1.1.0] - 2026-07-15
 

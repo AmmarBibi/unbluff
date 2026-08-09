@@ -64,17 +64,17 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
           - Add the HISTORY header + "these five accounting systems must never be summed".
           No code. Half a session.  [criterion 2's definition; unblocks everything else]
 
-  STEP 2  Make the platform evidence real.
-          - Give the `integration` job the matrix the `selftest` job already has:
-            [ubuntu-latest, macos-latest, windows-latest]. Same edit size as INT-WIN, closes
-            criterion 4 instead of two thirds of it.
-          - Make pre_push_gate's three `SELFTEST SKIP: sh unavailable` paths ASK THE BOX (resolve
-            git's bundled sh.exe) and FAIL when neither is found. A fixture that finds no case
-            must fail, not pass.
-          - Fix CHANGELOG 1.1.1's false claim that the integration suite passes on all three
-            platforms - it has never run anywhere but ubuntu.
-          NOTE: there is no macOS MUTATION sweep either; say so rather than overstating.
-          [criterion 4. Do this BEFORE step 5 - it converts all 35 platform-caveated PROVEN rows]
+  [DONE 2026-08-09] STEP 2. Platform evidence is real. **CRITERION 4 IS CLOSED.**
+                    HEAD `eab22f0`; CI run 31304861194 green, 16 jobs, `integration` on
+                    ubuntu + macos + windows. It was expected to go RED and did not - no fix
+                    was required on any platform, so the unpriced part of step 2 cost nothing.
+                    pre_push_gate's three sh paths now resolve a shell and FAIL when none is
+                    found (was 0 of 3 sites executing while the suite printed SELFTEST OK and
+                    exited 0). CHANGELOG 1.1.1 corrected in place; two README claims that the
+                    matrix falsified repaired in the same commit. INT-MUT unblocked - its
+                    "blocked on a mechanism" premise was refuted by measurement - and given its
+                    first 2 mutations. `unit_path` fixed so repo-ROOT files are mutable at all.
+                    Full detail + everything it surfaced: ledger sections D, E1, J2, L.
 
   STEP 3  The criterion-2 defect queue.
           - INSTALL-TAUTOLOGY (CRITICAL): install.py's partial-checkout guard globs the very
@@ -88,7 +88,38 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             unit that is both STALE and has open findings is labelled only STALE).
           - Gate-ledger coverage: 4 of 5 gate tiers write no record at all.
           - Buy ONE INDEPENDENT adversarial pass over the R1 dispositions. Non-negotiable: the
-            author's probe set and the author's blind spot are the same object.
+            author's probe set and the author's blind spot are the same object. **Step 2's fix
+            is now also in scope for this pass** - it changed a CHECKING INSTRUMENT and its
+            author wrote its only probe.
+          --- ADDED BY STEP 2's CLOSE RITUAL, 2026-08-09 (ledger E1 / J2 / L) ---
+          - INT-MUT: 2 of 30 integration scenario-groups are mutation-pinned. Close the rest.
+          - 16 of 47 gate-able .py files carry ZERO mutations; 11 were in NO ledger state.
+            Load-bearing first: selftest_budget, fast_test_on_stop_selftest,
+            skills/consistency-audit/scripts/sources.py (SHIPPED to users), check_python_floor,
+            check_skill_deps, run_selftests.
+          - The TWIN ROSTER of step 2's defect: 9 more vacuous `SELFTEST SKIP` sites in 4 files.
+            MEASURED LATENT, not live - 0 fired in a full run; they key on git, which is always
+            present. Scheduled because the sh sites were assumed harmless on identical reasoning.
+          - `_SH_SITES_REQUIRED` is a DECLARED roster, not a derived one - a 4th delegation site
+            that forgets to register is invisible. Same shape as INSTALL-TAUTOLOGY/ENTRY-GUARD.
+          - The 800-line rule is enforced by NOTHING. Over today: pre_push_gate_selftest.py 866
+            (step 2 pushed it over), mutation_check.py 1033. Build the GATE, then split.
+          --- FROM THE INDEPENDENT REVIEW wf_feb7202e-8fe (24 found / 24 adjudicated / 14
+              confirmed). Its 3 defects in step 2's own code are FIXED; these are the rest ---
+          - `_child()` runs the SELFTEST module, not the gate (HIGH). Check 14 is WHOLLY
+            decorative - proven by applying mutation #10 and still getting SELFTEST OK. Also:
+            mutation #10's in-code "the twin is covered" claim is false, repointing _child is
+            NOT sufficient (a traceback exits 1, which the predicate accepts), and main()'s
+            fail-open wrapper is pinned by nothing.
+          - The git-ancestor-walk branch of _resolve_sh executes on NO CI runner - windows-latest
+            has `sh` on PATH. Step 2's headline code path is exercised on one machine only.
+            Needs a fixture that hides `sh` and asserts the git branch resolves.
+          - mutation_check counts HARNESS ERRORs as "executed", and has NO concurrency lock
+            (MUT-CONC). Its baseline guard is the only thing that stopped 11 mutations scoring
+            CAUGHT for an unrelated reason.
+          - `main` is unprotected, zero rulesets: a red CI job blocks nothing. Criterion 4's
+            evidence is produced but not ENFORCED.
+          - The `exit 7` probe's discrimination is unpinned - needs an injectable runner.
           [criterion 2]
 
   STEP 4  Build criterion 3 for real.
@@ -123,9 +154,14 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             confirm the CI badge is green ON the tagged commit.
           [criterion 1 edit half + the DoD's own closing clause + release mechanics]
 
-Estimated 7 sessions from here. The old 3-4 was made before the population had ever been
-measured and was wrong by ~2.5x. If a session ends with the estimate GROWN, say so explicitly
-rather than quietly re-planning. Step 4's size is genuinely unknown - RE-ESTIMATE AFTER IT LANDS.
+**Estimate: 6 sessions remaining, and THE ESTIMATE HAS GROWN - saying so explicitly, as the rule
+requires.** Step 2 began with 6 remaining and completed a whole step, so a pure countdown would
+say 5. It is still 6 because step 2's close ritual added five item-clusters to step 3 (INT-MUT's
+remaining 28 scenario-groups, 16 zero-mutation files, the 9-site twin roster, the declared sh
+roster, the unenforced 800-line rule). Step 2 itself came in UNDER budget - the integration
+matrix was expected to go red and did not - but step 3 grew by more than step 2 saved. The
+growth is in the DISCOVERED population, not in the work done: none of it was known before the
+close ritual looked. Step 4's size is still genuinely unknown - RE-ESTIMATE AFTER IT LANDS.
 
 === WORKING RULES - unchanged, all earned. NONE of these may be dropped ===
 
