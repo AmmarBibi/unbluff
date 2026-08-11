@@ -181,13 +181,33 @@ def _selftest_no_false_block() -> list:
         ("empty tests/ dir", {"tests": None, "app.py": "x = 1\n"}),
         ("tests/ holding only a helper module", {"tests/helpers.py": "def h():\n    return 1\n"}),
     ]
+    # PIN pytest-importability to True here, for the same reason the accept-shapes do it and
+    # for one MEASURED reason more: without it these assertions pass for the WRONG REASON on
+    # any box without pytest. detect() returns None when EITHER half declines, so on CI - where
+    # nothing is pip-installed - a broken detector still yields None and the case goes green.
+    # That is not hypothetical: FTB-1 came back SURVIVED on CI run 31526789857 while passing
+    # here, because this loop was left unpinned when the accept-shapes were pinned.
+    _real_imp0 = getattr(_m, "_pytest_importable", None)
     for label, files in decline:
         d = _dir(files)
-        cmd, _, _ = detect(d)
+        if _real_imp0 is not None:
+            _m._pytest_importable = lambda: True
+        try:
+            cmd, _, _ = _m.detect(d)
+        finally:
+            if _real_imp0 is not None:
+                _m._pytest_importable = _real_imp0
         if cmd is not None:
             fails.append(f"FASTTEST-BLOCK: {label} is not a pytest project but detect() "
                          f"returned {cmd!r} - every turn end there is BLOCKED on pytest's "
                          f"'no tests ran' (rc 5), and so is every push")
+        # The box-independent half, asserted directly rather than only through detect().
+        # This is what actually kills FTB-1 on every machine: it names the DETECTION verdict
+        # instead of the composite, so a missing pytest can never stand in for a correct one.
+        if looks_like_pytest_project(d):
+            fails.append(f"FASTTEST-BLOCK: looks_like_pytest_project() calls {label} a pytest "
+                         f"project - the detection half is wrong on every machine, whether or "
+                         f"not pytest happens to be installed on this one")
 
     # ---- ACCEPT shapes: a real pytest project must still be detected ----------------------
     accept = [

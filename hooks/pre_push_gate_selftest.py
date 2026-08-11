@@ -443,38 +443,32 @@ def selftest() -> int:
         # COLLECTED) and was told "BLOCKED - tests are failing". detect() now declines those,
         # and this pins the containment at THIS gate's own call site - fast_test's selftest
         # cannot cover it, because this is a second, independent consumer of the same rule.
-        _have_pytest = False
+        # SYNTHETIC, and it must stay that way. A real `python -m pytest` here can only run
+        # where pytest is installed, which is nowhere in CI - nothing is pip-installed in any
+        # workflow. Guarding it with a third-state skip left FTB-6 with NO catcher on the very
+        # runner that executes the mutation job, and it came back SURVIVED on run 31526789857
+        # while passing locally. A real subprocess that exits 5 and carries the bare word
+        # `pytest` as an argv token asks the same question on every box: it is classified by
+        # the command STRING, before execution, so no shell comment semantics are involved.
+        with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:
+            f.write('"%s" -c "import sys; sys.exit(5)" pytest\n'
+                    % sys.executable.replace("\\", "/"))
+        with open(os.path.join(r, "app.py"), "w", encoding="utf-8") as f:
+            f.write("x = 2\n")
+        _real_err = sys.stderr
+        sys.stderr = __import__("io").StringIO()
         try:
-            _have_pytest = __import__("importlib.util", fromlist=["util"]).find_spec(
-                "pytest") is not None
-        except Exception:
-            _have_pytest = False
-        _empty = os.path.join(r, "no_tests_here")
-        os.makedirs(_empty, exist_ok=True)
-        if not _have_pytest:
-            # THIRD STATE: the box cannot present the case. Never a silent pass.
-            print("SELFTEST SKIP: pytest not importable, so the rc-5 containment at the PUSH "
-                  "gate was NOT verified on this box")
-        else:
-            with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:
-                f.write('"%s" -m pytest -x -q "%s"\n'
-                        % (sys.executable.replace("\\", "/"), _empty.replace("\\", "/")))
-            with open(os.path.join(r, "app.py"), "w", encoding="utf-8") as f:
-                f.write("x = 2\n")
-            _real_err = sys.stderr
-            sys.stderr = __import__("io").StringIO()
-            try:
-                _rc_nv = gate(r)
-                _err_nv = sys.stderr.getvalue()
-            finally:
-                sys.stderr = _real_err
-            if _rc_nv != 0:
-                fails.append("a pytest run that collected NOTHING blocked the push (rc %r) - "
-                             "the gate is reporting 'tests are failing' about code it never "
-                             "tested: %r" % (_rc_nv, _err_nv[:200]))
-            elif "NOTHING VERIFIED" not in _err_nv:
-                fails.append("the push was allowed on a run that proved nothing, SILENTLY - "
-                             "unverified now looks identical to verified: %r" % (_err_nv[:200],))
+            _rc_nv = gate(r)
+            _err_nv = sys.stderr.getvalue()
+        finally:
+            sys.stderr = _real_err
+        if _rc_nv != 0:
+            fails.append("a pytest run that collected NOTHING blocked the push (rc %r) - "
+                         "the gate is reporting 'tests are failing' about code it never "
+                         "tested: %r" % (_rc_nv, _err_nv[:200]))
+        elif "NOTHING VERIFIED" not in _err_nv:
+            fails.append("the push was allowed on a run that proved nothing, SILENTLY - "
+                         "unverified now looks identical to verified: %r" % (_err_nv[:200],))
 
         # 4. passing tests allow, and record state fast_test_on_stop can read
         with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:
