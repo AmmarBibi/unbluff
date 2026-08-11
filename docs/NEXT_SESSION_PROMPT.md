@@ -12,20 +12,21 @@ Paste the block below to start.
 unbluff - STEP 3 of the v1.0 finish plan, RESUMING mid-step.
 Repo C:\Users\ammar\Downloads\unbluff.
 
-=== STATE, verified live 2026-08-09 (paused here) ===
+=== STATE, verified live 2026-08-11 ===
 
-HEAD c488ab3 on main, PUSHED, = origin/main. run_selftests 33/33 exit 0.
-Mutation harness 152 entries. Criterion 4 CLOSED.
+HEAD 5ee678b on main, PUSHED. run_selftests 33/33 exit 0 (ON AN IDLE MACHINE - see the
+budget flake below, it matters). Full clean sweep 153 of 155 executed, 0 SURVIVED,
+0 HARNESS ERROR, 2 posix-only not-runnable here. Integration 30/30. Criterion 4 CLOSED.
+Mutation harness 155 entries. Normal sweep runtime is ~30 MIN (measured 1770s and 1960s);
+anything far past that is a HANG, not a slow run - one sat at 48h with 2s of CPU.
 
-FIRST THING TO DO ON RESUME, in this order:
-  1. `git -C . status --porcelain` and `git log --oneline -6`. Expect a clean tree at c488ab3
-     with eab22f0 / 3b386d5 / dd25f1e / c488ab3 as the session's four commits.
-  2. `gh run list --limit 3` - CI was NOT yet confirmed green on c488ab3 when the session
-     paused. Check it before trusting anything below.
-  3. A full local mutation sweep was STILL RUNNING at the pause and its result was never read.
-     Re-run it clean: `python tools/mutation_check.py` with nothing else executing. The last
-     COMPLETED clean sweep was at 150 entries (148 executed, 0 SURVIVED); the harness is now
-     at 152, so that figure predates IT-1/IT-2/EG-1/EG-2 landing. Do not cite it as current.
+FIRST THING TO DO ON RESUME:
+  1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 5ee678b.
+  2. `gh run list --limit 3`. CI was green on bc8fcec (16 jobs) but was still RUNNING on
+     5ee678b when this was written - CONFIRM IT before trusting the state above.
+  3. Run the suite on an IDLE machine. A suite run alongside other work false-fails on
+     hook_health_check and meta_audit_on_stop - see SELFTEST-BUDGET-FLAKE below. "33/33" is
+     not evidence unless the box was idle.
 
 === THE GOAL ===
 
@@ -93,6 +94,26 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             hooks. Roster is now the AST IMPORT CLOSURE of the wired entry points. 16 of 25
             -> 25 of 25 detected. install.py gained its FIRST --selftest and is registered as
             the `install-guard` gate (suite 32 -> 33). Pinned by IT-1/IT-2. Ledger section N.
+          [DONE 08-11] The optional-import regression ENTRY-GUARD shipped: it turned ALL 16
+            CI jobs red. find_spec('docx') returns None on a runner without python-docx, so
+            the closure reported consistency-audit/scripts/docx.py as a missing LOCAL file -
+            it invented three files that never existed. Fixed: an import whose enclosing try
+            catches ImportError is optional BY DEFINITION. Pinned OPT-1. It passed locally
+            ONLY because this box has python-docx/PyMuPDF/pdfminer installed.
+          [DONE 08-11] SKILLDIR-DESTROY (HIGH, user DATA LOSS). Two paths: install merged
+            over a user's pre-existing same-named skill; uninstall rmtree'd the WHOLE dir, so
+            uninstalling unbluff deleted a skill that predated it, silently. Fixed with a
+            provenance manifest, following install()'s existing refuse-foreign-hook rule.
+            5 user-data cases incl. the reverse direction. Pinned SD-1/SD-2.
+          [NEW, SCHEDULED] SELFTEST-BUDGET-FLAKE - selftest_budget asserts a wall-clock
+            duration with NO control for load. Under load hook_health_check (10.81s vs
+            10.00s) and meta_audit_on_stop (19.63s vs 17.50s) FAIL; both pass standalone and
+            the suite is 33/33 idle. Do not just loosen it - a selftest over its share of the
+            25s weekly cap IS reported to users as ERRORED. The same output says the gate
+            covers 3 of 24 hooks and is self-declared never-adversarially-reviewed.
+          [NEW, SCHEDULED] MUT-HANG - the sweep can hang forever with no timeout, no
+            heartbeat, no output. One sat at 48h with 2.2s of CPU and a 0-byte file. Normal
+            is ~30 min. Fix with MUT-CONC: watchdog + progress printed as it goes.
           [DONE] ENTRY-GUARD, fixed WITH it as K3 required. install_skill() warned and
             CONTINUED on a missing skill dir, so install exited 0 and close_skills_guard - a
             WIRED hook - then blocked every close demanding a skill the user never got.
