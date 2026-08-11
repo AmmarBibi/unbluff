@@ -498,8 +498,12 @@ MUTATIONS = [
        '        shutil.copy2(os.path.join(src, "SKILL.md"), os.path.join(dest, "SKILL.md"))')],
      False, "tests/test_integration"),
     ("install", "INT-2", "install_skill ships only the first skill (the v1.1.1 drift)",
-     [("def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES:",
-       "def install_skill(dry_run: bool) -> None:\n    for name in SKILL_NAMES[:1]:")],
+     # ANCHOR UPDATED 2026-08-11: install_skill gained dest_root/src_root params so the
+     # SKILLDIR-DESTROY cases could be driven without a fake HOME. Second anchor drift caused
+     # by this session's own refactors; both times the harness said HARNESS ERROR rather than
+     # passing quietly, which is the only reason either was noticed.
+     [("    src_root = src_root or SKILLS_DIR\n    for name in SKILL_NAMES:",
+       "    src_root = src_root or SKILLS_DIR\n    for name in SKILL_NAMES[:1]:")],
      False, "tests/test_integration"),
     # ---- INSTALL-TAUTOLOGY (CRITICAL, criterion 2). The partial-checkout guard globbed
     # hooks/*.py into its required set and then asserted those files exist - the same statement
@@ -526,6 +530,20 @@ MUTATIONS = [
        "    blocked = set()")],
      False, "install"),
     # ---- ENTRY-GUARD, the sibling INSTALL-TAUTOLOGY had to be fixed with (ledger K3).
+    # ---- SKILLDIR-DESTROY: unbluff destroying the USER's own data, both directions.
+    ("install", "SD-1", "install merges into a skill directory it did not create again, "
+     "overwriting the user's same-named skill",
+     [("        if os.path.isdir(dest) and _read_skill_manifest(dest) is None:",
+       "        if False:")],
+     False, "install"),
+    ("install", "SD-2", "uninstall goes back to rmtree of the WHOLE directory, deleting a "
+     "skill that predates unbluff",
+     [("        files = _read_skill_manifest(dest)\n"
+       "        if files is None:",
+       "        shutil.rmtree(dest, ignore_errors=True)\n"
+       "        files = _read_skill_manifest(dest)\n"
+       "        if files is None:")],
+     False, "install"),
     ("install", "OPT-1", "an import guarded by try/except ImportError is treated as REQUIRED "
      "again - the defect that turned all 16 CI jobs red on c488ab3",
      [('    import ast\n'

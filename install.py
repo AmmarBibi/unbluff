@@ -190,10 +190,44 @@ def write_settings(settings: dict) -> None:
         raise
 
 
-def install_skill(dry_run: bool) -> None:
+SKILL_MANIFEST = ".unbluff-manifest.json"
+
+
+def _read_skill_manifest(dest: str):
+    """The relative paths unbluff installed into `dest`, or None if it did not install it.
+
+    None is the load-bearing answer: it means "this directory is not ours", and both install
+    and uninstall must then keep their hands off it.
+    """
+    try:
+        with open(os.path.join(dest, SKILL_MANIFEST), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("files"), list):
+        return [str(x) for x in data["files"]]
+    return None
+
+
+def _skill_payload(src: str) -> list:
+    """Relative paths install would copy from `src` - derived by walking it, not listed."""
+    out = []
+    for root, _dirs, files in os.walk(src):
+        if "__pycache__" in root.replace("\\", "/").split("/"):
+            continue
+        for fn in files:
+            if fn.endswith(".pyc"):
+                continue
+            out.append(os.path.relpath(os.path.join(root, fn), src).replace("\\", "/"))
+    return sorted(out)
+
+
+def install_skill(dry_run: bool, dest_root: str = None, src_root: str = None) -> None:
+    dest_root = dest_root or SKILLS_DEST_DIR
+    src_root = src_root or SKILLS_DIR
     for name in SKILL_NAMES:
-        src = os.path.join(SKILLS_DIR, name)
-        dest = os.path.join(SKILLS_DEST_DIR, name)
+        src = os.path.join(src_root, name)
+        dest = os.path.join(dest_root, name)
         if not os.path.isdir(src):
             # Not a warning. close_skills_guard is WIRED and requires all four by name, so
             # "skipping" here ships a hook that blocks every close with an unsatisfiable
@@ -201,25 +235,63 @@ def install_skill(dry_run: bool) -> None:
             # backstop for any other caller.
             sys.exit(f"ERROR: skill source missing ({src}) - refusing to install a partial set. "
                      f"close_skills_guard requires all of {list(SKILL_NAMES)}.")
+        # [SKILLDIR-DESTROY] Never merge into a directory unbluff did not create. `dirs_exist_ok`
+        # silently overwrote same-named files inside a skill the user already had - the same
+        # class of harm install() has always refused for a foreign pre-push hook, applied
+        # nowhere here.
+        if os.path.isdir(dest) and _read_skill_manifest(dest) is None:
+            sys.exit(f"ERROR: {dest} already exists and was not installed by unbluff "
+                     f"(no {SKILL_MANIFEST}). Refusing to overwrite it - move or delete it "
+                     f"first if you want unbluff's '{name}' skill.")
         if dry_run:
             print(f"  would copy skill -> {dest}")
             continue
         # Copy the whole skill dir (SKILL.md + any bundled scripts/), not just SKILL.md.
         shutil.copytree(src, dest, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # The manifest is what makes uninstall precise: it removes exactly these paths and
+        # leaves anything the user put here afterwards.
+        with open(os.path.join(dest, SKILL_MANIFEST), "w", encoding="utf-8") as f:
+            json.dump({"files": _skill_payload(src)}, f, indent=2)
         print(f"  copied skill -> {dest}")
 
 
-def remove_skill(dry_run: bool) -> None:
+def remove_skill(dry_run: bool, dest_root: str = None) -> None:
+    dest_root = dest_root or SKILLS_DEST_DIR
     for name in SKILL_NAMES:
-        dest = os.path.join(SKILLS_DEST_DIR, name)
+        dest = os.path.join(dest_root, name)
         if not os.path.isdir(dest):
             continue
-        if dry_run:
-            print(f"  would remove skill <- {dest}")
+        # [SKILLDIR-DESTROY] rmtree took the WHOLE directory, so uninstalling unbluff deleted a
+        # skill the user had before unbluff existed - and `ignore_errors=True` meant it did so
+        # in silence. Remove exactly what the manifest says we put there, nothing else.
+        files = _read_skill_manifest(dest)
+        if files is None:
+            print(f"  ! {dest} has no {SKILL_MANIFEST} - NOT unbluff's, leaving it untouched")
             continue
-        shutil.rmtree(dest, ignore_errors=True)
-        print(f"  removed skill <- {dest}")
+        if dry_run:
+            print(f"  would remove {len(files)} file(s) <- {dest}")
+            continue
+        for rel in files:
+            try:
+                os.remove(os.path.join(dest, *rel.split("/")))
+            except OSError:
+                pass
+        try:
+            os.remove(os.path.join(dest, SKILL_MANIFEST))
+        except OSError:
+            pass
+        # Prune directories that are now empty, deepest first. A directory still holding the
+        # user's own files simply survives - which is the entire point.
+        for root, _dirs, _files in sorted(os.walk(dest), key=lambda t: -len(t[0])):
+            try:
+                os.rmdir(root)
+            except OSError:
+                pass
+        if os.path.isdir(dest):
+            print(f"  removed {len(files)} unbluff file(s) <- {dest} (kept your other files)")
+        else:
+            print(f"  removed skill <- {dest}")
 
 
 def resolve_events(only: str, without: str) -> set:
@@ -533,10 +605,72 @@ def selftest() -> int:
                          "optional-import rule is over-applied and genuinely missing files "
                          "would go unreported, which is the defect this guard exists to catch")
 
+    # [SKILLDIR-DESTROY] The user's OWN data must survive both directions. Two distinct paths:
+    # install merged over a pre-existing same-named skill dir (copytree dirs_exist_ok=True), and
+    # uninstall rmtree'd the WHOLE directory - so uninstalling unbluff deleted a skill the user
+    # had before unbluff existed. This repo already refuses to clobber a foreign pre-push hook;
+    # skills had no equivalent rule.
+    destroy = 0
+    with tempfile.TemporaryDirectory() as td:
+        dest_root = os.path.join(td, "skills")
+        victim = os.path.join(dest_root, SKILL_NAMES[0])
+        os.makedirs(victim)
+        keep = os.path.join(victim, "MY_OWN_NOTES.md")
+        with open(keep, "w", encoding="utf-8") as f:
+            f.write("the user's own file, predating unbluff\n")
+
+        # (a) install must NOT silently overwrite a directory it did not create.
+        destroy += 1
+        try:
+            install_skill(False, dest_root=dest_root)
+            refused = False
+        except SystemExit:
+            refused = True
+        if not refused and not os.path.exists(keep):
+            fails.append("install DESTROYED a pre-existing user file at %r - a same-named skill "
+                         "directory the user owned was overwritten without warning" % keep)
+        elif not refused:
+            fails.append("install merged into a skill directory it did not create and did not "
+                         "refuse - unbluff's own files now sit inside the user's skill")
+
+        # (b) uninstall must never remove a directory unbluff did not install.
+        destroy += 1
+        remove_skill(False, dest_root=dest_root)
+        if not os.path.exists(keep):
+            fails.append("uninstall DELETED the user's own file at %r - rmtree removed a whole "
+                         "directory unbluff never created. Uninstalling unbluff destroys a "
+                         "skill that predates it" % keep)
+
+    # (c)/(d) the round trip must still WORK - a fix that protects user data by breaking
+    # uninstall is not a fix. Clean install -> uninstall leaves nothing; and a file the user
+    # adds AFTER install survives while unbluff's own files go.
+    with tempfile.TemporaryDirectory() as td:
+        dest_root = os.path.join(td, "skills")
+        install_skill(False, dest_root=dest_root)
+        destroy += 1
+        if not os.path.isfile(os.path.join(dest_root, SKILL_NAMES[0], "SKILL.md")):
+            fails.append("clean install did not place SKILL.md - the round trip is broken")
+        later = os.path.join(dest_root, SKILL_NAMES[0], "USER_ADDED_LATER.md")
+        with open(later, "w", encoding="utf-8") as f:
+            f.write("added by the user after installing\n")
+        remove_skill(False, dest_root=dest_root)
+        destroy += 1
+        if os.path.exists(os.path.join(dest_root, SKILL_NAMES[0], "SKILL.md")):
+            fails.append("uninstall left unbluff's own SKILL.md behind")
+        if not os.path.exists(later):
+            fails.append("uninstall deleted a file the user added AFTER install (%r) - the "
+                         "manifest is not bounding the removal" % later)
+        destroy += 1
+        # and a skill with nothing user-owned must disappear entirely, or G5 in the
+        # integration suite ('every installed skill removed') would go red.
+        if os.path.isdir(os.path.join(dest_root, SKILL_NAMES[1])):
+            fails.append("uninstall left an empty skill directory behind for %r - the prune "
+                         "did not run" % SKILL_NAMES[1])
+
     # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
     # that passed, which is the failure this whole repo is about.
-    print("  [install-guard] %d hook + %d skill deleted-file case(s), %d synthetic case(s)"
-          % (checked, skill_checked, synth))
+    print("  [install-guard] %d hook + %d skill deleted-file case(s), %d synthetic, "
+          "%d user-data case(s)" % (checked, skill_checked, synth, destroy))
     if not skill_checked:
         fails.append("the skill-guard probe ran ZERO cases - it is checking nothing")
     if not checked:
