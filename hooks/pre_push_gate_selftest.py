@@ -416,7 +416,13 @@ def selftest() -> int:
 
         # 2. push-time override wins over fast_test_on_stop's detection, and carries its timeout
         os.makedirs(os.path.join(r, ".claude"), exist_ok=True)
-        os.makedirs(os.path.join(r, "tests"), exist_ok=True)  # would make fast_test_on_stop pick pytest
+        # A REAL pytest project, not just a directory named `tests`. [FASTTEST-BLOCK] A bare
+        # dir used to be enough for fast_test.detect() to return pytest, so this case proved
+        # the override beat a competing detection. Now a bare dir detects nothing, and the
+        # case would have kept passing while proving only that an override beats NOTHING.
+        os.makedirs(os.path.join(r, "tests"), exist_ok=True)
+        with open(os.path.join(r, "tests", "test_probe.py"), "w", encoding="utf-8") as f:
+            f.write("def test_probe():\n    assert True\n")
         with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:
             f.write("# strict gate\ntimeout=222\npython -c \"pass\"\n")
         cmd, t = resolve_command(r)
@@ -430,6 +436,45 @@ def selftest() -> int:
             f.write("x = 1\n")
         if gate(r) != 1:
             fails.append("failing tests must block the push")
+
+        # 3b. [FASTTEST-BLOCK] A pytest run that proved NOTHING must not be reported as a
+        # failing test suite. This gate shares fast_test's detect(), so it shared the defect:
+        # a Rust/Go/JS repo with a tests/ dir got `python -m pytest`, exited 5 (NOTHING
+        # COLLECTED) and was told "BLOCKED - tests are failing". detect() now declines those,
+        # and this pins the containment at THIS gate's own call site - fast_test's selftest
+        # cannot cover it, because this is a second, independent consumer of the same rule.
+        _have_pytest = False
+        try:
+            _have_pytest = __import__("importlib.util", fromlist=["util"]).find_spec(
+                "pytest") is not None
+        except Exception:
+            _have_pytest = False
+        _empty = os.path.join(r, "no_tests_here")
+        os.makedirs(_empty, exist_ok=True)
+        if not _have_pytest:
+            # THIRD STATE: the box cannot present the case. Never a silent pass.
+            print("SELFTEST SKIP: pytest not importable, so the rc-5 containment at the PUSH "
+                  "gate was NOT verified on this box")
+        else:
+            with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:
+                f.write('"%s" -m pytest -x -q "%s"\n'
+                        % (sys.executable.replace("\\", "/"), _empty.replace("\\", "/")))
+            with open(os.path.join(r, "app.py"), "w", encoding="utf-8") as f:
+                f.write("x = 2\n")
+            _real_err = sys.stderr
+            sys.stderr = __import__("io").StringIO()
+            try:
+                _rc_nv = gate(r)
+                _err_nv = sys.stderr.getvalue()
+            finally:
+                sys.stderr = _real_err
+            if _rc_nv != 0:
+                fails.append("a pytest run that collected NOTHING blocked the push (rc %r) - "
+                             "the gate is reporting 'tests are failing' about code it never "
+                             "tested: %r" % (_rc_nv, _err_nv[:200]))
+            elif "NOTHING VERIFIED" not in _err_nv:
+                fails.append("the push was allowed on a run that proved nothing, SILENTLY - "
+                             "unverified now looks identical to verified: %r" % (_err_nv[:200],))
 
         # 4. passing tests allow, and record state fast_test_on_stop can read
         with open(os.path.join(r, ".claude", "pre-push.cmd"), "w", encoding="utf-8") as f:

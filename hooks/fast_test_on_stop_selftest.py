@@ -94,6 +94,286 @@ def _selftest_gate_alignment() -> list:
     return fails
 
 
+def _selftest_no_false_block() -> list:
+    """[FASTTEST-BLOCK] A repo that is not a pytest project must never be BLOCKED at turn end.
+
+    MEASURED 2026-08-11 before the fix, through the real entry point, 10 repo shapes: SEVEN
+    blocked a turn end (rc 2) with nothing wrong. `tests/` alone was taken as proof of a pytest
+    project, so `python -m pytest -x -q` ran in a Rust repo (`tests/` is Cargo's own
+    integration-test directory), a Go repo, a JS repo whose package.json has no `scripts.test`,
+    an empty `tests/`, and a `tests/` holding only helpers - each exiting 5 (NOTHING COLLECTED)
+    and each reported to the user as "FAILING at stop - fix before finishing". A broken root
+    conftest exited 4 (USAGE ERROR) and blocked too, and an interpreter without pytest exited
+    **1 - the same code as a genuine test failure**, which is why detection has to PREVENT that
+    case rather than interpretation contain it.
+
+    `pre_push_gate` calls this same `detect()` (pre_push_gate.py:114) and maps rc != 0 to a
+    BLOCKED push, so every one of those shapes also blocked `git push`.
+
+    Two halves, and neither subsumes the other:
+      * detection    - `tests/` is not evidence; require pytest CONFIG or a collectible test
+                       FILE, and require pytest to be importable by the interpreter that runs it
+      * containment  - for a pytest command, rc 5 (collected nothing) and rc 4 (usage error) are
+                       "the gate could not answer", not "your tests failed"
+
+    The positive controls are not decoration: a detector that answered None for everything would
+    satisfy the false-alarm half perfectly while disabling the hook, so every accept-shape is
+    asserted too, and the genuine-failure path is asserted to still BLOCK.
+    """
+    import json as _json
+    import shutil as _sh
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile as _tf
+
+    fails = []
+    trash = []
+    # DERIVED, not transcribed: each end-to-end block appends its own label, so adding a case
+    # cannot leave the printed denominator stale. A hardcoded "2" was wrong within one edit.
+    e2e_run = []
+
+    def _dir(files: dict) -> str:
+        """A plain directory containing `files` - NO git.
+
+        detect() reads the filesystem and never shells out to git, so a `git init` per
+        detection case bought nothing and cost 12 subprocesses per selftest run. That
+        footprint is not free: this selftest runs inside a suite whose next gates assert a
+        WALL-CLOCK budget, and the I/O burst pushed meta_audit_on_stop from 7.2s to 22.7s
+        against a 17.5s cap. A fixture should build exactly what its case needs.
+        """
+        d = _tf.mkdtemp()
+        trash.append(d)
+        for rel, body in files.items():
+            p = os.path.join(d, *rel.split("/"))
+            if body is None:
+                os.makedirs(p, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(body)
+        return d
+
+    def _repo(files: dict) -> str | None:
+        """A real git repo containing `files`. None when git cannot make one (third state).
+
+        Only the END-TO-END cases need this: main() calls is_git_worktree() and returns 0
+        before detect() ever runs outside a repo.
+        """
+        d = _dir(files)
+        try:
+            if _sp.run(["git", "-C", d, "init", "-q"], capture_output=True,
+                       timeout=60).returncode:
+                return None
+        except (OSError, _sp.SubprocessError):
+            return None
+        return d
+
+    T_OK = "def test_ok():\n    assert True\n"
+
+    # ---- DECLINE shapes: none of these is a pytest project, none may yield a command -------
+    decline = [
+        ("rust (tests/ is Cargo's integration-test dir)",
+         {"tests/integration.rs": "#[test]\nfn t() {}\n", "src/main.rs": "fn main() {}\n"}),
+        ("go repo with a tests/ dir", {"tests/fixtures.json": "{}\n", "main.go": "package main\n"}),
+        ("js repo, package.json with no scripts.test",
+         {"package.json": '{"name":"x","scripts":{"build":"tsc"}}',
+          "tests/app.test.js": "test('x',()=>{});\n"}),
+        ("empty tests/ dir", {"tests": None, "app.py": "x = 1\n"}),
+        ("tests/ holding only a helper module", {"tests/helpers.py": "def h():\n    return 1\n"}),
+    ]
+    for label, files in decline:
+        d = _dir(files)
+        cmd, _, _ = detect(d)
+        if cmd is not None:
+            fails.append(f"FASTTEST-BLOCK: {label} is not a pytest project but detect() "
+                         f"returned {cmd!r} - every turn end there is BLOCKED on pytest's "
+                         f"'no tests ran' (rc 5), and so is every push")
+
+    # ---- ACCEPT shapes: a real pytest project must still be detected ----------------------
+    accept = [
+        ("tests/ with a test_*.py", {"tests/test_ok.py": T_OK}),
+        ("tests/ with a *_test.py (pytest's other default)", {"tests/ok_test.py": T_OK}),
+        ("test_*.py nested deeper under tests/", {"tests/unit/sub/test_deep.py": T_OK}),
+        ("pytest.ini, tests living elsewhere", {"pytest.ini": "[pytest]\n", "src/test_x.py": T_OK}),
+        ("pyproject [tool.pytest]", {"pyproject.toml": "[tool.pytest.ini_options]\n"}),
+        ("setup.cfg [tool:pytest]", {"setup.cfg": "[tool:pytest]\n"}),
+        ("tox.ini [pytest]", {"tox.ini": "[pytest]\n"}),
+    ]
+    for label, files in accept:
+        d = _dir(files)
+        cmd, _, _ = detect(d)
+        if not (cmd and "pytest" in cmd):
+            fails.append(f"FASTTEST-BLOCK went too far: {label} IS a pytest project but "
+                         f"detect() returned {cmd!r} - the gate is disabled, which is the "
+                         f"failure mode the fix must not trade into")
+
+    # ---- the pytest-importable gate is CONSULTED, not merely present ----------------------
+    # Case J measured rc 1 for a missing pytest - indistinguishable from a real failure - so
+    # this must be decided at detect time. Patch the parent's global (rebinding rule).
+    d = _dir({"tests/test_ok.py": T_OK})
+    real_imp = getattr(_m, "_pytest_importable", None)
+    if real_imp is None:
+        fails.append("FASTTEST-BLOCK: detect() has no _pytest_importable gate, so a box "
+                     "without pytest still gets 'No module named pytest' reported as a "
+                     "FAILING test run (measured rc 1, identical to a real failure)")
+    else:
+        _m._pytest_importable = lambda: False
+        try:
+            cmd, _, _ = _m.detect(d)
+        finally:
+            _m._pytest_importable = real_imp
+        if cmd is not None:
+            fails.append("FASTTEST-BLOCK: detect() ignores _pytest_importable - it still "
+                         f"returned {cmd!r} for an interpreter that cannot run pytest")
+        if _m._pytest_importable is not real_imp:
+            fails.append("fixture left _pytest_importable patched")
+
+    # ---- containment: pytest's rc 4 / rc 5 are NOT verdicts -------------------------------
+    reason_fn = getattr(_m, "inconclusive_reason", None)
+    if reason_fn is None:
+        fails.append("FASTTEST-BLOCK: no inconclusive_reason() - a pytest run that collected "
+                     "NOTHING (rc 5) or could not start (rc 4) is still reported to the user "
+                     "as 'FAILING at stop', and blocks the push gate too")
+    else:
+        pyc = '"python" -m pytest -x -q'
+        for rc, must in ((5, True), (4, True), (0, False), (1, False), (2, False)):
+            got = reason_fn(pyc, rc)
+            if must and not got:
+                fails.append(f"inconclusive_reason: pytest rc {rc} must be inconclusive, "
+                             f"got {got!r} - the user is blocked on a run that proved nothing")
+            if not must and got:
+                fails.append(f"inconclusive_reason: pytest rc {rc} is a real VERDICT, but it "
+                             f"was waived as {got!r} - the gate would stop biting")
+        # pytest's exit table must not be applied to a command that is not pytest. npm's rc 5
+        # means something else entirely, and misreading it would silently disarm that gate.
+        for other in ("npm test --silent", "go test ./...", "cargo test"):
+            if reason_fn(other, 5) or reason_fn(other, 4):
+                fails.append(f"inconclusive_reason applied pytest's exit table to {other!r} - "
+                             f"a genuine failure there would be waived")
+
+    # ---- END TO END through main(): allowed, and NOT silent -------------------------------
+    # rc 0 alone would be satisfied by deleting the hook. The no-gate notice is what keeps a
+    # skip from reading as a green run, so it is asserted in the same breath.
+    io_mod = __import__("io")
+    real_state = _m.STATE_DIR
+    sd = _tf.mkdtemp()
+    trash.append(sd)
+    _m.STATE_DIR = sd
+    try:
+        d = _repo({"tests/integration.rs": "#[test]\nfn t() {}\n",
+                   "src/main.rs": "fn main() {}\n"})
+        if d is None:
+            fails.append("FASTTEST-BLOCK: could not build the end-to-end rust fixture")
+        else:
+            real_in, real_err = _sys.stdin, _sys.stderr
+            _sys.stdin = io_mod.StringIO(_json.dumps({"cwd": d}))
+            _sys.stderr = io_mod.StringIO()
+            try:
+                rc_e2e = main()
+                err_e2e = _sys.stderr.getvalue()
+            finally:
+                _sys.stdin, _sys.stderr = real_in, real_err
+            e2e_run.append("rust-decline")
+            if rc_e2e != 0:
+                fails.append(f"FASTTEST-BLOCK end-to-end: a rust repo still exits {rc_e2e} at "
+                             f"turn end (2 = BLOCKED): {err_e2e[:200]!r}")
+            elif "NO TEST GATE" not in err_e2e:
+                fails.append("FASTTEST-BLOCK end-to-end: the rust repo is allowed but SILENT - "
+                             "an unverified turn now looks exactly like a verified one")
+    finally:
+        _m.STATE_DIR = real_state
+
+    # ---- END TO END through main(), reaching the CONTAINMENT call site --------------------
+    # The rust case above proves detection; it exits before main() ever evaluates an rc, so it
+    # leaves `reason = inconclusive_reason(...)` in main() completely uncovered - a mutation
+    # deleting that call would survive it. This is check 7's lesson in this same file: testing
+    # the helper is not testing the WIRING. A real pytest project with a broken root conftest
+    # exits 4 (MEASURED, case H) and is the shape that reaches the branch.
+    real_state = _m.STATE_DIR
+    sd3 = _tf.mkdtemp()
+    trash.append(sd3)
+    _m.STATE_DIR = sd3
+    try:
+        have_pytest = False
+        try:
+            have_pytest = __import__("importlib.util", fromlist=["util"]).find_spec(
+                "pytest") is not None
+        except Exception:
+            have_pytest = False
+        d = _repo({"tests/test_ok.py": T_OK, "app.py": "x = 1\n",
+                   "conftest.py": "import unbluff_nonexistent_plugin_xyz\n"})
+        if d is None:
+            fails.append("FASTTEST-BLOCK: could not build the broken-conftest fixture")
+        elif not have_pytest:
+            print("SELFTEST SKIP: pytest not importable here, so the rc-4 containment WIRING "
+                  "in main() could not be exercised - it was NOT verified on this box")
+        else:
+            real_in, real_err = _sys.stdin, _sys.stderr
+            _sys.stdin = io_mod.StringIO(_json.dumps({"cwd": d}))
+            _sys.stderr = io_mod.StringIO()
+            try:
+                rc_cf = main()
+                err_cf = _sys.stderr.getvalue()
+            finally:
+                _sys.stdin, _sys.stderr = real_in, real_err
+            e2e_run.append("rc4-containment-wiring")
+            if rc_cf != 0:
+                fails.append(f"FASTTEST-BLOCK: a pytest run that could not START (rc 4) still "
+                             f"exits {rc_cf} from main() - main() is not consulting "
+                             f"inconclusive_reason, so the containment is unwired")
+            elif "NOTHING VERIFIED" not in err_cf:
+                fails.append(f"FASTTEST-BLOCK: rc 4 was waved through SILENTLY - a run that "
+                             f"proved nothing now looks like a green one: {err_cf[:200]!r}")
+    finally:
+        _m.STATE_DIR = real_state
+
+    # ---- END TO END control: a genuinely failing pytest suite must STILL block -------------
+    # Deliberately the one case that pays for a real pytest invocation (~1s). Everything else
+    # above is filesystem-only, because this selftest shares hook_health_check's 25s cap.
+    real_state = _m.STATE_DIR
+    sd2 = _tf.mkdtemp()
+    trash.append(sd2)
+    _m.STATE_DIR = sd2
+    try:
+        d = _repo({"tests/test_bad.py": "def test_bad():\n    assert False\n",
+                   "app.py": "x = 1\n"})
+        have_pytest = False
+        try:
+            have_pytest = __import__("importlib.util", fromlist=["util"]).find_spec(
+                "pytest") is not None
+        except Exception:
+            have_pytest = False
+        if d is None:
+            fails.append("FASTTEST-BLOCK: could not build the failing-suite control")
+        elif not have_pytest:
+            # THIRD STATE: this box cannot present the case. Say so; never pass quietly.
+            print("SELFTEST SKIP: pytest not importable here, so the 'a real failure still "
+                  "BLOCKS' control could not be run - it was NOT verified on this box")
+        else:
+            real_in, real_err = _sys.stdin, _sys.stderr
+            _sys.stdin = io_mod.StringIO(_json.dumps({"cwd": d}))
+            _sys.stderr = io_mod.StringIO()
+            try:
+                rc_bad = main()
+                err_bad = _sys.stderr.getvalue()
+            finally:
+                _sys.stdin, _sys.stderr = real_in, real_err
+            e2e_run.append("genuine-failure-still-blocks")
+            if rc_bad != 2:
+                fails.append(f"the fix disarmed the gate: a genuinely FAILING pytest suite "
+                             f"exited {rc_bad} instead of 2 ({err_bad[:200]!r})")
+    finally:
+        _m.STATE_DIR = real_state
+        for t in trash:
+            _sh.rmtree(t, ignore_errors=True)
+    # The end-to-end count is what was actually RUN, so a case skipped for a missing pytest
+    # shrinks the printed number instead of being silently counted as covered.
+    print(f"-- fast-test detection: {len(decline)} decline shape(s), {len(accept)} accept "
+          f"shape(s), 1 importable gate, {len(e2e_run)} end-to-end case(s) run "
+          f"({', '.join(e2e_run) if e2e_run else 'NONE'})")
+    return fails
+
+
 def selftest() -> int:
     import tempfile
     fails = []
@@ -128,9 +408,16 @@ def selftest() -> int:
         cmd, t, d = detect(td)
         if (cmd, t, d) != ("pytest -x -q tests/fast", 240, 1800):
             fails.append(f"override detect wrong: {(cmd, t, d)}")
-    # 3. pytest auto-detect via tests/ dir
+    # 3. pytest auto-detect. [FASTTEST-BLOCK] This case used to create a BARE `tests/` dir and
+    #    require a pytest command back - i.e. it ASSERTED the defect, which is a large part of
+    #    why the defect survived every review. It is corrected here rather than deleted: the
+    #    intent (autodetection must work) is kept, the false premise (a directory named `tests`
+    #    proves a pytest project) is replaced by real evidence. The bare-dir shape is now
+    #    asserted in the opposite direction, in _selftest_no_false_block.
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, "tests"))
+        with open(os.path.join(td, "tests", "test_x.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    assert True\n")
         cmd, _, _ = detect(td)
         if not (cmd and "-m pytest" in cmd):
             fails.append(f"pytest autodetect wrong: {cmd}")
@@ -471,6 +758,7 @@ def selftest() -> int:
             _shutil.rmtree(d, ignore_errors=True)
 
     fails += _selftest_gate_alignment()
+    fails += _selftest_no_false_block()
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

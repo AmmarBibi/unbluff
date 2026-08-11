@@ -267,6 +267,21 @@ def gate(root: str) -> int:
                          f"with: git push --no-verify\n")
         return 1
     if rc != 0:
+        # [FASTTEST-BLOCK] This gate shares fast_test's detect(), so it shared its defect: a
+        # Rust repo (tests/ is Cargo's integration-test dir), a Go repo, a JS repo with no
+        # scripts.test, an empty tests/ - all got `python -m pytest`, all exited 5 (NOTHING
+        # COLLECTED), and all were reported here as "BLOCKED - tests are failing". detect() now
+        # declines those outright; this handles the residue that still reaches a run, e.g. a
+        # real pytest project whose root conftest cannot import (rc 4, measured).
+        #
+        # ALLOW-and-say-so is this gate's existing policy for "nothing to verify", and no pass
+        # is recorded - so the next push re-runs rather than inheriting a green it never earned.
+        # Said on EVERY push, not once: a push is rare enough that the line is signal.
+        reason = fast_test.inconclusive_reason(cmd, rc)
+        if reason:
+            sys.stderr.write(f"[pre-push] NOTHING VERIFIED: {reason} (cmd: {cmd}). This is not "
+                             f"a test failure - allowing the push, but it is NOT verified.\n")
+            return 0
         tail = "\n".join(ln for ln in (output or "").splitlines() if ln.strip())[-2000:]
         sys.stderr.write(f"\n[pre-push] BLOCKED - tests are failing:\n{tail}\n"
                          f"\n[pre-push] Fix them, or bypass with: git push --no-verify\n")

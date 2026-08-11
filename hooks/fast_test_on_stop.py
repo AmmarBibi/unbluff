@@ -156,6 +156,128 @@ def _read_override(path: str, options: dict | None = None) -> tuple[str | None, 
     return cmd, timeout_s, debounce_s
 
 
+# pytest's own defaults for what a test file is called (`python_files`). A project that
+# renames them declares so in a config file, which the config branch below already accepts.
+_PYTEST_FILE_CAP = 5000     # bounded walk; see _has_collectible_tests for what the cap MEANS
+# [FASTTEST-BLOCK] Config markers, each in the file that owns it. `tests/` is deliberately NOT
+# on this list: it is Cargo's integration-test directory, and Go/JS/Java projects use it too.
+_PYTEST_CONFIG_MARKERS = (
+    ("pytest.ini", None),                    # existing at all is the declaration
+    ("pyproject.toml", "[tool.pytest"),
+    ("setup.cfg", "[tool:pytest]"),
+    ("tox.ini", "[pytest]"),
+)
+
+
+def _pytest_importable() -> bool:
+    """Can the interpreter that would RUN the command actually import pytest?
+
+    The command is literally `"{sys.executable}" -m pytest`, so this asks about exactly the
+    interpreter that will execute it - which is why find_spec is the right question here and
+    was the WRONG one in install.py's import closure (OPT-1). There the question was "does
+    this file exist for every user" and the answer was about this box; here the box IS the
+    subject. Do not "fix" this back into a static check.
+
+    Without it, a repo with real pytest config on a machine where pytest is not installed runs
+    `python -m pytest` and gets **rc 1** - byte-identical to a genuine test failure - so no
+    exit-code interpretation downstream can ever separate the two. MEASURED, case J.
+    """
+    try:
+        import importlib.util
+        return importlib.util.find_spec("pytest") is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
+def _has_pytest_config(cwd: str) -> bool:
+    """True iff this project DECLARES itself a pytest project in one of pytest's own config files."""
+    for name, marker in _PYTEST_CONFIG_MARKERS:
+        p = os.path.join(cwd, name)
+        if not os.path.exists(p):
+            continue
+        if marker is None:
+            return True
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                if marker in f.read():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _has_collectible_tests(tests_dir: str) -> bool | None:
+    """Does `tests/` hold a file pytest would actually collect? None = could not finish looking.
+
+    Three states on purpose, per this repo's standing rule that a check must distinguish "no
+    answer" from "bad answer". Hitting the cap on a huge tree is NOT evidence of absence, and a
+    directory that large is almost certainly a real suite - so the caller treats None as accept
+    and lets the rc-5 containment below catch it if that guess was wrong. The two halves of the
+    fix cover each other here rather than each having to be perfect.
+    """
+    seen = 0
+    try:
+        for root, dirs, files in os.walk(tests_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            for fn in files:
+                seen += 1
+                if seen > _PYTEST_FILE_CAP:
+                    return None
+                if not fn.endswith(".py"):
+                    continue
+                if fn.startswith("test_") or fn[:-3].endswith("_test"):
+                    return True
+    except OSError:
+        return None
+    return False
+
+
+def looks_like_pytest_project(cwd: str) -> bool:
+    """Is there real evidence this is a pytest project, beyond a directory called `tests`?
+
+    ONE definition, called by both detect() and the no-gate notice, so the two can never drift
+    into disagreeing about what a pytest project is.
+    """
+    if _has_pytest_config(cwd):
+        return True
+    tests_dir = os.path.join(cwd, "tests")
+    if not os.path.isdir(tests_dir):
+        return False
+    return _has_collectible_tests(tests_dir) is not False   # None (cap reached) accepts
+
+
+# pytest's documented exit codes. 0 PASSED / 1 FAILED are VERDICTS; these two are not.
+_PYTEST_INCONCLUSIVE = {
+    5: "pytest collected no tests, so nothing was verified",
+    4: "pytest could not start (usage or collection error), so nothing was verified",
+}
+
+
+def _is_pytest_command(cmd: str) -> bool:
+    """True iff `cmd` invokes pytest, so pytest's exit table applies to its return code.
+
+    Whole-word, because applying pytest's table to `npm test` or `go test` would waive a
+    GENUINE failure there. The failure mode of guessing wrong in the other direction is merely
+    today's behaviour, which is why the test is deliberately conservative.
+    """
+    import re
+    return re.search(r"(?<![\w-])pytest(?![\w-])", cmd or "") is not None
+
+
+def inconclusive_reason(cmd: str, rc: int | None) -> str | None:
+    """Why this run proved NOTHING, or None when `rc` is a real verdict about the user's code.
+
+    [FASTTEST-BLOCK] Both gates mapped every non-zero rc onto "your tests are failing". For
+    pytest, rc 5 means it collected nothing and rc 4 means it never got as far as running -
+    neither is a statement about the code, and reporting them as failures blocks a turn end
+    (and a push) on a repo with nothing wrong. Not applied to non-pytest commands: their exit
+    codes mean different things, and misreading one would silently disarm that gate instead.
+    """
+    if rc is None or not _is_pytest_command(cmd):
+        return None
+    return _PYTEST_INCONCLUSIVE.get(rc)
+
+
 def detect(cwd: str) -> tuple[str | None, int, int]:
     """(command, timeout_s, debounce_s) for this project, or (None, ...) when nothing safe exists."""
     ov = os.path.join(cwd, ".claude", "fast-test.cmd")
@@ -170,15 +292,12 @@ def detect(cwd: str) -> tuple[str | None, int, int]:
                 return "npm test --silent", DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
         except (OSError, ValueError):
             pass
-    has_pytest = (os.path.exists(os.path.join(cwd, "pytest.ini"))
-                  or os.path.isdir(os.path.join(cwd, "tests")))
-    if not has_pytest:
-        pp = os.path.join(cwd, "pyproject.toml")
-        try:
-            has_pytest = os.path.exists(pp) and "[tool.pytest" in open(pp, encoding="utf-8").read()
-        except OSError:
-            has_pytest = False
-    if has_pytest:
+    # [FASTTEST-BLOCK] `os.path.isdir(cwd/"tests")` used to be sufficient here. MEASURED: that
+    # blocked the turn end AND the push on a Rust repo (tests/ is Cargo's own integration-test
+    # dir), a Go repo, a JS repo whose package.json has no scripts.test, an empty tests/, and a
+    # tests/ holding only helpers - five shapes, all exiting 5 (NOTHING COLLECTED), all
+    # reported to the user as "FAILING at stop - fix before finishing".
+    if looks_like_pytest_project(cwd) and _pytest_importable():
         return f'"{sys.executable}" -m pytest -x -q', DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
     return None, DEFAULT_TIMEOUT_S, DEFAULT_DEBOUNCE_S
 
@@ -428,6 +547,15 @@ def _nogate_state_path(cwd: str) -> str:
         _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
 
 
+def _inconclusive_state_path(cwd: str) -> str:
+    """Its OWN key, deliberately: a project that was once ungated and has since acquired a
+    pytest config would otherwise have this notice masked by the stale `nogate-` marker, and
+    the two say different things. Distinguishing "there is no gate" from "the gate ran and
+    proved nothing" is the whole point of the notice existing."""
+    return os.path.join(STATE_DIR, "inconclusive-" + hashlib.sha1(
+        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
+
+
 def _notice_no_gate(cwd: str) -> int:
     """Say ONCE per project that no test gate exists here, so a skip cannot pass for a green run.
 
@@ -455,11 +583,45 @@ def _notice_no_gate(cwd: str) -> int:
     # Computed outside the f-string: a backslash inside an f-string expression is a SyntaxError
     # before Python 3.12 (PEP 701), and this hook must import on older interpreters.
     name = os.path.basename(cwd.rstrip("/\\")) or cwd
+    # [FASTTEST-BLOCK] Name the REASON when there is a specific one. A project that is plainly
+    # a pytest project but whose pytest is missing from THIS interpreter used to be told its
+    # tests were failing (rc 1, identical to a real failure); telling it "add a test gate"
+    # instead would be the same unhelpful answer one step quieter.
+    why = (f"[fast-test] This looks like a pytest project, but pytest is not importable by "
+           f"{sys.executable} - point .claude/fast-test.cmd at the interpreter that has it.\n"
+           if looks_like_pytest_project(cwd) and not _pytest_importable() else
+           f"[fast-test] Add one to activate the gate: .claude/fast-test.cmd, package.json "
+           f"scripts.test, or a pytest config (pytest.ini / pyproject / setup.cfg / tox.ini) "
+           f"or tests/ containing test_*.py.\n")
     sys.stderr.write(
         f"[fast-test] NO TEST GATE in '{name}': source changed, nothing was verified.\n"
-        f"[fast-test] Add one to activate the gate: .claude/fast-test.cmd, package.json "
-        f"scripts.test, or a tests/ dir.\n"
+        f"{why}"
         f"[fast-test] Said once per project. Delete {np} to hear it again.\n")
+    return 0
+
+
+def _notice_inconclusive(cwd: str, cmd: str, reason: str) -> int:
+    """The gate RAN and proved nothing. Say so once, exit 0 - never block on it.
+
+    Once per project rather than every turn: a recurring nag at every turn end is how a guard
+    gets switched off, and a switched-off guard is worse than no guard (criterion 3). The push
+    gate says it on EVERY push instead, because a push is a rare event where the line is signal.
+    """
+    ip = _inconclusive_state_path(cwd)
+    if os.path.exists(ip):
+        return 0
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(ip, "w", encoding="utf-8") as f:
+            json.dump({"ts": time.time(), "cwd": cwd, "cmd": cmd, "reason": reason}, f)
+    except OSError:
+        return 0
+    name = os.path.basename(cwd.rstrip("/\\")) or cwd
+    sys.stderr.write(
+        f"[fast-test] NOTHING VERIFIED in '{name}': {reason} (cmd: {cmd}).\n"
+        f"[fast-test] This is NOT a test failure and is not blocking. Point "
+        f".claude/fast-test.cmd at a command that runs your tests to gate this project.\n"
+        f"[fast-test] Said once per project. Delete {ip} to hear it again.\n")
     return 0
 
 
@@ -523,6 +685,13 @@ def main() -> int:
         sys.stderr.write(f"[fast-test] skipped: '{cmd}' exceeded {timeout_s}s (raise timeout= in .claude/fast-test.cmd)\n")
         return 0
     if rc != 0:
+        # [FASTTEST-BLOCK] "non-zero" is not "your tests failed". Ask first whether this run
+        # produced a VERDICT at all - a pytest that collected nothing (rc 5) or could not start
+        # (rc 4) says nothing about the user's code, and reporting it as a failure hard-blocked
+        # the turn end on five measured repo shapes that had nothing wrong with them.
+        reason = inconclusive_reason(cmd, rc)
+        if reason:
+            return _notice_inconclusive(cwd, cmd, reason)
         tail = "\n".join(line for line in tail_src.splitlines() if line.strip())[-1500:]
         sys.stderr.write(f"[fast-test] FAILING at stop - fix before finishing (cmd: {cmd}):\n{tail}\n")
         return 2  # feed the failure back to Claude exactly once (stop_hook_active guards the loop)

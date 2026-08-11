@@ -254,6 +254,32 @@ MUTATIONS = [
        "                os.kill(target, signal.SIGKILL)")], True),
     ("fast_test_on_stop", "D10b", "the Windows job object is never created",
      [("    job = _win_job_kill_on_close()", "    job = None")], "nt"),
+    # --- FASTTEST-BLOCK: a repo that is not a pytest project must never be BLOCKED ---
+    # MEASURED before the fix: 7 of 10 repo shapes hard-blocked a turn end (rc 2) with nothing
+    # wrong, and the same detect() blocked their pushes. Two halves - detection and exit-code
+    # containment - each pinned on BOTH sides, plus both call sites, because the helper being
+    # correct proves nothing about whether either gate consults it.
+    ("fast_test_on_stop", "FTB-1", "a bare tests/ dir is proof of a pytest project again "
+     "(the original defect: Cargo's tests/ dir blocked every Rust turn end)",
+     [("    return _has_collectible_tests(tests_dir) is not False", "    return True")], False),
+    ("fast_test_on_stop", "FTB-1b", "pytest CONFIG files stop counting, so a real pytest "
+     "project whose tests live outside tests/ loses its gate entirely",
+     [("    for name, marker in _PYTEST_CONFIG_MARKERS:", "    for name, marker in ():")], False),
+    ("fast_test_on_stop", "FTB-2", "detect() stops asking whether pytest is importable, so a "
+     "box without pytest gets rc 1 - indistinguishable from a real failure",
+     [("    if looks_like_pytest_project(cwd) and _pytest_importable():",
+       "    if looks_like_pytest_project(cwd):")], False),
+    ("fast_test_on_stop", "FTB-3", "rc 4 / rc 5 are treated as verdicts again",
+     [("    return _PYTEST_INCONCLUSIVE.get(rc)", "    return None")], False),
+    ("fast_test_on_stop", "FTB-4", "main() stops CONSULTING inconclusive_reason (the wiring, "
+     "not the helper - check 7's lesson in this same file)",
+     [("        reason = inconclusive_reason(cmd, rc)", "        reason = None")], False),
+    ("fast_test_on_stop", "FTB-5", "the pytest-command test matches anything, so pytest's exit "
+     "table is applied to npm/go/cargo and a GENUINE failure there is waived",
+     [("    return re.search(", "    return True or re.search(")], False),
+    ("pre_push_gate", "FTB-6", "the PUSH gate stops consulting inconclusive_reason, so a run "
+     "that collected nothing blocks the push as 'tests are failing'",
+     [("        reason = fast_test.inconclusive_reason(cmd, rc)", "        reason = None")], False),
     ("hook_health_check", "D11", "the weekly sweep loses its aggregate budget",
      [("        if time.monotonic() >= deadline:", "        if False:")], False),
     ("hook_health_check", "D11b", "sweep progress is no longer persisted per hook",

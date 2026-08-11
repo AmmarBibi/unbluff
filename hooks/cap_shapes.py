@@ -50,12 +50,29 @@ from cap_types import (Facts, POSITIONAL_FLOOR, _aggregated_nodes, _all_args,  #
 SANCTIONED_MODULES = {"capped_report"}
 
 BOUND_EXEMPTIONS = {
-    # LIVE sites in this repo. Both are resource bounds whose function reports its own total.
+    # LIVE sites in this repo. The first two are resource bounds whose function reports its
+    # own total. The THIRD is different in kind and is labelled as such rather than filed
+    # under the same sentence - it is this detector's own measured FALSE POSITIVE.
     ("numbers_match_on_write", "index_sources", "collection"):
         "MAX_SOURCE_VALUES - anti-balloon bound on the source index; the caller reports the "
         "real figure separately (finding M2)",
     ("numbers_match_on_write", "matches_source", "collection"):
         "MAX_FILE_BYTES - per-file read bound, not a truncation of anything reported",
+    ("fast_test_on_stop", "_has_collectible_tests", "collection"):
+        "CAP-FP-1, a MEASURED false positive of this detector, not a sanctioned truncation. "
+        "The site bounds a COUNTER (`seen`) and the function returns a tri-state bool, never "
+        "a collection - clause 1 excludes 'a counter' and clause 2 excludes 'a bool', so by "
+        "this module's own stated rules it should never have been flagged. Reduced to a "
+        "minimal fixture and probed with controls in both directions: the same shape flags, "
+        "the same shape with the bound removed is clean, and a genuine offender still flags "
+        "with a DIFFERENT message ('slices to a bound ... render()' vs 'stops the scan at a "
+        "bound ... keep()'), so the detector was live and looking. Toggling clause2/clause3 "
+        "changes nothing for this site, which locates the defect in the 'stops the scan' "
+        "branch not applying clauses 1-3. Classified V1.4-BACKLOG by the repo's own R1/R2 "
+        "rule: R1 holds via the weekly sweep, R2 does NOT, because reaching it requires "
+        "editing unbluff's own source - so it is developer-facing, not a criterion-3 "
+        "user-facing false alarm. This entry is liveness-audited, so it reports itself as "
+        "DEAD the moment the detector is fixed.",
 }
 
 # CORPUS fixtures, kept in a SEPARATE roster from the live one on purpose.
