@@ -199,13 +199,31 @@ def _selftest_no_false_block() -> list:
         ("setup.cfg [tool:pytest]", {"setup.cfg": "[tool:pytest]\n"}),
         ("tox.ini [pytest]", {"tox.ini": "[pytest]\n"}),
     ]
+    # SYNTHETIC on purpose, and this is the OPT-1 lesson applied rather than re-learned: CI
+    # installs NOTHING (no pip install anywhere in .github/workflows, requirements-dev.txt is
+    # Pillow only), so _pytest_importable() is False on every runner and True on this box.
+    # Asserting the real detect() here would have gone green locally and turned all 16 CI jobs
+    # red - which is exactly what the ENTRY-GUARD optional-import regression did. Pinning the
+    # gate to True makes the DETECTION logic answer identically everywhere; the gate's other
+    # direction is asserted immediately below, so both are covered and neither depends on what
+    # happens to be installed.
+    _real_imp = getattr(_m, "_pytest_importable", None)
     for label, files in accept:
         d = _dir(files)
-        cmd, _, _ = detect(d)
+        if _real_imp is not None:
+            _m._pytest_importable = lambda: True
+        try:
+            cmd, _, _ = _m.detect(d)
+        finally:
+            if _real_imp is not None:
+                _m._pytest_importable = _real_imp
         if not (cmd and "pytest" in cmd):
             fails.append(f"FASTTEST-BLOCK went too far: {label} IS a pytest project but "
                          f"detect() returned {cmd!r} - the gate is disabled, which is the "
                          f"failure mode the fix must not trade into")
+        if not looks_like_pytest_project(d):
+            fails.append(f"looks_like_pytest_project() says {label} is not a pytest project - "
+                         f"this is the box-independent half, so it is wrong on every machine")
 
     # ---- the pytest-importable gate is CONSULTED, not merely present ----------------------
     # Case J measured rc 1 for a missing pytest - indistinguishable from a real failure - so
@@ -282,6 +300,45 @@ def _selftest_no_false_block() -> list:
                              "an unverified turn now looks exactly like a verified one")
     finally:
         _m.STATE_DIR = real_state
+
+    # ---- SYNTHETIC containment wiring, exercised on EVERY box including CI ----------------
+    # The real-pytest case below is skipped wherever pytest is absent - which is every CI
+    # runner - so relying on it alone would leave main()'s containment call site unpinned
+    # exactly where the mutation job runs, and FTB-4 would come back SURVIVED there. Same
+    # shape as M1 (a branch that executes on no CI runner). The command is a real subprocess
+    # that exits 4 and carries the bare word `pytest` as an argv token, so _is_pytest_command
+    # matches it on every platform without depending on shell comment semantics.
+    real_state0 = _m.STATE_DIR
+    sd0 = _tf.mkdtemp()
+    trash.append(sd0)
+    _m.STATE_DIR = sd0
+    try:
+        d = _repo({"app.py": "x = 1\n"})
+        if d is None:
+            print("SELFTEST SKIP: git unavailable, synthetic containment wiring untested")
+        else:
+            os.makedirs(os.path.join(d, ".claude"), exist_ok=True)
+            with open(os.path.join(d, ".claude", "fast-test.cmd"), "w", encoding="utf-8") as f:
+                f.write('debounce=0\n"%s" -c "import sys; sys.exit(4)" pytest\n'
+                        % _sys.executable.replace("\\", "/"))
+            real_in, real_err = _sys.stdin, _sys.stderr
+            _sys.stdin = io_mod.StringIO(_json.dumps({"cwd": d}))
+            _sys.stderr = io_mod.StringIO()
+            try:
+                rc_syn = main()
+                err_syn = _sys.stderr.getvalue()
+            finally:
+                _sys.stdin, _sys.stderr = real_in, real_err
+            e2e_run.append("synthetic-rc4-wiring")
+            if rc_syn != 0:
+                fails.append(f"FASTTEST-BLOCK: a pytest command exiting 4 still blocks the "
+                             f"turn end (rc {rc_syn}) - main() is not consulting "
+                             f"inconclusive_reason: {err_syn[:200]!r}")
+            elif "NOTHING VERIFIED" not in err_syn:
+                fails.append(f"FASTTEST-BLOCK: rc 4 waved through SILENTLY - an unverified "
+                             f"turn now looks verified: {err_syn[:200]!r}")
+    finally:
+        _m.STATE_DIR = real_state0
 
     # ---- END TO END through main(), reaching the CONTAINMENT call site --------------------
     # The rust case above proves detection; it exits before main() ever evaluates an rc, so it
@@ -418,7 +475,17 @@ def selftest() -> int:
         os.makedirs(os.path.join(td, "tests"))
         with open(os.path.join(td, "tests", "test_x.py"), "w", encoding="utf-8") as f:
             f.write("def test_x():\n    assert True\n")
-        cmd, _, _ = detect(td)
+        # detect() now also requires pytest to be IMPORTABLE, which is false on every CI
+        # runner (nothing is pip-installed there) and true here. Pin it so this case asks
+        # about DETECTION and answers the same on every box - see _selftest_no_false_block.
+        _ri = getattr(_m, "_pytest_importable", None)
+        if _ri is not None:
+            _m._pytest_importable = lambda: True
+        try:
+            cmd, _, _ = _m.detect(td)
+        finally:
+            if _ri is not None:
+                _m._pytest_importable = _ri
         if not (cmd and "-m pytest" in cmd):
             fails.append(f"pytest autodetect wrong: {cmd}")
     # 4. nothing detectable -> None
