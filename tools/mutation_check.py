@@ -526,6 +526,14 @@ MUTATIONS = [
        "    blocked = set()")],
      False, "install"),
     # ---- ENTRY-GUARD, the sibling INSTALL-TAUTOLOGY had to be fixed with (ledger K3).
+    ("install", "OPT-1", "an import guarded by try/except ImportError is treated as REQUIRED "
+     "again - the defect that turned all 16 CI jobs red on c488ab3",
+     [('    import ast\n'
+       '    names = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}',
+       '    import ast\n'
+       '    return False\n'
+       '    names = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}')],
+     False, "install"),
     ("install", "EG-1", "a missing SKILL.md stops being reported, so install ships "
      "close_skills_guard demanding a skill the user never received",
      [('        if not os.path.exists(md):\n'

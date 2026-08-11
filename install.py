@@ -280,6 +280,24 @@ def missing_hook_files(hooks_dir: str) -> list:
     return [s for s in sorted(required) if not os.path.exists(os.path.join(hooks_dir, s))]
 
 
+def _catches_import_error(handler) -> bool:
+    """True if this `except` clause would swallow a failed import.
+
+    A bare `except:` counts - it catches everything, so the import under it is optional
+    whatever the author intended.
+    """
+    import ast
+    names = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}
+    t = handler.type
+    if t is None:
+        return True
+    if isinstance(t, ast.Name):
+        return t.id in names
+    if isinstance(t, ast.Tuple):
+        return any(isinstance(e, ast.Name) and e.id in names for e in t.elts)
+    return False
+
+
 def _import_closure(src_dir: str, seeds) -> set:
     """`seeds` plus every local .py they import, transitively. ONE implementation, two callers.
 
@@ -302,8 +320,31 @@ def _import_closure(src_dir: str, seeds) -> set:
                 tree = ast.parse(f.read())
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue   # a file that is missing or unparsable is REPORTED by the caller
+        # An import guarded by try/except ImportError is OPTIONAL BY DEFINITION and must never
+        # be required. skills/consistency-audit/scripts/extract.py does exactly this for the
+        # document readers (`try: import docx / except ImportError:`), which is correct design -
+        # the tool degrades instead of refusing to start.
+        #
+        # MEASURED FAILURE, 2026-08-09 -> caught by CI on 2026-08-11: without this, the guard
+        # asked `find_spec("docx")`, got None on a machine that does not have python-docx, and
+        # reported `consistency-audit/scripts/docx.py` as a MISSING LOCAL FILE. It invented
+        # three files that never existed and turned all 16 CI jobs red.
+        #
+        # It passed locally because THIS machine has those libraries installed, so the same code
+        # took the opposite branch. That is the environment-dependence class - the probe below
+        # is therefore synthetic, so it gives the same answer on every box.
+        optional = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try) and any(_catches_import_error(h)
+                                                 for h in node.handlers):
+                for stmt in node.body:
+                    for sub in ast.walk(stmt):
+                        if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                            optional.add(id(sub))
         mods = []
         for node in ast.walk(tree):   # ast.walk, so imports nested in functions count too
+            if id(node) in optional:
+                continue
             if isinstance(node, ast.Import):
                 mods += [a.name.split(".")[0] for a in node.names]
             elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
@@ -465,10 +506,37 @@ def selftest() -> int:
                          "demands all of %r and blocks every session close"
                          % (len(undetected_s), len(victims), undetected_s, list(SKILL_NAMES)))
 
+    # The optional-import rule, probed SYNTHETICALLY so the answer does not depend on what
+    # happens to be installed. The real defect was invisible on the authoring machine because
+    # it HAD python-docx; CI did not, and reported three files that never existed. A probe
+    # reading the real scripts would reproduce exactly that split.
+    synth = 0
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "scripts")
+        os.makedirs(d)
+        with open(os.path.join(d, "seed.py"), "w", encoding="utf-8") as f:
+            f.write("try:\n    import unbluff_absent_xyz\n"
+                    "except ImportError:\n    unbluff_absent_xyz = None\n"
+                    "import unbluff_present_xyz\n")
+        with open(os.path.join(d, "unbluff_present_xyz.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+        closure = _import_closure(d, ["seed.py"])
+        synth += 1
+        if "unbluff_absent_xyz.py" in closure:
+            fails.append("an import guarded by try/except ImportError was treated as REQUIRED. "
+                         "On any machine lacking that optional library the guard reports a file "
+                         "that never existed as missing - this turned all 16 CI jobs red")
+        # And the rule must not be OVER-applied: an unguarded local import is still required.
+        synth += 1
+        if "unbluff_present_xyz.py" not in closure:
+            fails.append("an UNGUARDED local import was dropped from the closure - the "
+                         "optional-import rule is over-applied and genuinely missing files "
+                         "would go unreported, which is the defect this guard exists to catch")
+
     # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
     # that passed, which is the failure this whole repo is about.
-    print("  [install-guard] %d hook + %d skill deleted-file case(s) checked"
-          % (checked, skill_checked))
+    print("  [install-guard] %d hook + %d skill deleted-file case(s), %d synthetic case(s)"
+          % (checked, skill_checked, synth))
     if not skill_checked:
         fails.append("the skill-guard probe ran ZERO cases - it is checking nothing")
     if not checked:
