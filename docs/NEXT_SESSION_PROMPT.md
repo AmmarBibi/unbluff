@@ -14,19 +14,24 @@ Repo C:\Users\ammar\Downloads\unbluff.
 
 === STATE, verified live 2026-08-11 ===
 
-HEAD 5ee678b on main, PUSHED. run_selftests 33/33 exit 0 (ON AN IDLE MACHINE - see the
-budget flake below, it matters). Full clean sweep 153 of 155 executed, 0 SURVIVED,
-0 HARNESS ERROR, 2 posix-only not-runnable here. Integration 30/30. Criterion 4 CLOSED.
-Mutation harness 155 entries. Normal sweep runtime is ~30 MIN (measured 1770s and 1960s);
-anything far past that is a HANG, not a slow run - one sat at 48h with 2s of CPU.
+HEAD 367ace4 on main, PUSHED, CI GREEN (run 31531141633, 16 jobs, 0 failed).
+run_selftests 33/33 exit 0 on an IDLE machine AND on a pytest-LESS interpreter.
+Integration 30/30. Criterion 4 CLOSED. Mutation harness 162 entries, 163 anchors.
+CI full sweep 160 of 162 executed, 0 SURVIVED, 2 not-runnable-here.
+Normal sweep runtime is ~30 MIN (measured 1770s and 1960s); far past that is a HANG,
+not a slow run - one sat at 48h with 2.2s of CPU and a 0-byte file.
 
 FIRST THING TO DO ON RESUME:
-  1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 5ee678b.
-  2. `gh run list --limit 3`. CI was green on bc8fcec (16 jobs) but was still RUNNING on
-     5ee678b when this was written - CONFIRM IT before trusting the state above.
+  1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 367ace4.
+  2. `gh run list --limit 3`. Expect success on 367ace4. CONFIRM before trusting the above.
   3. Run the suite on an IDLE machine. A suite run alongside other work false-fails on
      hook_health_check and meta_audit_on_stop - see SELFTEST-BUDGET-FLAKE below. "33/33" is
      not evidence unless the box was idle.
+  4. NEW, and it is the cheapest lesson here: also run the suite AND the mutation harness
+     under a `venv --without-pip` interpreter. Running the SUITE deprived proves only
+     PORTABILITY; running the MUTATION HARNESS deprived proves the pins still BITE there.
+     Two mutations shipped DECORATIVE on 2026-08-11 because only the first was done.
+     That is DEPRIVED-CI, scheduled in step 3.
 
 === THE GOAL ===
 
@@ -53,7 +58,7 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
   1 finds a README claim that depends on it - in which case the choice is fix it or delete the
   claim.
 * The v1.3.1 ship gate ("no HIGH in the shipped hook path") is retired. Criteria 1-4 replace it.
-* docs/V131_REVIEW_PLAN.md (2,338 lines - NOT 2,200) is HISTORY. **The collapse is CANCELLED.**
+* docs/V131_REVIEW_PLAN.md (2,368 lines - re-measured 2026-08-11) is HISTORY. **The collapse is CANCELLED.**
   It discharges no criterion, and CHANGELOG.md:56 stays true if the file keeps its phases. It
   gets a HISTORY header, not a rewrite. 40 of its 247 items must survive - see ledger section F.
 * The v1.0 milestone ships as tag **v1.4.0**. `v1.0.0` has existed since 2026-07-13 (b8d3f9e);
@@ -126,10 +131,30 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             WIRED hook - then blocked every close demanding a skill the user never got.
             Derived from what a SKILL.md TELLS THE USER TO RUN plus its import closure.
             Pinned by EG-1/EG-2. One shared _import_closure serves both rosters.
+          [DONE 08-11] FASTTEST-BLOCK (HIGH). MEASURED through the real entry point, 10 repo
+            shapes: SEVEN hard-blocked a turn end with nothing wrong - `tests/` alone was
+            taken as proof of a pytest project, and `tests/` is Cargo's own integration-test
+            dir, so every Rust repo blocked every turn end AND every push (pre_push_gate
+            shares detect()). Fixed in two halves: detection needs real pytest evidence AND
+            an importable pytest; containment maps pytest rc 4/5 to "could not answer", not
+            "you failed". Pinned FTB-1/1b/2/3/4/5/6, 7 of 7 CAUGHT on a pytest-PRESENT and a
+            pytest-LESS interpreter. CI green on `367ace4`, 16 jobs. Ledger N0.
+            LIMIT: author wrote the fix and its only probe - "12 shapes passed", NOT "no
+            false alarm remains". Independent pass still owed.
           - ENC-1: 0 of 25 hooks reconfigure stdout. cp1252 + non-ASCII path = half-printed
             report then exit 0. Silent, not a visible crash.
           - PGG-PS: piped_gate_guard is registered matcher "Bash"; never fires for PowerShell.
-          - SKILLDIR-DESTROY, FASTTEST-BLOCK, CA-SELFREF, --dry-run, settings.json backup.
+          - CA-SELFREF (now THIRD instance and SELF-PROPAGATING: each time the defect is
+            documented, the documentation becomes a new instance), --dry-run, settings.json
+            backup.
+          - CAP-FP-1 (NEW 08-11): cap_shapes false-positives on a COUNTER bound in a
+            BOOL-returning function - its own clauses 1 and 2 exclude both. Measured with
+            controls both directions. V1.4-BACKLOG by R1/R2 (R1 yes, R2 no), so
+            developer-facing, NOT a criterion-3 user-facing false alarm. Held by a
+            liveness-audited BOUND_EXEMPTIONS entry that self-reports DEAD when fixed.
+          - SELFTEST-BUDGET-FTOS (NEW 08-11): fast_test_on_stop's selftest is at 15.8s of a
+            25s cap it cannot see, and is one of the 21 of 24 hooks that do NOT self-budget.
+            Same mechanism as SELFTEST-BUDGET-FLAKE; fix them together.
           - The 42 open confirmed findings (NOT 5 - check_review_freshness masks 37 because a
             unit that is both STALE and has open findings is labelled only STALE).
           - Gate-ledger coverage: 4 of 5 gate tiers write no record at all.
@@ -173,7 +198,7 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
               13 read sys.stdin and none expose slicing_offenders(), the only entrypoint
               score_corpus.py calls. "The corpus machinery already exists" was FALSE.
           4b: one corpus of ordinary correct work per input class.
-          Fix FASTTEST-BLOCK first (step 3) - it is a false alarm that would be measured.
+          FASTTEST-BLOCK is DONE (step 3, 2026-08-11) - that false alarm is out of the corpus.
           Settle the denominator: the repo's own detectors say 25 / 24 / 22.
           [criterion 3. Largest unknown in the estimate - RE-ESTIMATE AFTER THIS LANDS]
 
