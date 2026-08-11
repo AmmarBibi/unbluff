@@ -114,6 +114,13 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
           [NEW, SCHEDULED] MUT-HANG - the sweep can hang forever with no timeout, no
             heartbeat, no output. One sat at 48h with 2.2s of CPU and a 0-byte file. Normal
             is ~30 min. Fix with MUT-CONC: watchdog + progress printed as it goes.
+          [NEW, SCHEDULED] close_skills_guard verifies INVOCATION, not COMPLETION. It
+            correctly blocked three premature closes, but cannot see a skill that was
+            invoked and then half-run - which happened, to all FOUR skills, and was caught
+            by the user asking rather than by any gate. The repo's own defect class turned
+            on its own close ritual: a check that confirms the ritual STARTED and reports
+            that as the ritual HAPPENING. Beware the obvious fix - having each skill
+            self-report completion is the same defect one level down. Ledger N2.
           [DONE] ENTRY-GUARD, fixed WITH it as K3 required. install_skill() warned and
             CONTINUED on a missing skill dir, so install exited 0 and close_skills_guard - a
             WIRED hook - then blocked every close demanding a skill the user never got.
@@ -230,9 +237,17 @@ watcher is not a green result.
 
 === AT CLOSE ===
 
-Invoke the four audit skills (consistency-audit, completeness-audit, source-coverage,
-meta-review) via the Skill tool and COMPLETE each procedure, including refreshing the coverage
-ledger. On 2026-08-09 all four found something real - consistency found a live `[]` placeholder
+Invoke the four audit skills via the Skill tool IN THIS ORDER - consistency-audit,
+completeness-audit, source-coverage, then **meta-review LAST** - and COMPLETE each procedure,
+including refreshing the coverage ledger. The order is not cosmetic: on 2026-08-11 meta-review
+was run FIRST and therefore never saw MUT-HANG, a finding the later three produced, even though
+meta-review is the synthesising pass whose job is to weigh it.
+
+COMPLETE means every step, not just the invocation. Also on 2026-08-11 all four were invoked and
+three were only half-run (the consistency script skipped for a targeted derivation, the
+soft-defer sweep skipped, meta-review checks 1 and 5 skipped). `close_skills_guard` did not
+catch it - it verifies INVOCATION, not COMPLETION - and it was found only because a human asked.
+Running the skipped steps afterwards produced two new findings (ledger N2). On 2026-08-09 all four found something real - consistency found a live `[]` placeholder
 and a tool self-reference defect, source-coverage found two unreconciled populations, and
 meta-review found the gate ledger covers 1 of 5 tiers. This is not a formality.
 ```

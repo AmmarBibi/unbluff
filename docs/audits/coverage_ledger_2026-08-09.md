@@ -306,6 +306,29 @@ what the code does.** The ledger said to fix them together (K3) and they were.
 | **the optional-import regression** - ENTRY-GUARD turned all 16 CI jobs RED on `c488ab3` | **BUILT** 2026-08-11 | The closure asked `find_spec("docx")`, got None on a runner without python-docx, and reported `consistency-audit/scripts/docx.py` as a MISSING LOCAL FILE - it invented three files that never existed. `extract.py` guards those readers with `try/except ImportError` on purpose. **It passed locally because THIS box has python-docx, PyMuPDF and pdfminer installed and a clean runner does not** - verified at resume. Fix: an import whose enclosing `try` catches ImportError is optional BY DEFINITION, derived from the AST. Verified against the real failure condition by stubbing `_resolves_outside` so exactly those three are unresolvable - both rosters return `[]`. Probe is SYNTHETIC so it answers identically on every box, and asserts BOTH directions (guarded = not required, unguarded = still required). Pinned by `OPT-1`. CI green on `bc8fcec`, 16 jobs |
 | `SKILLDIR-DESTROY` (HIGH, **user data loss**) | **BUILT** 2026-08-11 | Worse than this ledger recorded - TWO paths, both reproduced live before fixing. **install** merged over a user's pre-existing same-named skill (`copytree(dirs_exist_ok=True)`); **uninstall** `rmtree`d the WHOLE directory with `ignore_errors=True`, so uninstalling unbluff silently deleted a skill that predated it. Fixed with a provenance manifest, following this repo's own precedent that `install()` refuses to clobber a foreign pre-push hook. Install refuses any skill dir with no manifest; uninstall removes exactly the manifest's paths and prunes only directories that end up empty. **The reverse direction is tested too** - a fix that protects user data by breaking uninstall is not a fix: 5 user-data cases covering refuse-on-foreign, don't-delete-foreign, clean round trip, a file added AFTER install surviving, and an all-ours directory still disappearing (or integration G5 would go red). Pinned by `SD-1`/`SD-2`. Integration 30/30 |
 
+### N2. Found by auditing the AUDITS, 2026-08-11
+
+Prompted by being asked whether the close ritual was actually completed. It had been
+INVOKED in full - all four skills, via the Skill tool - but not COMPLETED. **All FOUR were
+partial, not three** (an earlier draft of this row said three, which flattered the author;
+the consistency pass caught it):
+
+| skill | what was skipped |
+|---|---|
+| consistency-audit | STEP 1 - the bundled `scripts/audit.py`, replaced with a targeted derivation of that day's figures |
+| completeness-audit | STEP 1 - the soft-defer marker sweep |
+| source-coverage | STEP 5 - re-verify no optional-forever language and confirm the ledger is current |
+| meta-review | checks 1 (parked-but-unscheduled) and 5 (improvements) |
+
+Running the skipped steps afterwards found the rows below - so the omissions were not
+harmless, which is the whole argument for completing a procedure rather than invoking it.
+
+| finding | state | detail |
+|---|---|---|
+| **`close_skills_guard` verifies INVOCATION, not COMPLETION** | **SCHEDULED** - step 3 | It correctly blocked two premature closes today by detecting that a skill had not been invoked since the last user message. It cannot detect a skill that was invoked and then only half-run - which is exactly what happened, and was found by a human asking rather than by any gate. This is the repo's own defect class applied to its own close ritual: a check that confirms the ritual STARTED and reports that as the ritual HAPPENING. Any fix must avoid the obvious trap of having each skill self-report completion, since a skill that lies about finishing is the same defect one level down |
+| **the four audits have no defined ORDER, and the order matters** | **SCHEDULED** - step 3 | `meta-review` was run FIRST in this pass, so it never saw `MUT-HANG` - a finding the later audits produced - even though meta-review is the synthesising pass whose job is to weigh exactly that. The plan says "invoke the four" and names no sequence. Correct order is consistency -> completeness -> source-coverage -> **meta-review last**, and the plan should say so rather than leaving it to whoever is running it |
+| a live re-instance of `CA-SELFREF` | **SCHEDULED** - step 3 (unchanged) | The bundled script flagged `[E] placeholder` at `NEXT_SESSION_PROMPT.md:235`. Adjudicated FALSE POSITIVE: the `[]` sits inside the plan's own sentence *"consistency found a live `[]` placeholder"*. The tool flags a document that DESCRIBES the tool. Second recorded instance; the finding already exists in section B |
+
 ### N1. Newly surfaced by step 3 - SCHEDULED, not fixed
 
 | gap | state | detail |
