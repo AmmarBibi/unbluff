@@ -218,6 +218,30 @@ def _selftest_no_false_block() -> list:
         ("pyproject [tool.pytest]", {"pyproject.toml": "[tool.pytest.ini_options]\n"}),
         ("setup.cfg [tool:pytest]", {"setup.cfg": "[tool:pytest]\n"}),
         ("tox.ini [pytest]", {"tox.ini": "[pytest]\n"}),
+        # [FTB-CFG] pytest's canonical config_names, re-extracted from
+        # _pytest.config.findpaths.locate_config: pytest.toml, .pytest.toml, pytest.ini,
+        # .pytest.ini, pyproject.toml, tox.ini, setup.cfg. Only 4 of the 7 were recognised.
+        # pytest.toml arrived in pytest 9.0 as the HIGHEST-precedence file, authoritative
+        # "even when empty", so the gap was widening. MEASURED: a dir with only pytest.toml
+        # plus a root test_app.py really does run `1 passed` under pytest, and unbluff
+        # refused to gate it.
+        (".pytest.ini (baseline pytest, every supported version)", {".pytest.ini": "\n"}),
+        ("pytest.toml (pytest 9.0, highest precedence, valid empty)", {"pytest.toml": "\n"}),
+        (".pytest.toml (hidden variant)", {".pytest.toml": "\n"}),
+        # [FTB-LAYOUT] Genuine layouts that pytest collects and passes, measured rc 0 each,
+        # which detection rejected. A false negative silently DISABLES the gate - the exact
+        # failure mode the FASTTEST-BLOCK fix promised not to trade into.
+        ("root-level test_*.py, no tests/ dir", {"test_app.py": T_OK}),
+        ("`test/` singular", {"test/test_app.py": T_OK}),
+        ("tests colocated in the package", {"mypkg/__init__.py": "", "mypkg/test_app.py": T_OK}),
+        ("root conftest.py (pytest's own marker of a test root)",
+         {"conftest.py": "import pytest\n", "mypkg/check_thing.py": ""}),
+        # main() anchors detect() on project_root() - the repo TOPLEVEL - so a monorepo whose
+        # pytest config lives in a package is the normal shape, not a contrived one. Asserted
+        # rather than assumed: the repo-wide walk should reach it even though the toplevel
+        # carries no config of its own.
+        ("monorepo: pkg/pytest.ini + pkg/tests/",
+         {"pkg/pytest.ini": "[pytest]\n", "pkg/tests/test_app.py": T_OK}),
     ]
     # SYNTHETIC on purpose, and this is the OPT-1 lesson applied rather than re-learned: CI
     # installs NOTHING (no pip install anywhere in .github/workflows, requirements-dev.txt is

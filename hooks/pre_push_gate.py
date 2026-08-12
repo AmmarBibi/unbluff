@@ -10,7 +10,8 @@ Mechanical by design (no reasoning):
   1. command = <project>/.claude/pre-push.cmd if present, else fast_test_on_stop's own detect()
      (same file format: line1 = command, optional "timeout=N"). A project can therefore run a
      STRICTER gate at push time than at turn end - pushes are rare, turns are not.
-  2. no command detectable  -> say so, ALLOW the push (a repo with no tests has nothing to gate)
+  2. no command detectable  -> say WHY (no gate configured, vs a real pytest project whose
+     pytest this interpreter cannot import - two different problems), then ALLOW the push
   3. fast_test_on_stop already recorded a PASS for this same command, newer than the newest source file
                             -> ALLOW instantly, costing one stat() sweep and no test run
   4. otherwise             -> run the command now; non-zero BLOCKS the push
@@ -217,7 +218,20 @@ def gate(root: str) -> int:
     cmd, timeout_s = resolve_command(root)
     name = os.path.basename(root.rstrip("/\\")) or root
     if not cmd:
-        sys.stderr.write(f"[pre-push] '{name}' has no test command - nothing to verify, allowing push.\n")
+        # [FTB-GATES] The two gates consume the SAME detect(), which declines for two very
+        # different reasons - "there is no test gate here" and "this IS a pytest project but
+        # pytest is not importable by the interpreter that would run it". The Stop gate said
+        # which; this one said "has no test command" for both, so the RARER, HIGHER-STAKES
+        # event got the weaker and, in the second case, FALSE message. Not exotic: the
+        # installer embeds the interpreter it was run with, so on any machine where pytest
+        # lives in a project venv rather than that interpreter, EVERY pytest project takes
+        # this path. Routed through fast_test's own _nogate_reason() rather than restating it
+        # here, so the two gates cannot drift apart again.
+        _, why_no_gate = fast_test._nogate_reason(root)
+        sys.stderr.write(f"[pre-push] '{name}' has no test command - nothing to verify, "
+                         f"allowing push.\n"
+                         + why_no_gate.replace("[fast-test]", "[pre-push]")
+                                      .replace(".claude/fast-test.cmd", ".claude/pre-push.cmd"))
         return 0
 
     newest, where = newest_source_mtime(root)

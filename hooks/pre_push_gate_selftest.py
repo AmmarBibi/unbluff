@@ -414,6 +414,40 @@ def selftest() -> int:
         if gate(r) != 0:
             fails.append("repo with no test command should allow the push")
 
+        # 1b. [FTB-GATES] ...and it must say WHICH no-command case this is. Both gates consume
+        # the same detect(), which declines for two very different reasons; this one used to
+        # print "has no test command" for both, so a real pytest project whose pytest the
+        # installer's interpreter cannot import was told something FALSE at push time - the
+        # rarer, higher-stakes event getting the weaker message. Not exotic: the installer
+        # embeds the interpreter it was run with, so any machine whose pytest lives in a
+        # project venv takes this path for EVERY pytest project.
+        _pp_pkg = os.path.join(r, "pytest_layout_probe")
+        os.makedirs(_pp_pkg, exist_ok=True)
+        with open(os.path.join(_pp_pkg, "test_probe2.py"), "w", encoding="utf-8") as f:
+            f.write("def test_probe2():\n    assert True\n")
+        _real_imp = getattr(fast_test, "_pytest_importable", None)
+        if _real_imp is None:
+            fails.append("FTB-GATES: fast_test has no _pytest_importable to consult")
+        else:
+            fast_test._pytest_importable = lambda: False
+            _real_err = sys.stderr
+            sys.stderr = __import__("io").StringIO()
+            try:
+                _rc_ng = gate(r)
+                _err_ng = sys.stderr.getvalue()
+            finally:
+                sys.stderr = _real_err
+                fast_test._pytest_importable = _real_imp
+            if _rc_ng != 0:
+                fails.append("FTB-GATES: an unimportable pytest must not BLOCK the push (rc %r)"
+                             % (_rc_ng,))
+            elif "not importable" not in _err_ng:
+                fails.append("FTB-GATES: the push gate did not say WHY there is no command - a "
+                             "real pytest project whose pytest this interpreter cannot import "
+                             "is told it 'has no test command', which is false: %r"
+                             % (_err_ng[:200],))
+        __import__("shutil").rmtree(_pp_pkg, ignore_errors=True)
+
         # 2. push-time override wins over fast_test_on_stop's detection, and carries its timeout
         os.makedirs(os.path.join(r, ".claude"), exist_ok=True)
         # A REAL pytest project, not just a directory named `tests`. [FASTTEST-BLOCK] A bare

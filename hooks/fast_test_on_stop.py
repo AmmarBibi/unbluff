@@ -161,12 +161,28 @@ def _read_override(path: str, options: dict | None = None) -> tuple[str | None, 
 _PYTEST_FILE_CAP = 5000     # bounded walk; see _has_collectible_tests for what the cap MEANS
 # [FASTTEST-BLOCK] Config markers, each in the file that owns it. `tests/` is deliberately NOT
 # on this list: it is Cargo's integration-test directory, and Go/JS/Java projects use it too.
+# [FTB-CFG] pytest's canonical config_names, re-extracted from
+# `_pytest.config.findpaths.locate_config`: pytest.toml, .pytest.toml, pytest.ini, .pytest.ini,
+# pyproject.toml, tox.ini, setup.cfg. Only FOUR were listed here, so three real config shapes
+# left a genuine pytest project ungated - and `pytest.toml` arrived in pytest 9.0 as the
+# HIGHEST-precedence file, authoritative even when EMPTY, so the gap was widening with each
+# release rather than shrinking. A marker of None means "existing at all is the declaration",
+# which is correct for every .ini/.toml form: pytest honours them empty.
 _PYTEST_CONFIG_MARKERS = (
-    ("pytest.ini", None),                    # existing at all is the declaration
-    ("pyproject.toml", "[tool.pytest"),
+    ("pytest.ini", None),
+    (".pytest.ini", None),
+    ("pytest.toml", None),
+    (".pytest.toml", None),
+    ("pyproject.toml", "[tool.pytest"),      # covers [tool.pytest] AND [tool.pytest.ini_options]
     ("setup.cfg", "[tool:pytest]"),
     ("tox.ini", "[pytest]"),
 )
+
+# Directories never worth walking for test files: huge, and a hit inside one is somebody
+# else's test suite, not this project's.
+_PRUNE_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".tox", ".nox", ".venv",
+               "venv", "env", ".mypy_cache", ".pytest_cache", "target", "build", "dist",
+               "site-packages", ".eggs", ".idea", ".vscode"}
 
 
 def _pytest_importable() -> bool:
@@ -218,7 +234,8 @@ def _has_collectible_tests(tests_dir: str) -> bool | None:
     seen = 0
     try:
         for root, dirs, files in os.walk(tests_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            dirs[:] = [d for d in dirs
+                       if not d.startswith(".") and d.lower() not in _PRUNE_DIRS]
             for fn in files:
                 seen += 1
                 if seen > _PYTEST_FILE_CAP:
@@ -237,13 +254,25 @@ def looks_like_pytest_project(cwd: str) -> bool:
 
     ONE definition, called by both detect() and the no-gate notice, so the two can never drift
     into disagreeing about what a pytest project is.
+
+    [FTB-LAYOUT] This required a `tests/` directory specifically, which rejected four layouts
+    that pytest genuinely collects and passes (MEASURED, raw `pytest -x -q` rc 0 on each):
+    a root-level `test_app.py` with no tests/ dir at all; `test/` SINGULAR; tests colocated
+    beside the code (`mypkg/test_app.py`); and a root `conftest.py`. A false negative silently
+    DISABLES the gate, which is the failure mode the FASTTEST-BLOCK fix promised not to trade
+    into, and `README` asserts the strong form ("auto-detects pytest").
+
+    Asking "does this repo contain a file pytest would collect" is both simpler and more
+    correct than enumerating directory names - the singular/plural/colocated cases collapse
+    into one question. The walk is bounded and prunes vendor and build trees; hitting the cap
+    returns None and ACCEPTS, because a tree that large is almost certainly a real suite and
+    the rc-5 containment catches the guess if it is wrong.
     """
     if _has_pytest_config(cwd):
         return True
-    tests_dir = os.path.join(cwd, "tests")
-    if not os.path.isdir(tests_dir):
-        return False
-    return _has_collectible_tests(tests_dir) is not False   # None (cap reached) accepts
+    if os.path.isfile(os.path.join(cwd, "conftest.py")):
+        return True                      # pytest's own marker of a test root
+    return _has_collectible_tests(cwd) is not False        # None (cap reached) accepts
 
 
 # pytest's documented exit codes. Only rc 5 (NO_TESTS_COLLECTED) is verdict-free HERE.

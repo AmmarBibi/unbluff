@@ -261,10 +261,25 @@ MUTATIONS = [
     # correct proves nothing about whether either gate consults it.
     ("fast_test_on_stop", "FTB-1", "a bare tests/ dir is proof of a pytest project again "
      "(the original defect: Cargo's tests/ dir blocked every Rust turn end)",
-     [("    return _has_collectible_tests(tests_dir) is not False", "    return True")], False),
+     [("    return _has_collectible_tests(cwd) is not False",
+       '    return os.path.isdir(os.path.join(cwd, "tests"))')], False),
     ("fast_test_on_stop", "FTB-1b", "pytest CONFIG files stop counting, so a real pytest "
      "project whose tests live outside tests/ loses its gate entirely",
      [("    for name, marker in _PYTEST_CONFIG_MARKERS:", "    for name, marker in ():")], False),
+    ("fast_test_on_stop", "FTB-10", "the config roster loses pytest 9.0's pytest.toml family "
+     "and .pytest.ini, so 3 of pytest's 7 canonical config files leave a real project UNGATED",
+     [('    ("pytest.ini", None),\n    (".pytest.ini", None),\n    ("pytest.toml", None),\n'
+       '    (".pytest.toml", None),', '    ("pytest.ini", None),')], False),
+    ("fast_test_on_stop", "FTB-11", "detection needs a `tests/` directory again, so a root-level "
+     "test_*.py, `test/` singular, colocated tests and a monorepo package are all UNGATED",
+     [("    return _has_collectible_tests(cwd) is not False",
+       '    return _has_collectible_tests(os.path.join(cwd, "tests")) is not False')], False),
+    ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
+     [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
+    ("pre_push_gate", "FTB-GATES", "the push gate stops naming WHY there is no command, so a "
+     "pytest project whose pytest is unimportable is told it 'has no test command'",
+     [("        _, why_no_gate = fast_test._nogate_reason(root)",
+       '        why_no_gate = ""')], False),
     ("fast_test_on_stop", "FTB-2", "detect() stops asking whether pytest is importable, so a "
      "box without pytest gets rc 1 - indistinguishable from a real failure",
      [("    if looks_like_pytest_project(cwd) and _pytest_importable():",
