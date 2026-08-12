@@ -284,6 +284,18 @@ MUTATIONS = [
      "test_*.py, `test/` singular, colocated tests and a monorepo package are all UNGATED",
      [("    return _has_collectible_tests(cwd) is not False",
        '    return _has_collectible_tests(os.path.join(cwd, "tests")) is not False')], False),
+    ("fast_test_on_stop", "FTB-13", "the config marker goes back to a raw SUBSTRING match, so a "
+     "pyproject that merely mentions it in a comment or a string is read as declaring pytest",
+     [("                    if line.startswith(marker):", "                    if marker in line:")],
+     False),
+    ("fast_test_on_stop", "FTB-14", "the file cap counts EVERY file again, so a large tree of "
+     "non-Python fixtures hits it and is ACCEPTED as a pytest project on no Python evidence",
+     [("                if not fn.endswith(\".py\"):\n                    continue\n",
+       "")], False),
+    ("fast_test_on_stop", "FTB-15", "the three-state cap collapses to False, so a repo too big "
+     "to finish scanning is reported as NOT a pytest project and silently loses its gate",
+     [("                    return None\n                if fn.startswith(\"test_\")",
+       "                    return False\n                if fn.startswith(\"test_\")")], False),
     ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
      [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
     ("tools/check_readme_fresh", "CI-JOBS-1", "a job-count gate that could not PARSE the "

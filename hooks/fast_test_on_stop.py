@@ -213,16 +213,30 @@ def _has_pytest_config(cwd: str) -> bool:
             continue
         if marker is None:
             return True
+        # [FTB-MARKER] Was `marker in f.read()` - a raw substring search, so a pyproject that
+        # merely MENTIONS the marker in a comment or a string counted as DECLARING a pytest
+        # project. Both are common: listing pytest as a dev dependency, or a comment saying
+        # why it is NOT used. Every one of these markers is a TOML/INI section header, so it
+        # is line-anchored by definition; comments cannot be section headers, and a marker
+        # inside a value never starts its line.
+        #
+        # utf-8-sig, not utf-8: `_read_override` already opens with it, and a BOM - which
+        # Windows editors add routinely - otherwise hides the FIRST line of the file, which is
+        # exactly where a section header lives.
         try:
-            with open(p, encoding="utf-8", errors="replace") as f:
-                if marker in f.read():
-                    return True
+            with open(p, encoding="utf-8-sig", errors="replace") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line[0] in "#;":
+                        continue
+                    if line.startswith(marker):
+                        return True
         except OSError:
             continue
     return False
 
 
-def _has_collectible_tests(tests_dir: str) -> bool | None:
+def _has_collectible_tests(tests_dir: str, cap: int = 0) -> bool | None:
     """Does `tests/` hold a file pytest would actually collect? None = could not finish looking.
 
     Three states on purpose, per this repo's standing rule that a check must distinguish "no
@@ -231,17 +245,29 @@ def _has_collectible_tests(tests_dir: str) -> bool | None:
     and lets the rc-5 containment below catch it if that guess was wrong. The two halves of the
     fix cover each other here rather than each having to be perfect.
     """
+    # `cap` is injectable ONLY so the selftest can reach the cap without building 5000 files.
+    # It had to be: mutations FTB-14 and FTB-15 both came back SURVIVED because no fixture
+    # could exercise this branch at all, and a mutation that cannot be PLACED has proven
+    # nothing. Production always uses the module constant.
+    cap = cap or _PYTEST_FILE_CAP
     seen = 0
     try:
         for root, dirs, files in os.walk(tests_dir):
             dirs[:] = [d for d in dirs
                        if not d.startswith(".") and d.lower() not in _PRUNE_DIRS]
             for fn in files:
-                seen += 1
-                if seen > _PYTEST_FILE_CAP:
-                    return None
                 if not fn.endswith(".py"):
                     continue
+                # [FTB-CAP] Count only what the search is LOOKING for. Counting every file made
+                # the cap a measure of repo SIZE rather than of Python content, and the
+                # FTB-LAYOUT change widened this walk from `tests/` to the whole repo - so a
+                # large tree of non-Python fixtures (images, JSON, docs) would hit the cap,
+                # return None, and be ACCEPTED as a pytest project on no Python evidence at
+                # all. Counting .py files only means the cap now bounds the work that can
+                # actually produce a hit.
+                seen += 1
+                if seen > cap:
+                    return None
                 if fn.startswith("test_") or fn[:-3].endswith("_test"):
                     return True
     except OSError:

@@ -180,6 +180,15 @@ def _selftest_no_false_block() -> list:
           "tests/app.test.js": "test('x',()=>{});\n"}),
         ("empty tests/ dir", {"tests": None, "app.py": "x = 1\n"}),
         ("tests/ holding only a helper module", {"tests/helpers.py": "def h():\n    return 1\n"}),
+        # [FTB-MARKER] A config MARKER inside a comment or a string is not a declaration.
+        # _has_pytest_config did a raw substring match, so a pyproject that only MENTIONS
+        # pytest - which is extremely common, e.g. listing it as a dev dependency or
+        # explaining why it is not used - was read as declaring a pytest project.
+        ("pyproject mentioning the marker only in a COMMENT",
+         {"pyproject.toml": "# we do not use [tool.pytest] here, see CONTRIBUTING\n"
+                            "[project]\nname = 'x'\n"}),
+        ("pyproject mentioning the marker inside a STRING",
+         {"pyproject.toml": "[project]\ndescription = \"migrating off [tool.pytest] soon\"\n"}),
     ]
     # PIN pytest-importability to True here, for the same reason the accept-shapes do it and
     # for one MEASURED reason more: without it these assertions pass for the WRONG REASON on
@@ -242,6 +251,11 @@ def _selftest_no_false_block() -> list:
         # carries no config of its own.
         ("monorepo: pkg/pytest.ini + pkg/tests/",
          {"pkg/pytest.ini": "[pytest]\n", "pkg/tests/test_app.py": T_OK}),
+        # [FTB-MARKER] ...but a marker at the start of a line, with a UTF-8 BOM in front of it,
+        # IS a declaration. _read_override already opens with utf-8-sig; this one did not, so a
+        # BOM - which Windows editors add routinely - hid the very first line of the file.
+        ("pyproject with a UTF-8 BOM before the marker",
+         {"pyproject.toml": "﻿[tool.pytest.ini_options]\naddopts = '-q'\n"}),
     ]
     # SYNTHETIC on purpose, and this is the OPT-1 lesson applied rather than re-learned: CI
     # installs NOTHING (no pip install anywhere in .github/workflows, requirements-dev.txt is
@@ -289,6 +303,38 @@ def _selftest_no_false_block() -> list:
                          f"returned {cmd!r} for an interpreter that cannot run pytest")
         if _m._pytest_importable is not real_imp:
             fails.append("fixture left _pytest_importable patched")
+
+    # ---- [FTB-CAP] the CAP branch, which no fixture could previously reach ----------------
+    # FTB-14 and FTB-15 both came back SURVIVED: reaching the cap needs >5000 .py files, so
+    # nothing exercised this branch at all and both mutations were unplaceable. The cap is now
+    # injectable purely so a fixture can reach it in three files instead of five thousand.
+    cap_fn = getattr(_m, "_has_collectible_tests", None)
+    if cap_fn is None:
+        fails.append("FTB-CAP: _has_collectible_tests is gone, so the cap is untestable")
+    else:
+        # (a) NON-.py files must NOT consume the cap. Correct code sees 1 .py and answers
+        #     False; code that counts every file blows a cap of 2 and answers None, which the
+        #     caller ACCEPTS - a pytest project declared on no Python evidence at all.
+        d_noise = _dir(dict([("data/f%02d.json" % i, "{}\n") for i in range(10)]
+                            + [("helpers.py", "def h():\n    return 1\n")]))
+        got_noise = cap_fn(d_noise, cap=2)
+        if got_noise is not False:
+            fails.append("FTB-CAP: %d non-Python files consumed the cap (got %r, want False) - "
+                         "the cap measures repo SIZE rather than Python content, so a big tree "
+                         "of fixtures is accepted as a pytest project" % (10, got_noise))
+        # (b) Hitting the cap is UNKNOWN (None), never False. Collapsing it to False would
+        #     report a repo too big to finish scanning as definitively NOT a pytest project,
+        #     silently losing its gate - "could not finish looking" is not "nothing there".
+        d_many = _dir({"a_helper.py": "x=1\n", "b_helper.py": "x=1\n", "c_helper.py": "x=1\n"})
+        got_many = cap_fn(d_many, cap=2)
+        if got_many is not None:
+            fails.append("FTB-CAP: hitting the cap returned %r, not None - 'could not finish "
+                         "looking' must stay distinguishable from 'looked and found nothing'"
+                         % (got_many,))
+        # (c) the control: under the cap, a real test file is still found
+        if cap_fn(_dir({"test_ok.py": T_OK}), cap=50) is not True:
+            fails.append("FTB-CAP: a collectible test under the cap was not found - the probe "
+                         "is measuring the wrong thing")
 
     # ---- containment: pytest's rc 4 / rc 5 are NOT verdicts -------------------------------
     reason_fn = getattr(_m, "inconclusive_reason", None)
