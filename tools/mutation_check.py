@@ -298,6 +298,15 @@ MUTATIONS = [
        "                    return False\n                if fn.startswith(\"test_\")")], False),
     ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
      [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
+    ("install", "RD-1", "the partial-checkout seed goes back to the hand-typed REQUIRED_HOOKS "
+     "alone, so a sub-hook added to a dispatcher roster and never typed into the tuple is "
+     "invisible - install prints Done., the selftest prints OK, the hook never runs",
+     [("    seed = tuple(sorted(set(REQUIRED_HOOKS) | dispatcher_subhooks(hooks_dir)))",
+       "    seed = tuple(sorted(set(REQUIRED_HOOKS)))")], False),
+    ("install", "RD-2", "dispatcher_subhooks stops reading the HOOKS rosters, so the derivation "
+     "silently becomes a declaration again",
+     [('            if not any(isinstance(t, ast.Name) and t.id == "HOOKS" for t in node.targets):',
+       '            if True:')], False),
     ("tools/check_readme_fresh", "CI-JOBS-1", "a job-count gate that could not PARSE the "
      "workflow reports the same green as one that looked and found nothing wrong",
      [('    if want <= 0:\n        return 1, ("readme-jobs: FAIL - could not derive',
@@ -613,11 +622,16 @@ MUTATIONS = [
      # became a second caller, so the old anchor stopped matching. The harness reported
      # HARNESS ERROR rather than passing quietly, which is the only reason it was noticed -
      # the same way P14 B3 was caught.
-     [("    required = _import_closure(hooks_dir, REQUIRED_HOOKS)",
+     # ANCHOR UPDATED AGAIN 2026-08-12: ROSTER-DERIVE replaced the seed line this pointed at.
+     # That is FOUR known anchor drifts on this repo (IT-1 twice, FTB-5, FTB-1), three of them
+     # in one session, and every one was caught by the cheap `check_mutation_anchors` gate
+     # rather than by a 25-minute sweep or by review. A pin whose anchor has drifted looks
+     # exactly like a healthy one; the drift rate is the argument for keeping that gate fast
+     # enough to run on every commit.
+     [("    seed = tuple(sorted(set(REQUIRED_HOOKS) | dispatcher_subhooks(hooks_dir)))",
        "    import glob as _glob\n"
-       "    required = set(REQUIRED_HOOKS)\n"
-       "    required.update(os.path.basename(p)\n"
-       "                    for p in _glob.glob(os.path.join(_glob.escape(hooks_dir), '*.py')))")],
+       "    seed = tuple(sorted(set(REQUIRED_HOOKS) | {os.path.basename(p)\n"
+       "                 for p in _glob.glob(os.path.join(_glob.escape(hooks_dir), '*.py'))}))")],
      False, "install"),
     ("install", "IT-2", "_resolves_outside stops removing the hook dirs from sys.path, so a "
      "PRESENT intermediate reads as external and its transitive deps drop out",

@@ -329,10 +329,54 @@ def _resolves_outside(name: str, blocked: set) -> bool:
         sys.path = saved
 
 
+# The two hooks that load sub-hooks by NAME at runtime. Their rosters are the one part of the
+# wiring an import walk cannot see, so they are read explicitly - and READ, not restated here.
+_DISPATCHERS = ("stop_dispatcher.py", "post_tooluse_dispatcher.py")
+
+
+def dispatcher_subhooks(hooks_dir: str) -> set:
+    """Module files the dispatchers load by `importlib.import_module(<string>)`, DERIVED.
+
+    [ROSTER-DERIVE] These 7 modules are invisible to `_import_closure`: a string handed to
+    importlib is not an import statement, so an AST import walk cannot follow it. They reached
+    the roster only because someone had typed them into `REQUIRED_HOOKS` - a DECLARED roster
+    behind a docstring claiming the set was DERIVED, which is INSTALL-TAUTOLOGY's exact shape.
+    Adding an 8th sub-hook and forgetting the tuple gave: `missing_hook_files() == []`,
+    `--selftest` rc 0, and a dispatcher exiting 0 in silence while the hook never ran again.
+
+    Both `HOOKS` tuples are literal tuples of literal strings, so the AST answers directly.
+    A dispatcher that is itself missing yields nothing here - correctly, because its own
+    absence is the louder failure and `REQUIRED_HOOKS` still reports it.
+    """
+    import ast          # function-local, matching _import_closure's existing idiom
+    found = set()
+    for disp in _DISPATCHERS:
+        try:
+            with open(os.path.join(hooks_dir, disp), encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(t, ast.Name) and t.id == "HOOKS" for t in node.targets):
+                continue
+            for elt in getattr(node.value, "elts", []) or []:
+                parts = getattr(elt, "elts", None) or [elt]
+                first = parts[0] if parts else None
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    found.add(first.value + ".py")
+    return found
+
+
 def missing_hook_files(hooks_dir: str) -> list:
     """Hook files the installed configuration needs but which are NOT present.
 
-    DERIVED FROM THE IMPORT CLOSURE of the wired entry points - never from a directory listing.
+    DERIVED FROM THE IMPORT CLOSURE of the wired entry points, UNIONED with the dispatchers'
+    own sub-hook rosters (read from their ASTs) - never from a directory listing, and never
+    from a hand-typed name. The second half is not decoration: 7 of the 25 hooks are loaded by
+    `importlib.import_module(<string>)` and are structurally invisible to an import walk, so
+    while the seed was `REQUIRED_HOOKS` alone this docstring's first word was false.
 
     [INSTALL-TAUTOLOGY, fixed 2026-08-09] The previous implementation globbed `hooks/*.py` into
     the required set and then asserted that each of those files exists. Those two statements are
@@ -348,7 +392,12 @@ def missing_hook_files(hooks_dir: str) -> list:
     that fails to resolve with the hook dirs off `sys.path` is a LOCAL file that is missing,
     which is the one case a listing structurally cannot report.
     """
-    required = _import_closure(hooks_dir, REQUIRED_HOOKS)
+    # [ROSTER-DERIVE] Seed = the declared floor UNION the dispatchers' own rosters, read out of
+    # their ASTs. `REQUIRED_HOOKS` stays as a floor rather than being deleted: it is the only
+    # thing covering a dispatcher whose file is itself missing, when nothing can be derived
+    # from it. The union is what makes the docstring above true.
+    seed = tuple(sorted(set(REQUIRED_HOOKS) | dispatcher_subhooks(hooks_dir)))
+    required = _import_closure(hooks_dir, seed)
     return [s for s in sorted(required) if not os.path.exists(os.path.join(hooks_dir, s))]
 
 
@@ -667,10 +716,65 @@ def selftest() -> int:
             fails.append("uninstall left an empty skill directory behind for %r - the prune "
                          "did not run" % SKILL_NAMES[1])
 
+    # [ROSTER-DERIVE] The seed must be DERIVED, not declared. `REQUIRED_HOOKS` is hand-written,
+    # and 7 of the 25 hooks reach the closure ONLY because someone typed them into it: the
+    # dispatchers load their sub-hooks via `importlib.import_module(<string>)`, which an AST
+    # import walk structurally cannot see. Coverage is correct TODAY and the DERIVATION is not -
+    # INSTALL-TAUTOLOGY's exact shape one layer up, with the docstring again calling the roster
+    # "DERIVED", which is why nobody looked.
+    #
+    # Demonstrated before the fix: adding an 8th sub-hook to `post_tooluse_dispatcher.HOOKS`
+    # with its file absent gave `missing_hook_files() == []`, `install.py --selftest` rc 0
+    # "SELFTEST OK", and a dispatcher exiting 0 in silence - the ModuleNotFoundError reached
+    # only a JSONL ledger no user reads.
+    roster_cases = 0
+    try:
+        derived = dispatcher_subhooks(HOOKS_DIR)
+        roster_cases += 1
+        if not derived:
+            fails.append("dispatcher_subhooks() derived NOTHING - a seed of zero would make "
+                         "this guard pass against any dispatcher roster")
+        undeclared = sorted(n for n in derived if n not in set(REQUIRED_HOOKS))
+        if undeclared:
+            fails.append("dispatcher sub-hook(s) %s are wired by a dispatcher but absent from "
+                         "REQUIRED_HOOKS - while the seed was DECLARED this was silent, which "
+                         "is exactly how a roster rots" % (undeclared,))
+        roster_cases += 1
+        # A dispatcher roster entry whose FILE is missing must be REPORTED. Planted in a
+        # scratch copy: the question is about a repo state this one is deliberately not in.
+        rd = tempfile.mkdtemp()
+        try:
+            for fn in os.listdir(HOOKS_DIR):
+                if fn.endswith(".py"):
+                    shutil.copy(os.path.join(HOOKS_DIR, fn), os.path.join(rd, fn))
+            disp = os.path.join(rd, "post_tooluse_dispatcher.py")
+            with open(disp, encoding="utf-8") as fh:
+                body = fh.read()
+            planted = body.replace("HOOKS = (\n",
+                                   "HOOKS = (\n    (\"newly_added_guard\", \"n\"),\n", 1)
+            if planted == body:
+                fails.append("could not plant a synthetic dispatcher roster entry - the "
+                             "roster-drift case was NOT exercised, so it is unverified")
+            else:
+                with open(disp, "w", encoding="utf-8") as fh:
+                    fh.write(planted)
+                if "newly_added_guard.py" not in set(missing_hook_files(rd)):
+                    fails.append("a dispatcher roster entry with NO file was not reported "
+                                 "missing - install prints 'Done.', the selftest prints "
+                                 "SELFTEST OK, and that hook never runs again")
+                roster_cases += 1
+        finally:
+            shutil.rmtree(rd, ignore_errors=True)
+    except Exception as exc:                      # a probe that dies has verified NOTHING
+        fails.append("the roster-derivation probe raised %r, so it verified nothing" % (exc,))
+
     # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
     # that passed, which is the failure this whole repo is about.
     print("  [install-guard] %d hook + %d skill deleted-file case(s), %d synthetic, "
-          "%d user-data case(s)" % (checked, skill_checked, synth, destroy))
+          "%d user-data case(s), %d roster-derivation case(s)"
+          % (checked, skill_checked, synth, destroy, roster_cases))
+    if not roster_cases:
+        fails.append("the roster-derivation probe ran ZERO cases - it is checking nothing")
     if not skill_checked:
         fails.append("the skill-guard probe ran ZERO cases - it is checking nothing")
     if not checked:
