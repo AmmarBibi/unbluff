@@ -12,18 +12,18 @@ Paste the block below to start.
 unbluff - STEP 3 of the v1.0 finish plan, RESUMING mid-step.
 Repo C:\Users\ammar\Downloads\unbluff.
 
-=== STATE, verified live 2026-08-11 ===
+=== STATE, verified live 2026-08-12 ===
 
-HEAD 367ace4 on main, PUSHED, CI GREEN (run 31531141633, 16 jobs, 0 failed).
+HEAD 0ef4e2b on main, PUSHED, CI GREEN (17 jobs, 0 failed). 17 commits landed 2026-08-12.
 run_selftests 33/33 exit 0 on an IDLE machine AND on a pytest-LESS interpreter.
-Integration 30/30. Criterion 4 CLOSED. Mutation harness 162 entries, 163 anchors.
-CI full sweep 160 of 162 executed, 0 SURVIVED, 2 not-runnable-here.
+Integration 30/30. Criterion 4 CLOSED. Mutation harness 179 entries, 180 anchors.
+Full sweep 171 of 173 executed, 0 SURVIVED, 0 unproven (re-run it: the roster has grown since).
 Normal sweep runtime is ~30 MIN (measured 1770s and 1960s); far past that is a HANG,
 not a slow run - one sat at 48h with 2.2s of CPU and a 0-byte file.
 
 FIRST THING TO DO ON RESUME:
-  1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 367ace4.
-  2. `gh run list --limit 3`. Expect success on 367ace4. CONFIRM before trusting the above.
+  1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 0ef4e2b.
+  2. `gh run list --limit 3`. Expect success, 17 jobs. CONFIRM before trusting the above.
   3. Run the suite on an IDLE machine. A suite run alongside other work false-fails on
      hook_health_check and meta_audit_on_stop - see SELFTEST-BUDGET-FLAKE below. "33/33" is
      not evidence unless the box was idle.
@@ -31,7 +31,10 @@ FIRST THING TO DO ON RESUME:
      under a `venv --without-pip` interpreter. Running the SUITE deprived proves only
      PORTABILITY; running the MUTATION HARNESS deprived proves the pins still BITE there.
      Two mutations shipped DECORATIVE on 2026-08-11 because only the first was done.
-     That is DEPRIVED-CI, scheduled in step 3.
+     (DEPRIVED-CI was scheduled BACKWARDS and is superseded by RICH-CI, DONE 08-12: CI
+     installs nothing, so every runner was ALREADY deprived and it was the RICH path that
+     ran nowhere. A pytest-installed job now covers it. The deprived run stays a LOCAL
+     pre-push habit - it is how FTB-1/FTB-6 were confirmed without a third CI round.)
 
 === THE GOAL ===
 
@@ -110,7 +113,11 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             uninstalling unbluff deleted a skill that predated it, silently. Fixed with a
             provenance manifest, following install()'s existing refuse-foreign-hook rule.
             5 user-data cases incl. the reverse direction. Pinned SD-1/SD-2.
-          [NEW, SCHEDULED] SELFTEST-BUDGET-FLAKE - selftest_budget asserts a wall-clock
+          [DONE 08-12] SELFTEST-BUDGET-FLAKE - fixed with a CONTROL, not a looser threshold:
+            report() times a fixed CPU loop against an idle reference and normalises. Three
+            states, all pinned - ok / INCONCLUSIVE (over but the box is slow) / genuine
+            overrun. Pinned SB-1, SB-2. It had broken CI (run 31593005560).
+          [superseded] SELFTEST-BUDGET-FLAKE - selftest_budget asserts a wall-clock
             duration with NO control for load. Under load hook_health_check (10.81s vs
             10.00s) and meta_audit_on_stop (19.63s vs 17.50s) FAIL; both pass standalone and
             the suite is 33/33 idle. Do not just loosen it - a selftest over its share of the
@@ -141,6 +148,21 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
             pytest-LESS interpreter. CI green on `367ace4`, 16 jobs. Ledger N0.
             LIMIT: author wrote the fix and its only probe - "12 shapes passed", NOT "no
             false alarm remains". Independent pass still owed.
+          [DONE 08-12] The independent adversarial pass ran (wf_a6b49ecf-667): 49 produced,
+            49 adjudicated, 0 dropped, 24 CONFIRMED, 25 refuted, zero repo writes. It found a
+            CRITICAL that FASTTEST-BLOCK had INTRODUCED (FTB-RC4: the rc-4 waiver turned a
+            caught regression into a silent green) plus 4 HIGH. 16 of 24 are now closed:
+            FTB-RC4, FTB-MASK, FTB-SPELL, FTB-CFG, FTB-LAYOUT, FTB-GATES, FTB-MARKER,
+            FTB-CAP, ROSTER-DERIVE, WT-CAUSE, RICH-CI, CI-JOBS + the budget control.
+            8 remain, triaged with severities in ledger N3, none CRITICAL or HIGH.
+          [NEW, SCHEDULED] VERIFY-TARGET-GATE - hollow-pin mode 5 is PROSE, not a mechanism.
+            A mutation whose VERIFY TARGET has no --selftest verifies nothing and reports
+            SURVIVED (WT-1 did, while its probe worked). ~15 lines in check_mutation_anchors,
+            which already walks every entry and caught all FIVE anchor drifts.
+          [NEW, SCHEDULED] The 800-line rule is now broken by FIVE files, four of which grew
+            on 08-12: mutation_check 1263, pre_push_gate_selftest 1109,
+            fast_test_on_stop_selftest 1003, install 864, fast_test_on_stop 832.
+            Build the GATE, then split.
           - ENC-1: 0 of 25 hooks reconfigure stdout. cp1252 + non-ASCII path = half-printed
             report then exit 0. Silent, not a visible crash.
           - PGG-PS: piped_gate_guard is registered matcher "Bash"; never fires for PowerShell.
