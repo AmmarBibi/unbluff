@@ -84,23 +84,94 @@ def line(elapsed: float, share: float, name: str, over: bool) -> str:
                SELFTEST_TIMEOUT_S, round(pct)))
 
 
-def report(share: float = DEFAULT_SHARE, name: str = "", t0: float = 0.0) -> list:
+# [SELFTEST-BUDGET-FLAKE] The control this check had none of.
+#
+# `over = wall_clock > budget` asserts a DURATION with no control for how fast the machine is
+# running right now, which is the exact class this repo has a standing rule about. Measured
+# consequences, twice: locally, a suite run alongside a queued mutation sweep failed
+# hook_health_check (10.81s vs 10.00s) and meta_audit_on_stop (19.63s vs 17.50s) while both
+# passed standalone; and on CI run 31593005560 the hook_health_check baseline went RED for
+# ONE mutation (#C4) while its neighbour #C5 passed its baseline in the SAME SECOND - a
+# transient that made a whole job fail and could not be reproduced locally.
+#
+# It must NOT simply be loosened: a selftest genuinely over its share of the 25s cap IS
+# reported to users as ERRORED, so the invariant is real. What is wrong is the missing
+# control. So measure one: a fixed CPU-bound loop, timed right here, compared against a
+# reference measured on an idle machine. That yields how much slower this box is RIGHT NOW,
+# and the budget is normalised by it.
+#
+# The three states are then distinguishable, which is the whole point:
+#   normalised under budget                  -> ok
+#   raw over, normalised under               -> INCONCLUSIVE (this box is slow/loaded), NOT a
+#                                               failure, and said out loud rather than hidden
+#   normalised over                          -> a genuine overrun, FAILS as before
+_CALIB_ITERS = 300000
+_CALIB_REF_S = 0.0123      # MEASURED idle on the reference box: median of 7, spread x1.08
+_LOAD_FACTOR_CAP = 6.0     # a machine slower than this is reported, never silently absorbed
+
+
+def _calibrate(rounds: int = 3) -> float:
+    """Seconds for a fixed CPU-bound loop. MIN of `rounds`, so a single scheduling hiccup does
+    not masquerade as a slow machine, while sustained load still inflates every round."""
+    best = None
+    for _ in range(rounds):
+        t = time.perf_counter()
+        x = 0
+        for i in range(_CALIB_ITERS):
+            x += i * i
+        d = time.perf_counter() - t
+        best = d if best is None else min(best, d)
+    return best if best else _CALIB_REF_S
+
+
+def load_factor() -> float:
+    """How many times slower this box is than the reference, floored at 1.0 and CAPPED.
+
+    Capped so a pathologically slow machine cannot scale the budget to infinity and silently
+    disable the check; when the cap binds, report() says so rather than absorbing it.
+    """
+    try:
+        return max(1.0, min(_LOAD_FACTOR_CAP, _calibrate() / _CALIB_REF_S))
+    except Exception:
+        return 1.0        # never let the CONTROL break the check it is controlling
+
+
+def report(share: float = DEFAULT_SHARE, name: str = "", t0: float = 0.0,
+           factor: float = 0.0) -> list:
     """Print the budget line; return [] or [one problem string] to extend a hook's `fails`.
 
     Returning into the hook's existing fails list is deliberate: the problem then travels the
     SELFTEST FAIL: / nonzero-rc path every reader and every gate already follows, rather than
     needing a second channel nobody watches.
+
+    `factor` is injectable ONLY so the selftest can pin the control and exercise all three
+    states deterministically; production always measures it.
     """
     elapsed = time.time() - (t0 or _T0)
-    over = elapsed > budget_s(share)
-    print(line(elapsed, share, name or "selftest", over))
+    lf = factor if factor else load_factor()
+    b = budget_s(share)
+    normalised = elapsed / lf if lf else elapsed
+    over = normalised > b
+    print(line(elapsed, share, name or "selftest", over)
+          + (" [control: this box is %.1fx the reference, so %.2fs normalises to %.2fs]"
+             % (lf, elapsed, normalised) if lf > 1.0 else ""))
+    if elapsed > b and not over:
+        # THE THIRD STATE. Said out loud: a run that could not be judged is not a run that passed.
+        print("[selftest-budget] INCONCLUSIVE %s: %.2fs is over the %.2fs budget, but this box "
+              "measures %.1fx slower than the reference, so the budget was not judged. NOT "
+              "counted as a failure and NOT counted as proof it is under budget."
+              % (name or "selftest", elapsed, b, lf))
+    if lf >= _LOAD_FACTOR_CAP:
+        print("[selftest-budget] NOTE %s: the load factor hit its %.1fx cap, so any excess "
+              "beyond that is NOT being normalised away." % (name or "selftest", _LOAD_FACTOR_CAP))
     if not over:
         return []
-    return ["the selftest took %.2fs, over its %.2fs budget (share %.2f of the %ds cap "
+    return ["the selftest took %.2fs (%.2fs normalised for a machine measured %.1fx slower "
+            "than the reference), over its %.2fs budget (share %.2f of the %ds cap "
             "hook_health_check applies when it runs this selftest in the weekly sweep). A "
             "selftest that outlives that cap is reported to users as ERRORED/timed out even "
             "when it passes."
-            % (elapsed, budget_s(share), share, SELFTEST_TIMEOUT_S)]
+            % (elapsed, normalised, lf, budget_s(share), share, SELFTEST_TIMEOUT_S)]
 
 
 # --------------------------------------------------------------------------------------
@@ -234,6 +305,23 @@ def selftest() -> int:
         fails.append("an over-budget line must say so in words, not only in a number")
 
     # report() returns a problem exactly when it is over, and prints either way
+    # [SELFTEST-BUDGET-FLAKE] All THREE states, with the control PINNED so each is
+    # deterministic. Without the third probe the inconclusive branch would be unexercised -
+    # and an unexercised branch in a checking instrument is exactly what this repo treats as
+    # not existing.
+    #   raw over, normalised UNDER  -> inconclusive, returns NO problem
+    if report(0.5, "inconclusive-probe", t0=time.time() - 20.0, factor=4.0):
+        fails.append("a run that is over budget only because the box is 4x slow must be "
+                     "INCONCLUSIVE, not a failure - that is the flake this control removes")
+    #   raw over, normalised STILL over -> a genuine overrun, must still FAIL
+    if not report(0.5, "genuine-overrun-probe", t0=time.time() - 200.0, factor=4.0):
+        fails.append("a genuinely slow selftest must still FAIL after normalisation - the "
+                     "control must not be able to absorb a real overrun")
+    #   the control itself must be bounded and never below 1.0
+    _lf = load_factor()
+    if not (1.0 <= _lf <= _LOAD_FACTOR_CAP):
+        fails.append("load_factor() returned %r, outside [1.0, %.1f] - an unbounded factor "
+                     "would silently disable the budget check" % (_lf, _LOAD_FACTOR_CAP))
     if report(0.5, "under-budget-probe", t0=time.time()):
         fails.append("a fast selftest must produce no problem")
     if not report(0.5, "over-budget-probe", t0=time.time() - 999):

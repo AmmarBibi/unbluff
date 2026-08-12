@@ -276,6 +276,13 @@ MUTATIONS = [
        '    return _has_collectible_tests(os.path.join(cwd, "tests")) is not False')], False),
     ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
      [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
+    ("selftest_budget", "SB-1", "the budget assertion loses its CONTROL and goes back to raw "
+     "wall clock, so a slow or loaded machine false-fails a selftest that is not slow",
+     [("    over = normalised > b", "    over = elapsed > b")], False),
+    ("selftest_budget", "SB-2", "the load factor loses its cap, so a pathologically slow box "
+     "scales the budget without bound and the check silently stops being able to fail",
+     [("        return max(1.0, min(_LOAD_FACTOR_CAP, _calibrate() / _CALIB_REF_S))",
+       "        return max(1.0, _calibrate() / _CALIB_REF_S * 1e6)")], False),
     ("pre_push_gate", "FTB-GATES", "the push gate stops naming WHY there is no command, so a "
      "pytest project whose pytest is unimportable is told it 'has no test command'",
      [("        _, why_no_gate = fast_test._nogate_reason(root)",
@@ -1040,9 +1047,18 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
                                   capture_output=True, text=True, timeout=400,
                                   stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
             if base.returncode not in (0, 77):
+                # [BASE-WHY] Say WHY, not just that. This reported only an rc, so a baseline-red
+                # on a CI runner that does not reproduce locally was undiagnosable from the log
+                # - measured 2026-08-12, run 31593005560: hook_health_check #C4 went red while
+                # #C5 passed its baseline in the SAME SECOND, and the reason had to be inferred
+                # from the neighbours rather than read. A checking instrument that cannot
+                # explain its own failure is the defect class this repo exists to catch.
+                tail = "\n".join(
+                    ln for ln in ((base.stdout or "") + (base.stderr or "")).splitlines()
+                    if ln.strip())[-800:]
                 return ("HARNESS ERROR: baseline already RED before mutating (%s --selftest "
-                        "rc=%s) - this mutation would prove nothing"
-                        % (os.path.basename(verify_target), base.returncode))
+                        "rc=%s) - this mutation would prove nothing. Baseline said:\n%s"
+                        % (os.path.basename(verify_target), base.returncode, tail))
         except subprocess.TimeoutExpired:
             return "HARNESS ERROR: baseline selftest timed out before mutating"
         except (OSError, subprocess.SubprocessError) as e:
