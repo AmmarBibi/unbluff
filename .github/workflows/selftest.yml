@@ -94,6 +94,51 @@ jobs:
       - name: Revert each fix and require the suite to go red
         run: python tools/mutation_check.py
 
+  selftest-with-pytest:
+    # [RICH-CI] The INVERSE of the gap everyone looks for, and it was live for the whole life
+    # of this suite. No workflow here pip-installs anything, so EVERY runner is permanently
+    # WITHOUT pytest - which is why two probes shipped decorative and were caught here
+    # (FTB-1/FTB-6, run 31526789857). The mirror of that is easy to miss: the code paths that
+    # REQUIRE pytest are therefore exercised on NO runner at all, only on a maintainer's box.
+    #
+    # MEASURED on run 31595884191: `fast-test detection: ... 2 end-to-end case(s) run
+    # (rust-decline, synthetic-rc5-wiring)`, with `SELFTEST SKIP: pytest not importable` twice.
+    # The two skipped are `rc4-broken-conftest-BLOCKS` - the regression test for the CRITICAL
+    # FTB-RC4 defect, where a broken conftest.py silently turned a caught regression green -
+    # and `genuine-failure-still-blocks`, the control proving the gate still bites at all.
+    # The suite's own denominator reported it honestly every run; nobody read it.
+    #
+    # One cheap job fixes that. It is deliberately NOT added to the OS matrix: the question is
+    # "does the rich path work", not "does it work on three platforms", and a matrix here would
+    # cost 3x to answer the same question once.
+    name: selftest WITH pytest installed (the rich path CI never had)
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 - see the CI-SHALLOW note under `jobs:`. Uniform across all jobs.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest (the ONLY job here that installs anything)
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Prove pytest really is importable, or this job is a no-op wearing a green tick
+        run: python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('pytest') else 1)"
+      - name: Run hook selftests with the rich path available
+        run: python run_selftests.py
+      - name: Require the pytest-dependent cases to have ACTUALLY RUN, not skipped
+        # Without this the job would pass by skipping exactly what it exists to cover - the
+        # same "a skip is not a pass" rule the hooks themselves are built on.
+        run: |
+          python run_selftests.py > out.txt 2>&1
+          grep -q "4 end-to-end case(s) run" out.txt || {
+            echo "The pytest-dependent end-to-end cases did NOT run in the job that exists to run them:";
+            grep -o "fast-test detection:.*" out.txt; exit 1; }
+          ! grep -q "SELFTEST SKIP: pytest not importable" out.txt || {
+            echo "pytest reported not importable in the job that installs it:";
+            grep "SELFTEST SKIP: pytest not importable" out.txt; exit 1; }
+
   integration:
     # This job had NEVER run outside ubuntu, while `selftest` above carried a 3-OS matrix all
     # along - so "install -> fire -> uninstall" was proven on ONE platform while CHANGELOG 1.1.1

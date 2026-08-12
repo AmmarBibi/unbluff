@@ -275,7 +275,7 @@ Honesty beats surprise:
 
 - [Claude Code](https://code.claude.com/) with hooks enabled.
 - Python 3.8+ on your PATH (the installer embeds the interpreter it was run with). No `pip install`.
-- CI is 16 jobs. `run_selftests.py` runs on Linux, macOS and Windows across Python 3.8, 3.9,
+- CI is 17 jobs. `run_selftests.py` runs on Linux, macOS and Windows across Python 3.8, 3.9,
   3.11 and 3.12 (macOS skips 3.8). The integration test runs on all three. The mutation harness
   runs on Linux and Windows only - **there is no macOS mutation sweep**, so the mutation
   evidence is two-platform even though the other two gates are three.

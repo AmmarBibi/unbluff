@@ -32,8 +32,18 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # other fix as pinned had a blind spot covering its own directory, and the review-freshness
 # gate meant to notice such things omitted tools/ for the same reason (P13 A1). Both halves of
 # the evidence base were unwatched at once.
-COPY_TREES = ("hooks", "tools", "tests", "skills")
-COPY_FILES = ("install.py", "run_selftests.py")
+# [CI-JOBS] `.github` joined the roster the moment a gate started DERIVING a fact from the
+# workflow file. Without it the scratch tree is not a faithful copy of the repo, and any gate
+# that reads the workflow goes red at BASELINE - which is not a mutation result at all, it is
+# the harness measuring its own missing fixture. Found immediately rather than by inference,
+# because the baseline now prints WHY (see BASE-WHY below); before that fix this would have
+# read as a bare `rc=1`.
+COPY_TREES = ("hooks", "tools", "tests", "skills", ".github")
+# README.md is an INPUT to check_readme_fresh, not just documentation: without it that gate's
+# main() returns "cannot read README.md" and never reaches its checks, so every mutation of
+# that file died at baseline. The roster has to contain what the gates READ, not only what
+# gets mutated - the same distinction `.github` above turned on.
+COPY_FILES = ("install.py", "run_selftests.py", "README.md")
 
 
 def unit_path(root: str, name: str) -> str:
@@ -276,6 +286,14 @@ MUTATIONS = [
        '    return _has_collectible_tests(os.path.join(cwd, "tests")) is not False')], False),
     ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
      [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
+    ("tools/check_readme_fresh", "CI-JOBS-1", "a job-count gate that could not PARSE the "
+     "workflow reports the same green as one that looked and found nothing wrong",
+     [('    if want <= 0:\n        return 1, ("readme-jobs: FAIL - could not derive',
+       '    if False:\n        return 1, ("readme-jobs: FAIL - could not derive')], False),
+    ("tools/check_readme_fresh", "CI-JOBS-2", "main() stops consulting the job-count gate, so "
+     "the number is hand-maintained again (it said 14 once)",
+     [("    rc_jobs, msg_jobs = verdict_jobs(text, expected_jobs())",
+       "    rc_jobs, msg_jobs = 0, ''")], False),
     ("selftest_budget", "SB-1", "the budget assertion loses its CONTROL and goes back to raw "
      "wall clock, so a slow or loaded machine false-fails a selftest that is not slow",
      [("    over = normalised > b", "    over = elapsed > b")], False),
