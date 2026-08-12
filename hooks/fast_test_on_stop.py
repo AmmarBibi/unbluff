@@ -274,15 +274,36 @@ _PYTEST_INCONCLUSIVE = {
 }
 
 
+_PYTEST_VERSIONED = None    # compiled lazily; `pytest-3`, `pytest-3.11`, ... (Debian/Fedora)
+
+
 def _is_pytest_command(cmd: str) -> bool:
     """True iff `cmd` invokes pytest, so pytest's exit table applies to its return code.
 
-    Whole-word, because applying pytest's table to `npm test` or `go test` would waive a
-    GENUINE failure there. The failure mode of guessing wrong in the other direction is merely
-    today's behaviour, which is why the test is deliberately conservative.
+    [FTB-SPELL] Was a whole-word substring search for "pytest", which was wrong BOTH ways and
+    measured so:
+      * MISSED `py.test` - pytest's own still-shipped console script - and `pytest-3` /
+        `pytest-3.11`, which is what Debian and Fedora install. An unrecognised pytest command
+        falls through to the blanket `rc != 0 -> FAILING` branch, i.e. FASTTEST-BLOCK survived
+        VERBATIM for those spellings, in both gates.
+      * MATCHED `/opt/pytest/bin/collect` - a DIRECTORY named pytest - so an unrelated tool's
+        exit 5 would have been waived.
+
+    So ask the question properly: is any ARGUMENT of this command the pytest EXECUTABLE? Test
+    the basename of each token, not the raw string. `-m pytest` lands here too, because the
+    module name is its own token.
     """
     import re
-    return re.search(r"(?<![\w-])pytest(?![\w-])", cmd or "") is not None
+    global _PYTEST_VERSIONED
+    if _PYTEST_VERSIONED is None:
+        _PYTEST_VERSIONED = re.compile(r"pytest-\d[\d.]*\Z")
+    for tok in re.findall(r"[^\s\"']+", cmd or ""):
+        base = tok.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if base.endswith(".exe"):
+            base = base[:-4]
+        if base in ("pytest", "py.test") or _PYTEST_VERSIONED.match(base):
+            return True
+    return False
 
 
 def inconclusive_reason(cmd: str, rc: int | None) -> str | None:

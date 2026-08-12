@@ -290,9 +290,26 @@ def _selftest_no_false_block() -> list:
             if not must and got:
                 fails.append(f"inconclusive_reason: pytest rc {rc} is a real VERDICT, but it "
                              f"was waived as {got!r} - the gate would stop biting")
+        # [FTB-SPELL] Every spelling that IS pytest must be recognised, or FASTTEST-BLOCK
+        # survives verbatim for it: an unrecognised pytest command falls through to the
+        # blanket `rc != 0 -> FAILING` branch, which is the original defect.
+        # `py.test` is pytest's OWN still-shipped console script; `pytest-3` / `pytest-3.11`
+        # are what Debian and Fedora install. Neither was matched.
+        for spelled in ('"/usr/bin/python" -m pytest -x -q', "pytest -x -q", "py.test -x",
+                        "/usr/bin/pytest-3 -q", "pytest-3.11 -q", "poetry run pytest",
+                        r'"C:\Python\Scripts\pytest.exe" -q'):
+            if not reason_fn(spelled, 5):
+                fails.append(f"FTB-SPELL: {spelled!r} IS pytest but is not recognised, so its "
+                             f"rc 5 falls through to 'FAILING at stop' - FASTTEST-BLOCK "
+                             f"survives verbatim for this spelling in BOTH gates")
         # pytest's exit table must not be applied to a command that is not pytest. npm's rc 5
         # means something else entirely, and misreading it would silently disarm that gate.
-        for other in ("npm test --silent", "go test ./...", "cargo test"):
+        # [FTB-SPELL] These controls were DECORATIVE: none of the original three contained the
+        # substring 'pytest', so even a naive substring match would have passed them. Every
+        # control below now CONTAINS the substring and must still be rejected.
+        for other in ("npm test --silent", "go test ./...", "cargo test",
+                      "/opt/pytest/bin/collect --all",   # a DIRECTORY named pytest
+                      "python mypytest.py", "python pytest_shim.py", "npm run pytest-lint"):
             if reason_fn(other, 5) or reason_fn(other, 4):
                 fails.append(f"inconclusive_reason applied pytest's exit table to {other!r} - "
                              f"a genuine failure there would be waived")

@@ -276,7 +276,13 @@ MUTATIONS = [
      [("        reason = inconclusive_reason(cmd, rc)", "        reason = None")], False),
     ("fast_test_on_stop", "FTB-5", "the pytest-command test matches anything, so pytest's exit "
      "table is applied to npm/go/cargo and a GENUINE failure there is waived",
-     [("    return re.search(", "    return True or re.search(")], False),
+     [('        if base in ("pytest", "py.test") or _PYTEST_VERSIONED.match(base):',
+       "        if True:")], False),
+    ("fast_test_on_stop", "FTB-9", "the pytest-command test goes back to a raw substring search, "
+     "which MISSES py.test and pytest-3 (FASTTEST-BLOCK survives verbatim) and MATCHES a "
+     "directory named pytest (a genuine rc-5 failure is waived)",
+     [('        base = tok.replace("\\\\", "/").rsplit("/", 1)[-1].lower()',
+       "        base = tok.lower()")], False),
     ("pre_push_gate", "FTB-6", "the PUSH gate stops consulting inconclusive_reason, so a run "
      "that collected nothing blocks the push as 'tests are failing'",
      [("        reason = fast_test.inconclusive_reason(cmd, rc)", "        reason = None")], False),
