@@ -298,6 +298,17 @@ MUTATIONS = [
        "                    return False\n                if fn.startswith(\"test_\")")], False),
     ("fast_test_on_stop", "FTB-12", "a root conftest.py stops counting as a pytest test root",
      [('    if os.path.isfile(os.path.join(cwd, "conftest.py")):', "    if False:")], False),
+    ("pre_push_gate_selftest", "WT-1", "a broken FIXTURE collapses back into 'the box cannot "
+     "make a worktree', so two scenarios go unrun, the reason printed is false, and the suite "
+     "still exits 0",
+     # The 6th element is the VERIFY TARGET and it is load-bearing: this unit is a selftest
+     # MODULE with no --selftest entry point of its own (it is in KNOWN_NO_SELFTEST), so
+     # without it the harness ran `pre_push_gate_selftest.py --selftest`, which verifies
+     # nothing, and WT-1 came back SURVIVED while the probe was demonstrably working - the
+     # mutation was applied and checked against the wrong thing. Every sibling SH-* entry
+     # carries it; omitting it is a FIFTH way to make a pin hollow.
+     [("    if fixture_err:\n        return False,", "    if False:\n        return False,")],
+     False, "pre_push_gate"),
     ("install", "RD-1", "the partial-checkout seed goes back to the hand-typed REQUIRED_HOOKS "
      "alone, so a sub-hook added to a dispatcher roster and never typed into the tuple is "
      "invisible - install prints Done., the selftest prints OK, the hook never runs",
@@ -537,8 +548,13 @@ MUTATIONS = [
        "    tried = []\n    return None, tried\n\n    def _works(path):")],
      False, "pre_push_gate"),
     ("pre_push_gate_selftest", "SH-2", "a skipped delegation site stops being a failure",
-     [('    if skipped:\n        fails.append("no POSIX shell was found',
-       '    if False:\n        fails.append("no POSIX shell was found')],
+     # ANCHOR UPDATED 2026-08-12: WT-CAUSE rewrote the asserted "no POSIX shell was found"
+     # message this quoted, because it contradicted the shell line printed above it. Fifth
+     # anchor drift on this repo; caught by check_mutation_anchors, as all five were.
+     # Anchored on the CONDITION alone (verified unique), not on the message beneath it: the
+     # previous anchor spanned both and broke the moment a comment was inserted between them.
+     # An anchor that quotes prose is an anchor that drifts when the prose is corrected.
+     [("\n    if skipped:\n", "\n    if False:\n")],
      False, "pre_push_gate"),
     ("pre_push_gate_selftest", "SH-3", "a delegation site that was never REACHED stops failing",
      [('    if missing:\n        fails.append("sh-delegation site(s) never REACHED',

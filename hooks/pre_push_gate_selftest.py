@@ -96,11 +96,38 @@ def _sh_delegation_fails(sites, required):
         fails.append("unregistered sh-delegation site(s) %r - add them to _SH_SITES_REQUIRED, "
                      "or the roster under-counts while printing a full denominator" % (extra,))
     if skipped:
-        fails.append("no POSIX shell was found, so sh delegation is UNTESTED at %d of %d "
-                     "site(s): %r. These sites decide whether a user's own repo-local hooks "
-                     "keep firing - a skip here is this suite reporting a pass over a question "
-                     "it never asked" % (len(skipped), len(required), skipped))
+        # [WT-CAUSE] Was "no POSIX shell was found" - ASSERTED, not derived, so it contradicted
+        # the shell line printed directly above it whenever a site failed for any OTHER reason.
+        # Observed live: a broken `git commit` fixture produced "shell: .../sh.EXE" and "no
+        # POSIX shell was found" in the SAME run. This function only knows a site did not
+        # execute; the CAUSE belongs to whoever recorded it, and each of them now appends its
+        # own reason. Say what is actually known and no more.
+        fails.append("sh delegation is UNTESTED at %d of %d site(s): %r - see the reason "
+                     "recorded beside each. These sites decide whether a user's own repo-local "
+                     "hooks keep firing, so a skip here is this suite reporting a pass over a "
+                     "question it never asked" % (len(skipped), len(required), skipped))
     return fails
+
+
+def _worktree_fixture_verdict(fixture_err: str, wt_err: str) -> tuple:
+    """(site_state, fail_message, skip_message) for the worktree fixture. PURE on purpose.
+
+    [WT-CAUSE] Extracted so all THREE causes are drivable. Inline, the broken-fixture branch
+    was reachable only under a hostile git config, so a mutation collapsing the two causes back
+    into one flag could not be PLACED and would come back SURVIVED - the same unfalsifiable
+    shape as FTB-14. A pure function makes the classification testable in three calls.
+
+    `False` (a FAILURE) and `None` (UNAVAILABLE) are the two states that used to be one:
+    a fixture that LOOKED and could not build itself is this suite's problem, while a box that
+    genuinely cannot make a linked worktree is not.
+    """
+    if fixture_err:
+        return False, ("worktree fixture could not be built, so scenarios 17 and 18 were NOT "
+                       "run and this is NOT a missing git feature: %s" % fixture_err), ""
+    if wt_err:
+        return None, "", ("SELFTEST SKIP: `git worktree add` unavailable here (recorded "
+                          "UNAVAILABLE, not run): %s" % wt_err)
+    return True, "", ""
 
 
 def _sh_delegation_line(sites, required) -> str:
@@ -413,6 +440,31 @@ def selftest() -> int:
         # 1. no command -> allow (a repo with no tests must not be un-pushable)
         if gate(r) != 0:
             fails.append("repo with no test command should allow the push")
+
+        # 1a. [WT-CAUSE] All three worktree-fixture causes, driven directly. A broken `git
+        # commit` fixture used to be reported as "git worktree unavailable" - a statement about
+        # the MACHINE that was false - and scenarios 17 and 18 went unrun while the suite
+        # exited 0. Because it was an internal skip rather than SKIP_RC, run_selftests' "a skip
+        # is NOT a pass" rule never saw it and the run counted as one of the 33 OKs.
+        _st, _fl, _sk = _worktree_fixture_verdict("git commit -qm seed failed (rc=128): boom", "")
+        if _st is not False or "NOT a missing git feature" not in _fl or _sk:
+            fails.append("WT-CAUSE: a broken FIXTURE must be a FAILURE naming its own cause, "
+                         "not an UNAVAILABLE box: got state=%r fail=%r skip=%r"
+                         % (_st, _fl[:80], _sk[:80]))
+        _st, _fl, _sk = _worktree_fixture_verdict("", "worktree: unknown subcommand")
+        if _st is not None or _fl or "unavailable here" not in _sk:
+            fails.append("WT-CAUSE: a box that genuinely cannot make a worktree must be "
+                         "UNAVAILABLE, not a failure: got state=%r fail=%r skip=%r"
+                         % (_st, _fl[:80], _sk[:80]))
+        _st, _fl, _sk = _worktree_fixture_verdict("", "")
+        if _st is not True or _fl or _sk:
+            fails.append("WT-CAUSE: a healthy fixture must report True and say nothing: "
+                         "got state=%r fail=%r skip=%r" % (_st, _fl[:80], _sk[:80]))
+        # the two causes must stay DISTINGUISHABLE - collapsing them is the defect itself
+        if (_worktree_fixture_verdict("fixture broke", "")[0]
+                == _worktree_fixture_verdict("", "no worktree support")[0]):
+            fails.append("WT-CAUSE: a broken fixture and an unsupported git report the SAME "
+                         "state, so the two causes have collapsed back into one flag")
 
         # 1b. [FTB-GATES] ...and it must say WHICH no-command case this is. Both gates consume
         # the same detect(), which declines for two very different reasons; this one used to
@@ -864,22 +916,50 @@ def selftest() -> int:
             genv = dict(env)
             genv.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                          "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
-            wt_ok = True
+            # [WT-CAUSE] Three git commands, three different meanings - and they used to
+            # collapse into ONE boolean that was always reported as "git worktree unavailable".
+            # Only the THIRD justifies UNAVAILABLE. `git add` or `git commit` failing is a
+            # FIXTURE failure: the fixture looked and could not build itself, which this file's
+            # own `_sh_site` docstring already draws the line on - "a fixture that LOOKED and
+            # found nothing must FAIL - not a box that cannot be asked the question".
+            #
+            # MEASURED on an unmodified tree: pointing GIT_CONFIG_GLOBAL at a config with
+            # `[commit] gpgsign = true` and a nonexistent gpg program produced
+            # "SELFTEST SKIP: git worktree unavailable", "2 of 3 required site(s) executed",
+            # SELFTEST OK, exit 0 - a statement about the machine that was simply false, while
+            # scenarios 17 and 18 (worktree delegation, and install() in a linked worktree, the
+            # case that used to CRASH) went unrun with no failure. Because it is an internal
+            # skip rather than SKIP_RC, run_selftests' "a skip is NOT a pass" rule never saw it
+            # and the run counted as one of the 33 OKs.
+            fixture_err = ""
             for argv in (["add", "-A"], ["commit", "-qm", "seed"]):
-                if subprocess.run(["git", "-C", wt_host] + argv, capture_output=True,
-                                  env=genv).returncode:
-                    wt_ok = False
+                r_fx = subprocess.run(["git", "-C", wt_host] + argv, capture_output=True,
+                                      env=genv, text=True, encoding="utf-8", errors="replace")
+                if r_fx.returncode:
+                    _fx_err = (r_fx.stderr or r_fx.stdout or "").strip()[:200]
+                    fixture_err = "git %s failed (rc=%s): %s" % (
+                        " ".join(argv), r_fx.returncode, _fx_err or "<no output>")
+                    break
             wt_path = os.path.join(_tmpdir(stack), "wt")
-            if wt_ok and subprocess.run(["git", "-C", wt_host, "worktree", "add", "-q", wt_path],
-                                        capture_output=True, env=genv).returncode:
-                wt_ok = False
-            if not wt_ok:
-                # UNAVAILABLE, not skipped: this box cannot build a linked worktree at all, so
-                # the delegation case was never presented. Recording it False would make a
-                # missing git feature read as a defect in this repo and turn every
-                # pre_push_gate mutation into a HARNESS ERROR here.
-                _sh_site("worktree-delegation", None)
-                print("SELFTEST SKIP: git worktree unavailable (recorded UNAVAILABLE, not run)")
+            wt_unavailable = ""
+            if not fixture_err:
+                r_wt = subprocess.run(["git", "-C", wt_host, "worktree", "add", "-q", wt_path],
+                                      capture_output=True, env=genv, text=True,
+                                      encoding="utf-8", errors="replace")
+                if r_wt.returncode:
+                    _wt_err = (r_wt.stderr or r_wt.stdout or "").strip()[:200]
+                    wt_unavailable = _wt_err or "<no output>"
+            _wt_state, _wt_fail, _wt_skip = _worktree_fixture_verdict(fixture_err, wt_unavailable)
+            if _wt_state is not True:
+                # False = this suite's fixture broke (a FAILURE). None = the box genuinely
+                # cannot build a linked worktree (UNAVAILABLE, and only that case earns it).
+                # Recording UNAVAILABLE as False would make a missing git feature read as a
+                # defect here and turn every pre_push_gate mutation into a HARNESS ERROR.
+                _sh_site("worktree-delegation", _wt_state)
+                if _wt_fail:
+                    fails.append(_wt_fail)
+                if _wt_skip:
+                    print(_wt_skip)
             else:
                 # 17: the dispatcher must still delegate to the repo's own hook
                 hooks_common = os.path.join(wt_host, ".git", "hooks")
