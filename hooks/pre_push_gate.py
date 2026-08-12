@@ -271,8 +271,12 @@ def gate(root: str) -> int:
         # Rust repo (tests/ is Cargo's integration-test dir), a Go repo, a JS repo with no
         # scripts.test, an empty tests/ - all got `python -m pytest`, all exited 5 (NOTHING
         # COLLECTED), and all were reported here as "BLOCKED - tests are failing". detect() now
-        # declines those outright; this handles the residue that still reaches a run, e.g. a
-        # real pytest project whose root conftest cannot import (rc 4, measured).
+        # declines those outright; this handles the residue that still reaches a run - a pytest
+        # that collected NOTHING (rc 5), e.g. every test deselected by a marker in addopts.
+        #
+        # [FTB-RC4] rc 4 was ALSO waived here and that was a false NEGATIVE: a broken conftest.py
+        # is the user's own code, zero tests run, and this gate let the push through with
+        # "NOTHING VERIFIED". It now BLOCKS. See _PYTEST_INCONCLUSIVE for the measurement.
         #
         # ALLOW-and-say-so is this gate's existing policy for "nothing to verify", and no pass
         # is recorded - so the next push re-runs rather than inheriting a green it never earned.

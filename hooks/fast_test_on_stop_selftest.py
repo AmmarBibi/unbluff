@@ -274,7 +274,15 @@ def _selftest_no_false_block() -> list:
                      "as 'FAILING at stop', and blocks the push gate too")
     else:
         pyc = '"python" -m pytest -x -q'
-        for rc, must in ((5, True), (4, True), (0, False), (1, False), (2, False)):
+        # [FTB-RC4] rc 4 is a VERDICT and must NOT be waived. Re-extracted from pytest: with the
+        # argv this hook hard-codes (`-m pytest -x -q`, no user flags), a bad-CLI usage error is
+        # UNREACHABLE, so rc 4 here can only mean the user's own conftest.py or ini failed to
+        # load - measured as SyntaxError, ModuleNotFoundError and a raising tests/conftest.py,
+        # ZERO tests running in each. conftest.py is in this hook's own SRC_EXT: it is precisely
+        # the code the gate exists to verify. Waiving it turned a caught regression into a
+        # silent green (measured A/B: app.py regressed to VALUE=999, suite catches it, hook
+        # returned rc 0 with a broken conftest present and rc 2 without it).
+        for rc, must in ((5, True), (4, False), (0, False), (1, False), (2, False), (3, False)):
             got = reason_fn(pyc, rc)
             if must and not got:
                 fails.append(f"inconclusive_reason: pytest rc {rc} must be inconclusive, "
@@ -339,7 +347,7 @@ def _selftest_no_false_block() -> list:
         else:
             os.makedirs(os.path.join(d, ".claude"), exist_ok=True)
             with open(os.path.join(d, ".claude", "fast-test.cmd"), "w", encoding="utf-8") as f:
-                f.write('debounce=0\n"%s" -c "import sys; sys.exit(4)" pytest\n'
+                f.write('debounce=0\n"%s" -c "import sys; sys.exit(5)" pytest\n'
                         % _sys.executable.replace("\\", "/"))
             real_in, real_err = _sys.stdin, _sys.stderr
             _sys.stdin = io_mod.StringIO(_json.dumps({"cwd": d}))
@@ -349,16 +357,66 @@ def _selftest_no_false_block() -> list:
                 err_syn = _sys.stderr.getvalue()
             finally:
                 _sys.stdin, _sys.stderr = real_in, real_err
-            e2e_run.append("synthetic-rc4-wiring")
+            e2e_run.append("synthetic-rc5-wiring")
             if rc_syn != 0:
-                fails.append(f"FASTTEST-BLOCK: a pytest command exiting 4 still blocks the "
-                             f"turn end (rc {rc_syn}) - main() is not consulting "
-                             f"inconclusive_reason: {err_syn[:200]!r}")
+                fails.append(f"FASTTEST-BLOCK: a pytest command exiting 5 (collected NOTHING) "
+                             f"still blocks the turn end (rc {rc_syn}) - main() is not "
+                             f"consulting inconclusive_reason: {err_syn[:200]!r}")
             elif "NOTHING VERIFIED" not in err_syn:
-                fails.append(f"FASTTEST-BLOCK: rc 4 waved through SILENTLY - an unverified "
+                fails.append(f"FASTTEST-BLOCK: rc 5 waved through SILENTLY - an unverified "
                              f"turn now looks verified: {err_syn[:200]!r}")
     finally:
         _m.STATE_DIR = real_state0
+
+    # ---- [FTB-MASK] a DIFFERENT reason must still speak -----------------------------------
+    # `_notice_no_gate` emits two materially different messages - "add a test gate" and "this
+    # IS a pytest project but pytest is not importable by <interpreter>" - and keyed the
+    # once-per-project marker on the PATH ALONE. So whichever fired first silenced the other
+    # forever, and the second is the one that tells a user their gate is dead. Exactly the
+    # masking `_inconclusive_state_path` exists to prevent, one level in.
+    real_state_m = _m.STATE_DIR
+    sdm = _tf.mkdtemp()
+    trash.append(sdm)
+    _m.STATE_DIR = sdm
+    try:
+        d = _repo({"app.py": "x = 1\n"})            # no pytest evidence -> "add a gate"
+        if d is None:
+            fails.append("FASTTEST-BLOCK/FTB-MASK: could not build the masking fixture")
+        else:
+            real_err = _sys.stderr
+            _sys.stderr = io_mod.StringIO()
+            try:
+                _m._notice_no_gate(d)
+                first = _sys.stderr.getvalue()
+            finally:
+                _sys.stderr = real_err
+            # same project now looks like a pytest project whose pytest is unusable
+            os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+            with open(os.path.join(d, "tests", "test_x.py"), "w", encoding="utf-8") as f:
+                f.write(T_OK)
+            with open(os.path.join(d, "b.py"), "w", encoding="utf-8") as f:
+                f.write("y = 2\n")
+            real_imp2 = getattr(_m, "_pytest_importable", None)
+            if real_imp2 is not None:
+                _m._pytest_importable = lambda: False
+            real_err = _sys.stderr
+            _sys.stderr = io_mod.StringIO()
+            try:
+                _m._notice_no_gate(d)
+                second = _sys.stderr.getvalue()
+            finally:
+                _sys.stderr = real_err
+                if real_imp2 is not None:
+                    _m._pytest_importable = real_imp2
+            if "NO TEST GATE" not in first:
+                fails.append(f"FTB-MASK fixture wrong: the first notice did not fire ({first[:120]!r})")
+            elif "not importable" not in second:
+                fails.append("FASTTEST-BLOCK/FTB-MASK: the SECOND, different reason was "
+                             "MASKED by the first notice's marker - a user whose pytest is "
+                             "unusable is never told, because they were once told something "
+                             "else. Key the marker by REASON, not by path alone.")
+    finally:
+        _m.STATE_DIR = real_state_m
 
     # ---- END TO END through main(), reaching the CONTAINMENT call site --------------------
     # The rust case above proves detection; it exits before main() ever evaluates an rc, so it
@@ -393,14 +451,20 @@ def _selftest_no_false_block() -> list:
                 err_cf = _sys.stderr.getvalue()
             finally:
                 _sys.stdin, _sys.stderr = real_in, real_err
-            e2e_run.append("rc4-containment-wiring")
-            if rc_cf != 0:
-                fails.append(f"FASTTEST-BLOCK: a pytest run that could not START (rc 4) still "
-                             f"exits {rc_cf} from main() - main() is not consulting "
-                             f"inconclusive_reason, so the containment is unwired")
-            elif "NOTHING VERIFIED" not in err_cf:
-                fails.append(f"FASTTEST-BLOCK: rc 4 was waved through SILENTLY - a run that "
-                             f"proved nothing now looks like a green one: {err_cf[:200]!r}")
+            e2e_run.append("rc4-broken-conftest-BLOCKS")
+            # [FTB-RC4] INVERTED. This case previously required rc 0 - it ENSHRINED the defect,
+            # which is why the defect shipped: the suite asserted the wrong direction, so no
+            # amount of running it could ever object. A broken conftest is the USER'S OWN CODE
+            # and zero tests ran, so the only correct answer is to BLOCK and show pytest's
+            # traceback.
+            if rc_cf != 2:
+                fails.append(f"FASTTEST-BLOCK/FTB-RC4: a BROKEN conftest.py (the user's own "
+                             f"code, zero tests run) exited {rc_cf} instead of BLOCKING. The "
+                             f"gate is now silent on exactly the code it exists to verify: "
+                             f"{err_cf[:200]!r}")
+            elif "FAILING" not in err_cf:
+                fails.append(f"FASTTEST-BLOCK/FTB-RC4: blocked, but without saying it FAILED: "
+                             f"{err_cf[:200]!r}")
     finally:
         _m.STATE_DIR = real_state
 

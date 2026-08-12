@@ -246,10 +246,31 @@ def looks_like_pytest_project(cwd: str) -> bool:
     return _has_collectible_tests(tests_dir) is not False   # None (cap reached) accepts
 
 
-# pytest's documented exit codes. 0 PASSED / 1 FAILED are VERDICTS; these two are not.
+# pytest's documented exit codes. Only rc 5 (NO_TESTS_COLLECTED) is verdict-free HERE.
+#
+# [FTB-RC4] rc 4 (USAGE_ERROR) was in this map and that was a REAL DEFECT - a false NEGATIVE,
+# which is the more dangerous direction than the false alarm the fix was removing. Found by an
+# independent adversarial pass (run wf_a6b49ecf-667), not by the author who wrote both the fix
+# and its probes.
+#
+# The argument that put rc 4 here was "a broken conftest is not the user's tests failing". That
+# is backwards: conftest.py is a .py file and is in this module's OWN SRC_EXT, so it is exactly
+# the code the gate exists to verify. And because detect() HARD-CODES the argv (`-m pytest -x
+# -q`, no user flags), a genuine bad-CLI usage error is UNREACHABLE through the auto-detected
+# command - so rc 4 here can essentially only mean the user's own conftest.py or ini failed to
+# load. Re-measured against pytest: SyntaxError in conftest, ModuleNotFoundError in conftest, a
+# raising tests/conftest.py, and a bad `addopts` in pytest.ini ALL return 4 with ZERO tests run.
+#
+# Measured A/B through the real hook: with app.py regressed so the suite genuinely fails, a
+# broken conftest.py present gave rc 0 (silent green); removing only the conftest gave rc 2 and
+# pytest's traceback. The waiver converted a CAUGHT REGRESSION into a silent pass - the precise
+# failure this project exists to catch, shipped inside the fix for a different one.
+#
+# rc 2 (INTERRUPTED) and rc 3 (INTERNAL_ERROR) stay OUT of this map deliberately: both also mean
+# nothing was proven, but blocking is the safe direction and neither is a false alarm on correct
+# code, which is the only thing criterion 3 asks this map to prevent.
 _PYTEST_INCONCLUSIVE = {
     5: "pytest collected no tests, so nothing was verified",
-    4: "pytest could not start (usage or collection error), so nothing was verified",
 }
 
 
@@ -542,28 +563,63 @@ def _state_path(cwd: str) -> str:
         _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
 
 
-def _nogate_state_path(cwd: str) -> str:
+def _reason_slug(reason: str) -> str:
+    """A short stable tag for a notice REASON, so two different reasons cannot share a marker.
+
+    [FTB-MASK] These markers used to be keyed on the PATH ALONE. A project therefore got exactly
+    ONE notice ever, whichever fired first, and every later - materially DIFFERENT - reason was
+    silenced permanently, with nothing in the code to clear it. The masking that
+    `_inconclusive_state_path` was added to prevent between the two notice FAMILIES was still
+    live WITHIN each of them.
+    """
+    return hashlib.sha1(reason.encode("utf-8", "surrogateescape")).hexdigest()[:8]
+
+
+def _nogate_state_path(cwd: str, reason: str = "") -> str:
     return os.path.join(STATE_DIR, "nogate-" + hashlib.sha1(
-        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
+        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16]
+        + ("-" + _reason_slug(reason) if reason else "") + ".json")
 
 
-def _inconclusive_state_path(cwd: str) -> str:
+def _inconclusive_state_path(cwd: str, reason: str = "") -> str:
     """Its OWN key, deliberately: a project that was once ungated and has since acquired a
     pytest config would otherwise have this notice masked by the stale `nogate-` marker, and
     the two say different things. Distinguishing "there is no gate" from "the gate ran and
-    proved nothing" is the whole point of the notice existing."""
+    proved nothing" is the whole point of the notice existing. The reason is part of the key
+    for the same reason one level down - see _reason_slug [FTB-MASK]."""
     return os.path.join(STATE_DIR, "inconclusive-" + hashlib.sha1(
-        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16] + ".json")
+        _state_key(cwd).encode("utf-8", "surrogateescape")).hexdigest()[:16]
+        + ("-" + _reason_slug(reason) if reason else "") + ".json")
+
+
+def _nogate_reason(cwd: str) -> tuple[str, str]:
+    """(kind, message) for why this project has no usable gate. ONE definition, so the marker
+    key and the printed text can never disagree about which reason fired."""
+    if looks_like_pytest_project(cwd) and not _pytest_importable():
+        return ("pytest-not-importable",
+                f"[fast-test] This looks like a pytest project, but pytest is not importable by "
+                f"{sys.executable} - point .claude/fast-test.cmd at the interpreter that has "
+                f"it.\n")
+    return ("no-gate-configured",
+            "[fast-test] Add one to activate the gate: .claude/fast-test.cmd, package.json "
+            "scripts.test, or a pytest config (pytest.ini / pyproject / setup.cfg / tox.ini) "
+            "or tests/ containing test_*.py.\n")
 
 
 def _notice_no_gate(cwd: str) -> int:
-    """Say ONCE per project that no test gate exists here, so a skip cannot pass for a green run.
+    """Say ONCE PER REASON that no test gate exists here, so a skip cannot pass for a green run.
 
     Only speaks when source files actually changed - i.e. you are writing code in an ungated repo.
     Always exits 0: this is information, never a block. Adding a test command retires it naturally;
     deleting the state file re-arms it.
+
+    [FTB-MASK] Once per REASON, not once per project. This function emits two materially
+    different messages, and the second - "your pytest is not usable, so this gate is dead" - is
+    the one a user most needs. Keyed on the path alone, whichever fired first silenced the other
+    forever.
     """
-    np = _nogate_state_path(cwd)
+    kind, why = _nogate_reason(cwd)
+    np = _nogate_state_path(cwd, kind)
     if os.path.exists(np):
         return 0
     try:
@@ -583,16 +639,8 @@ def _notice_no_gate(cwd: str) -> int:
     # Computed outside the f-string: a backslash inside an f-string expression is a SyntaxError
     # before Python 3.12 (PEP 701), and this hook must import on older interpreters.
     name = os.path.basename(cwd.rstrip("/\\")) or cwd
-    # [FASTTEST-BLOCK] Name the REASON when there is a specific one. A project that is plainly
-    # a pytest project but whose pytest is missing from THIS interpreter used to be told its
-    # tests were failing (rc 1, identical to a real failure); telling it "add a test gate"
-    # instead would be the same unhelpful answer one step quieter.
-    why = (f"[fast-test] This looks like a pytest project, but pytest is not importable by "
-           f"{sys.executable} - point .claude/fast-test.cmd at the interpreter that has it.\n"
-           if looks_like_pytest_project(cwd) and not _pytest_importable() else
-           f"[fast-test] Add one to activate the gate: .claude/fast-test.cmd, package.json "
-           f"scripts.test, or a pytest config (pytest.ini / pyproject / setup.cfg / tox.ini) "
-           f"or tests/ containing test_*.py.\n")
+    # `why` and the marker key both come from _nogate_reason(), so the text printed and the
+    # reason suppressed can never drift apart.
     sys.stderr.write(
         f"[fast-test] NO TEST GATE in '{name}': source changed, nothing was verified.\n"
         f"{why}"
@@ -607,7 +655,7 @@ def _notice_inconclusive(cwd: str, cmd: str, reason: str) -> int:
     gets switched off, and a switched-off guard is worse than no guard (criterion 3). The push
     gate says it on EVERY push instead, because a push is a rare event where the line is signal.
     """
-    ip = _inconclusive_state_path(cwd)
+    ip = _inconclusive_state_path(cwd, reason)
     if os.path.exists(ip):
         return 0
     try:

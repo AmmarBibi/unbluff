@@ -280,6 +280,18 @@ MUTATIONS = [
     ("pre_push_gate", "FTB-6", "the PUSH gate stops consulting inconclusive_reason, so a run "
      "that collected nothing blocks the push as 'tests are failing'",
      [("        reason = fast_test.inconclusive_reason(cmd, rc)", "        reason = None")], False),
+    # --- FTB-RC4 / FTB-MASK: found by the independent pass (wf_a6b49ecf-667), NOT by the
+    # author who wrote both the fix and its probes. The first is a false NEGATIVE the fix
+    # INTRODUCED - the more dangerous direction than the false alarm it was removing.
+    ("fast_test_on_stop", "FTB-7", "rc 4 goes back into the waiver, so a BROKEN conftest.py - "
+     "the user's own code, zero tests run - is silently waved through by both gates",
+     [('_PYTEST_INCONCLUSIVE = {\n    5: "pytest collected no tests, so nothing was verified",\n}',
+       '_PYTEST_INCONCLUSIVE = {\n    5: "pytest collected no tests, so nothing was verified",\n'
+       '    4: "pytest could not start (usage or collection error), so nothing was verified",\n}')],
+     False),
+    ("fast_test_on_stop", "FTB-8", "the no-gate marker drops the REASON from its key again, so "
+     "the first notice permanently masks every later, different one",
+     [("    np = _nogate_state_path(cwd, kind)", "    np = _nogate_state_path(cwd)")], False),
     ("hook_health_check", "D11", "the weekly sweep loses its aggregate budget",
      [("        if time.monotonic() >= deadline:", "        if False:")], False),
     ("hook_health_check", "D11b", "sweep progress is no longer persisted per hook",
