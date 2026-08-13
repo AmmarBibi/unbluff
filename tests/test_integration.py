@@ -284,6 +284,16 @@ def main():
 
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n==== {passed}/{len(results)} scenarios passed ====")
+    # [2026-08-13] The install -> fire -> uninstall tier, recorded. It is criterion 4's only
+    # direct evidence and it left no trace in the gate ledger, so "when was the round trip
+    # last exercised locally?" was reconstructable only from CI history.
+    try:
+        sys.path.insert(0, os.path.join(REPO, "tools"))
+        import gate_ledger
+        gate_ledger.record("integration", "PASS" if passed == len(results) else "FAIL",
+                           passed=passed, total=len(results))
+    except Exception:
+        pass
     return 0 if passed == len(results) else 1
 
 

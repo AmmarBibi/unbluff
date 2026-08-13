@@ -47,6 +47,10 @@ AUX_GATES = (
     # review while its comment called itself DERIVED. 9 of 25 hook files were unguarded, 5 of
     # them imported by production hooks.
     ("install-guard", ("install.py",), ("--selftest",)),
+    # [SHIP-BAR enabler] The gate LEDGER's own retention rule. It recorded 1 of 5 tiers for
+    # days, and the fix is not just "let other tiers write" - the cap was GLOBAL, so the
+    # cheapest gate would evict the record of the 30-minute sweep as soon as both wrote.
+    ("gate-ledger", ("tools", "gate_ledger.py"), ("--selftest",)),
     # [criterion 3] The false-alarm scorer is itself a CHECKING INSTRUMENT, and on 2026-08-12
     # every defect found after the adversarial pass was in an instrument rather than in the
     # product. Its --selftest is the gate. The MEASUREMENT is deliberately NOT the gate: a
@@ -239,26 +243,14 @@ def record_gate_run(ran, failed, skipped=()):
     Best-effort: never fails the run. An unwritable ledger must not turn a green suite red.
     """
     try:
-        path = os.path.join(HERE, "docs", "audits", "gate_runs.json")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        try:
-            with open(path, encoding="utf-8") as f:
-                history = json.load(f)
-            if not isinstance(history, list):
-                history = []
-        except (OSError, ValueError):
-            history = []
-        history.append({
-            "gate": "run_selftests",
-            "utc": datetime.datetime.now(datetime.timezone.utc).replace(
-                microsecond=0).isoformat(),
-            "ran": ran,
-            "failed": sorted(failed),
-            "skipped": sorted(skipped),
-            "result": "PASS" if not failed else "FAIL",
-        })
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(history[-200:], f, indent=2)  # bounded: keep the last 200 runs
+        # [2026-08-13] Was an inline writer with the gate name HARDCODED here, which is why
+        # exactly ONE of five tiers could ever be recorded. Now the shared ledger, which every
+        # tier can call and which retains PER GATE - a global cap let this frequent gate evict
+        # the record of the 30-minute sweep, i.e. the one whose last-run date actually matters.
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import gate_ledger
+        gate_ledger.record("run_selftests", "PASS" if not failed else "FAIL",
+                           ran=ran, failed=sorted(failed), skipped=sorted(skipped))
     except Exception:
         pass
 

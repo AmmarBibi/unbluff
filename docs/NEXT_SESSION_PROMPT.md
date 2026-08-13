@@ -273,6 +273,25 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             fire_ledger.jsonl (sub-hook "newg", ModuleNotFoundError: new_guard, cwd ""). The
             Opus-5 item below says to READ that ledger rather than reason about it; an
             instrument test runs can write to is not a clean evidence base.
+          [DONE 08-13] SHIP-BAR's ENABLER: the gate ledger records more than one tier.
+            tools/gate_ledger.py, gate `gate-ledger`, pinned GL-1. run_selftests /
+            integration / false_alarm_scorer / mutation_sweep / mutation_sweep_filtered all
+            record; a FILTERED sweep gets its OWN gate name, because it proves nothing about
+            what it skipped and a ship bar conflating the two would accept a 3-entry run as a
+            full sweep. Retention is PER GATE - a global cap let the cheapest gate evict the
+            30-minute sweep's record, so simply letting more tiers write would NOT have
+            worked. last_run(gate) is the reader a pre-push gate needs.
+            TWO LIMITS, stated now rather than discovered later: (a) the file is GITIGNORED,
+            so it records what THIS MACHINE ran - never reaches CI, does not survive a clone;
+            a gate on it enforces LOCAL discipline, which is what verify-before-pushing
+            needs, and is NOT a shared auditable record. (b) the first version used a
+            60-per-gate cap and PERMANENTLY DISCARDED 140 of the 200 historical rows on its
+            first run; the cap now matches the old global bound so a migration can only add.
+          [SCHEDULED] SHIP-BAR-GATE itself, now unblocked, in two independent halves:
+            the STOPPING RULE (read the FINDINGS ledger, fail if any row is CRITICAL/HIGH and
+            not BUILT) and the PRE-PUSH gate (require a RECORDED sweep newer than the last
+            source change - it cannot run a 30-minute sweep but it can now ask when one
+            last passed).
           [NEW 08-13, SCHEDULED] The 800-line rule is now broken by SIX files, not five, and
             THREE of the increases are 08-13's: mutation_check 1309, pre_push_gate_selftest
             1109, fast_test_on_stop_selftest 1003, install 927, duplicate_registration_check

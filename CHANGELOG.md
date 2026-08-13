@@ -6,6 +6,27 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`tools/gate_ledger.py` - the gate ledger now records more than one tier**, which is the
+  ENABLER the ship bar's verify-before-pushing half was blocked on. The writer had lived inside
+  `run_selftests.py` as a private function with the gate name HARDCODED, so exactly one of five
+  tiers could record anything: measured 2026-08-13, 200 entries, all `run_selftests`, on a day
+  that also ran the mutation sweep five times, the integration suite four times and a new
+  criterion-3 scorer. `run_selftests`, `integration`, `false_alarm_scorer` and both
+  `mutation_sweep` variants now record; a FILTERED sweep is recorded under its own gate name,
+  because it proves nothing about the entries it skipped and a ship bar that conflated the two
+  would accept a 3-entry run as a full sweep. Registered as the `gate-ledger` gate (suite
+  34 -> 35). Pinned `GL-1`.
+  **The cap is now PER GATE, and that is the load-bearing part.** The original kept the last 200
+  entries GLOBALLY, so simply letting other tiers write would not have worked - `run_selftests`
+  runs many times an hour and the sweep runs once or twice a day, so the cheapest gate would
+  evict the record of the most expensive one, which is exactly the tier whose last-run date is
+  worth having.
+  **Two limits stated rather than discovered later:** the file is gitignored, so it records what
+  THIS MACHINE ran - it never reaches CI, does not survive a clone, and a ship bar built on it
+  enforces local discipline rather than producing a shared, auditable record. And the first
+  version of this change used a 60-per-gate cap, which permanently discarded 140 of the file's
+  200 historical rows on its first run; the cap now matches the previous global bound so a
+  migration can only ever add history.
 - **`tools/score_false_alarms.py` + `tests/false_alarm_corpus.py` - criterion 3 is now MEASURED
   rather than asserted.** The previous machinery (`tools/score_corpus.py`) calls
   `slicing_offenders(hooks_dir)` and scores exactly one detector - 0 of the 16 hooks `install.py`

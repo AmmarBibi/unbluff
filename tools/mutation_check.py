@@ -734,6 +734,13 @@ MUTATIONS = [
     ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
      "anyway, so silence from an unreachable hook reads as a perfect score",
      [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    # [SHIP-BAR enabler] The gate ledger's retention rule. Reverting it to a GLOBAL cap is the
+    # exact shape the original had: the cheapest, most frequent gate evicts the record of the
+    # 30-minute sweep, so the tier whose last-run date actually matters is the first to vanish.
+    ("tools/gate_ledger", "GL-1", "retention goes back to a GLOBAL cap, so a frequent gate "
+     "evicts the record of a rare one and the tier you most need is the first lost",
+     [('        counts[gate] = counts.get(gate, 0) + 1',
+       '        counts["*"] = counts.get("*", 0) + 1\n        gate = "*"')], False),
     ("tools/score_false_alarms", "FA-4", "the projects root stops being isolated, so "
      "memory_hygiene_guard resolves against the REAL ~/.claude/projects and every rate this "
      "tool prints depends on whose machine ran it",
@@ -1324,6 +1331,21 @@ def main() -> int:
                   % (len(skipped) + len(unproven) + len(other_platform)))
         else:
             print("all mutations caught - every fix is pinned by a test that fails without it")
+    # [2026-08-13] Record it. This is the tier the ledger most needed and least had: it runs
+    # for ~30 minutes and therefore rarely, so "when did the sweep last pass?" was answerable
+    # only from a scratchpad or someone's memory. A FILTERED run is recorded as its own gate
+    # name - it proves nothing about the entries it skipped, and a ship bar that could not
+    # tell the two apart would accept a 3-entry run as a full sweep.
+    try:
+        import gate_ledger
+        gate_ledger.record("mutation_sweep_filtered" if args.only else "mutation_sweep",
+                           "FAIL" if (survivors or errors) else "PASS",
+                           executed=len(MUTATIONS) - filtered - len(skipped)
+                           - len(other_platform),
+                           survivors=len(survivors), errors=len(errors),
+                           unproven=len(unproven), only=args.only or None)
+    except Exception:                              # never let bookkeeping fail a gate
+        pass
     return 1 if (survivors or errors) else 0
 
 

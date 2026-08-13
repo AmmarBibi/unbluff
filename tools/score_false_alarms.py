@@ -342,6 +342,17 @@ def main() -> int:
           "control) + %d NO CORPUS ENTRY; %d false alarm(s) on %d ordinary entr(ies)"
           % (len(roster), len(measured), len(unproven), len(no_entry),
              len(alarms), len(negatives)))
+    # Criterion 3's numbers are a PUBLISHED claim, so when they were last measured has to be
+    # answerable from the record rather than from a commit message.
+    try:
+        import gate_ledger
+        gate_ledger.record("false_alarm_scorer", "FAIL" if alarms else "PASS",
+                           measured=len(measured), unmeasured=len(unproven),
+                           no_corpus_entry=len(no_entry), false_alarms=len(alarms),
+                           nagging=len([1 for h in per_hook.values() if h.get("nags")]),
+                           ordinary_entries=len(negatives))
+    except Exception:
+        pass
     return 1 if alarms else 0
 
 
