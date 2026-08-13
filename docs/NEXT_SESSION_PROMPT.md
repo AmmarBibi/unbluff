@@ -45,7 +45,16 @@ it must be genuinely good for other people. It is my #1 project, worked on along
 
   1. Every behavioural claim in README.md and skills/*/SKILL.md is TRUE and has a test proving
      it - or the claim is DELETED.
-  2. No defect reachable by a user who installs it and uses it.
+  2. No CRITICAL or HIGH defect reachable by a user who installs it and uses it, where the
+     POPULATION is what the adversarial review + the R1/R2 rule define. MEDIUM/LOW ship with
+     a written WON'T-FIX or BACKLOG row in the ledger.
+     *** STOPPING RULE ADDED 2026-08-12, and it is the whole point of the amendment. ***
+     As written before, this criterion was UNFALSIFIABLE - there is always another defect -
+     so step 3 could not end, it could only be abandoned. That is what a bug spiral feels
+     like from inside. Severity + a defined population makes it DECIDABLE. This does not
+     narrow the goal: nothing is dropped, MEDIUM/LOW become RECORDED rather than unbounded
+     hand-hunting. A recorded known-MEDIUM is honest; a hunt that stops when someone tires
+     is not.
   3. Each hook's FALSE-ALARM rate on ordinary correct code is MEASURED and recorded. (This is
      the criterion that decides whether it is good for other people: a guard that fires on
      correct code gets switched off, which is worse than no guard.)
@@ -67,6 +76,34 @@ Anything not on that list is WON'T-FIX BY DESIGN and gets said so in the README.
 * The v1.0 milestone ships as tag **v1.4.0**. `v1.0.0` has existed since 2026-07-13 (b8d3f9e);
   "v1.0" stays a milestone LABEL in prose and the CHANGELOG explains it.
 * Claim DISPOSITION gets its own step and runs BEFORE any step that edits README/SKILL.md.
+
+=== PLAN REWORK 2026-08-12 - decided by the user, after 2 sessions inside step 3 ===
+
+THREE changes. The evidence for all three is this session's own record.
+
+(1) CRITERION 2 NOW HAS A STOPPING RULE (above). By it, STEP 3 IS CLOSEABLE: the 8
+    remaining confirmed findings are all MEDIUM/LOW and recorded in ledger N3.
+
+(2) STEP 4 COMES NEXT, AND IT DRIVES STEP 3'S TAIL - the order was backwards.
+    FASTTEST-BLOCK was a CRITERION-3 defect: a guard firing on correct code, in every Rust,
+    Go and JS repo. We found it by HAND in step 3. Step 4 measures exactly that, MECHANICALLY,
+    over every hook - it would have found FASTTEST-BLOCK, and probably PGG-PS and ENC-1 too.
+    Step 4 is BOUNDED (25 hooks x corpora, finite and countable). Step 3 is not. Running the
+    unbounded hunt before the bounded measurement is why two sessions produced no criterion-3
+    progress at all.
+    EXCEPTION, done by hand first: PGG-PS. A hook registered matcher "Bash" does not exist
+    AT ALL for PowerShell users - criterion-2 HIGH, same class as FASTTEST-BLOCK.
+
+(3) CEREMONY IN PROPORTION TO RISK. DIAGNOSED, not guessed: of 7 defects I introduced on
+    2026-08-12, SIX were in TEST/INSTRUMENT code, not product code. The per-fix ceremony
+    generates ~100 lines of new probes/mutations per 5-line fix (+1,389 / -110 in one day),
+    and that scaffolding is never-reviewed code written under the same assumptions as the fix
+    - which the standing rule already predicts. FULL rigor stays for product logic and
+    anything a user reaches. For INSTRUMENT fixes: reuse existing probes, do not invent new
+    scaffolding per item. This is the rigor-right-sizing rule, applied.
+
+NOT CHANGED: nothing is abandoned. The 8 findings keep their severities in ledger N3, and
+everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are untouched.
 
 === THE RECOMMENDED ORDER - the single canonical list ===
 
@@ -256,7 +293,19 @@ matrix was expected to go red and did not - but step 3 grew by more than step 2 
 growth is in the DISCOVERED population, not in the work done: none of it was known before the
 close ritual looked. Step 4's size is still genuinely unknown - RE-ESTIMATE AFTER IT LANDS.
 
-=== WORKING RULES - unchanged, all earned. NONE of these may be dropped ===
+=== WORKING RULES - all earned. NONE of these may be dropped ===
+
+VERIFY BEFORE PUSHING, AND BATCH THE COMMITS (decided 2026-08-12). Run the mutation
+sweep AND the `venv --without-pip` run BEFORE the push, not after. TWICE on 08-12 CI
+found what a local sweep would have: eb70f26 went red, and FTB-1/FTB-6 shipped
+DECORATIVE. main was briefly WRONG between 25a87f2 and 152d5a3. A FILTERED sweep proves
+nothing about the entries it did not consider - the harness prints exactly that on every
+run, and reading past it is what produced the red.
+
+CEREMONY IN PROPORTION TO RISK. Full rigor for product logic and anything a user reaches.
+For INSTRUMENT fixes, REUSE existing probes rather than inventing new scaffolding per
+item: 6 of the 7 defects introduced on 08-12 were in test/instrument code, not product
+code, and that scaffolding is never-reviewed code written under the fix's own assumptions.
 
 Regression test FIRST and watch it FAIL. Mutation-test every fix; SURVIVED means the test is
 decorative. Treat every PRESCRIBED fix as a HYPOTHESIS - one scored 7 of 12 and failed on its own
