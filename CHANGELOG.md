@@ -20,6 +20,21 @@ All notable changes to this project are documented here. Format loosely follows
   print 0% for a hook it has not shown to be reachable, because silence from an unreachable hook
   and silence from a correct one are the same output.
 
+- **Criterion 3's population is now FULLY measured: 11 of 11 wired hooks**, with a firing
+  control each. Nine sit at **0.0%** on 21 ordinary entries. The two that fire -
+  `memory_hygiene_guard` and the `stop_dispatcher` that surfaces it - do so **once per session
+  and then go silent**, so the suite has **zero NAGGING false alarms**.
+  The scorer now measures that distinction directly: every false alarm is re-run with the SAME
+  state and session, because a guard that objects once is a NOTICE while one that repeats every
+  turn is what actually gets a guard switched off. **This mattered immediately** - the
+  `memory_hygiene_guard` notice measured 100% purely because the scorer gives each entry a fresh
+  state dir, defeating the once-per-session marker that bounds it in real use. It was one step
+  from being "fixed"; measurement over three consecutive turns (fires, silent, silent) refuted
+  the defect. Recorded as a FINALIZED-EXCLUSION, not a scheduled fix.
+  Also isolates `UNBLUFF_PROJECTS_ROOT` per entry - without it `memory_hygiene_guard` resolved
+  against the maintainer's real `~/.claude/projects` and its result was not reproducible
+  anywhere else.
+
 ### Fixed
 - **`timing_claim_guard` was the only stateful hook that ignored `UNBLUFF_STATE_DIR`.** Its
   marker directory was a module-level constant overridden only inside its own selftest, so no

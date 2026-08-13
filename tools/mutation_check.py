@@ -734,6 +734,12 @@ MUTATIONS = [
     ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
      "anyway, so silence from an unreachable hook reads as a perfect score",
      [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    ("tools/score_false_alarms", "FA-3", "the NAG check stops re-running, so a guard that "
+     "objects once and then goes silent is reported identically to one that repeats every "
+     "turn - the distinction that decides whether a guard gets switched off",
+     [("    rc2, _out2, err2, _rows2 = run_entry(script, payload, cwd, state, ledger, "
+       "extra_env)\n    return fired(rc2, err2)",
+       "    return False")], False),
     ("tools/score_false_alarms", "FA-2", "an ADVISORY fire (a message on stderr with rc 0) is "
      "scored as silence, so every advisory guard reports 0% on inputs it objected to",
      [("    return rc not in (0, None) or bool((err or \"\").strip())",

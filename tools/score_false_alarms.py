@@ -143,6 +143,24 @@ def fired(rc, err) -> bool:
     return rc not in (0, None) or bool((err or "").strip())
 
 
+def repeats_in_session(script, payload, cwd, state, ledger, extra_env=None) -> bool:
+    """Does this hook object AGAIN on the same input, in the SAME session?
+
+    A guard that objects once and then goes quiet is a NOTICE. One that repeats every turn is
+    what actually gets a guard switched off - which is the behaviour criterion 3 exists to
+    prevent. Reporting only the first invocation reports the harsher number and hides a
+    deliberate design: memory_hygiene_guard's inconclusive notice measured 100% here purely
+    because this tool gives every corpus entry a FRESH state dir, defeating the once-per-
+    session marker that bounds it in real use. It was nearly "fixed" on that evidence.
+
+    A FUNCTION, not an inline condition, so its probe and its mutation reach the same code -
+    the first attempt pinned the call site while the selftest exercised a helper, the mutation
+    SURVIVED, and the harness said so (hollow-pin mode 3: helper tested, CALL SITE not).
+    """
+    rc2, _out2, err2, _rows2 = run_entry(script, payload, cwd, state, ledger, extra_env)
+    return fired(rc2, err2)
+
+
 def scored_scripts() -> dict:
     """{event: [script]} - every hook a corpus entry can put in front of, DERIVED.
 
@@ -207,10 +225,19 @@ def score():
                     c["total"] += 1
                     c["fired"] += 1 if did else 0
                 else:
-                    h = per_hook.setdefault(unit, {"exercised": 0, "false_alarms": []})
+                    h = per_hook.setdefault(unit, {"exercised": 0, "false_alarms": [],
+                                                   "nags": []})
                     h["exercised"] += 1
                     if did:
                         h["false_alarms"].append((name, (err or "").strip()[:120]))
+                        # DOES IT NAG? Re-run with the SAME state dir and session. Several
+                        # guards suppress a repeat via a once-per-session marker, and that is
+                        # the difference between a notice and the thing that gets a guard
+                        # switched off. Measuring only the first invocation reports the
+                        # harsher number and hides a deliberate design - which nearly cost a
+                        # working guard on 2026-08-13.
+                        if repeats_in_session(script, payload, td, state, ledger, entry_env):
+                            h["nags"].append(name)
     return per_hook, controls, entrypoint
 
 
@@ -254,7 +281,7 @@ def main() -> int:
           % ("hook", "exercised", "FALSE ALARM", "rate", "control"))
     unmeasured, alarms, uncovered = [], [], []
     for hook in sorted(set(roster) | set(per_hook) | set(controls)):
-        h = per_hook.get(hook, {"exercised": 0, "false_alarms": []})
+        h = per_hook.get(hook, {"exercised": 0, "false_alarms": [], "nags": []})
         c = controls.get(hook, {"total": 0, "fired": 0})
         n, fa = h["exercised"], len(h["false_alarms"])
         rate = rate_for(n, fa, c["fired"])
@@ -270,7 +297,12 @@ def main() -> int:
 
     print()
     for hook, name, msg in alarms:
-        print("FALSE ALARM: %s fired on %r -> %s" % (hook, name, msg or "(no message)"))
+        nags = name in per_hook.get(hook, {}).get("nags", [])
+        print("FALSE ALARM: %s fired on %r [%s] -> %s"
+              % (hook, name,
+                 "NAGS - repeats in the same session" if nags
+                 else "once per session, then SILENT - a notice, not nagging",
+                 msg or "(no message)"))
     for hook in unmeasured:
         if hook in uncovered:
             continue
@@ -351,6 +383,33 @@ def selftest() -> int:
         fails.append("whitespace on stderr was scored as a fire")
     if not fired(2, ""):
         fails.append("a BLOCKING rc with no message was scored as silence")
+
+    # (c) NAG DETECTION, exercised against a real hook in each direction. A guard that objects
+    # once and then goes quiet is a NOTICE; one that repeats every turn is what actually gets a
+    # guard switched off. Reporting only the first invocation nearly cost a working guard on
+    # 2026-08-13 - memory_hygiene_guard's inconclusive notice measured 100% because this tool
+    # gives every entry a fresh state dir, which defeats the very suppression that bounds it.
+    import tempfile as _tf
+    with _tf.TemporaryDirectory(prefix="unbluff-nag-") as _td:
+        _st = os.path.join(_td, "s")
+        os.makedirs(_st, exist_ok=True)
+        _lg = os.path.join(_td, "l.jsonl")
+        # piped_gate_guard keeps NO session marker: it must object every single time.
+        _pl = {"tool_name": "Bash",
+               "tool_input": {"command": "python run_selftests.py | tail -2"}}
+        run_entry("piped_gate_guard.py", _pl, _td, _st, _lg)          # first turn
+        if not repeats_in_session("piped_gate_guard.py", _pl, _td, _st, _lg):
+            fails.append("a guard with NO session marker was not detected as repeating - the "
+                         "nag column would report every guard as a harmless one-off notice")
+        # memory_hygiene_guard DOES keep one: it must go quiet on the second run.
+        _pr = os.path.join(_td, "proj")
+        os.makedirs(_pr, exist_ok=True)
+        _mp = {"session_id": "nagcheck", "cwd": _td, "stop_hook_active": False}
+        _env = {"UNBLUFF_PROJECTS_ROOT": _pr}
+        run_entry("memory_hygiene_guard.py", _mp, _td, _st, _lg, _env)
+        if repeats_in_session("memory_hygiene_guard.py", _mp, _td, _st, _lg, _env):
+            fails.append("a guard WITH a once-per-session marker repeated on the second run - "
+                         "either the marker broke or this probe is not sharing state")
 
     # the roster must be DERIVED and non-empty, or rule 4 is decorative
     wired = scored_scripts()
