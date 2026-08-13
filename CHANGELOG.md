@@ -5,7 +5,33 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **`tools/score_false_alarms.py` + `tests/false_alarm_corpus.py` - criterion 3 is now MEASURED
+  rather than asserted.** The previous machinery (`tools/score_corpus.py`) calls
+  `slicing_offenders(hooks_dir)` and scores exactly one detector - 0 of the 16 hooks `install.py`
+  wires. Every guard criterion 3 cares about reads a Claude Code EVENT PAYLOAD on stdin, so this
+  runs each one through its real entry point on a corpus of ordinary correct work.
+  Registered as the `false-alarm-scorer` gate (suite 33 -> 34). The gate is its `--selftest`,
+  not the measurement: a known false alarm is a ledger row, and gating on the score would either
+  keep the suite red or create pressure to delete the corpus entry that found it.
+  **First measurement, 15 ordinary entries + 5 controls:** `piped_gate_guard`, `plan_defer_guard`,
+  `numbers_match_on_write` and `timing_claim_guard` all **0.0%**, each with a firing control.
+  Four Stop-class hooks report **UNMEASURED** - they have no control yet, and the tool refuses to
+  print 0% for a hook it has not shown to be reachable, because silence from an unreachable hook
+  and silence from a correct one are the same output.
+
 ### Fixed
+- **`timing_claim_guard` was the only stateful hook that ignored `UNBLUFF_STATE_DIR`.** Its
+  marker directory was a module-level constant overridden only inside its own selftest, so no
+  harness could isolate it: the false-alarm scorer gave every corpus entry a fresh state dir,
+  this hook ignored it, and one surviving marker silenced the control on every run after the
+  first. Measuring it also WROTE INTO THE USER'S REAL `~/.claude/state`. Its default directory
+  differed from its twins' as well (`~/.claude/state` against `~/.claude/hooks/state`). Now read
+  at call time, like every other stateful hook.
+  **This also corrects the fire ledger as evidence:** the dispatchers record each sub-hook's
+  *exit code*, and this hook is ADVISORY - it reports on stderr and returns 0. A ledger reading
+  `timing: 0` across 1252 invocations therefore means "never BLOCKED", not "never fired".
+  Retiring a guard on that number would have been retiring it on a false zero.
 - **`PGG-PS` - the piped-gate guard did not exist for PowerShell users.** It was registered
   `matcher: "Bash"`, so on Windows - where PowerShell is the primary shell - the guard never ran
   at all, and its vocabulary was POSIX-only besides. Two independent halves, fixed and pinned

@@ -47,6 +47,12 @@ AUX_GATES = (
     # review while its comment called itself DERIVED. 9 of 25 hook files were unguarded, 5 of
     # them imported by production hooks.
     ("install-guard", ("install.py",), ("--selftest",)),
+    # [criterion 3] The false-alarm scorer is itself a CHECKING INSTRUMENT, and on 2026-08-12
+    # every defect found after the adversarial pass was in an instrument rather than in the
+    # product. Its --selftest is the gate. The MEASUREMENT is deliberately NOT the gate: a
+    # known, recorded false alarm is a ledger row, and wiring it here would either turn the
+    # suite permanently red or create pressure to delete the corpus entry that found it.
+    ("false-alarm-scorer", ("tools", "score_false_alarms.py"), ("--selftest",)),
     # the README advertises a Python floor; CI only exercises files it actually runs
     ("python-floor", ("tools", "check_python_floor.py"), ()),
     # a hook can name a skill the repo does not ship (close_skills_guard shipped requiring

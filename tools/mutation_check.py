@@ -720,6 +720,16 @@ MUTATIONS = [
      "read as a dispatcher fan-out roster again, so a hook that imports nothing is reported "
      "as double-registering a phantom module",
      [("    if not _imports_a_named_module(tree):", "    if False:")], False),
+    # [criterion 3] The false-alarm scorer. Both mutations attack the thing that makes its
+    # numbers mean anything - not its arithmetic, but its refusal to report a rate it has not
+    # earned. Both failure modes below actually occurred while it was being written.
+    ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
+     "anyway, so silence from an unreachable hook reads as a perfect score",
+     [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    ("tools/score_false_alarms", "FA-2", "an ADVISORY fire (a message on stderr with rc 0) is "
+     "scored as silence, so every advisory guard reports 0% on inputs it objected to",
+     [("    return rc not in (0, None) or bool((err or \"\").strip())",
+       "    return rc not in (0, None)")], False),
     ("duplicate_registration_check", "B3a", "extraction back to the hardcoded '.py' only",
      [("        if t.lower().endswith(SCRIPT_EXTS):", "        if t.lower().endswith('.py'):")],
      False),

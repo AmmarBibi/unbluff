@@ -120,9 +120,31 @@ def verdict(found, doc_count):
     return True, "\n".join(lines)
 
 
+def _marker_dir() -> str:
+    """Where the once-per-session marker lives.
+
+    [MEASURED 2026-08-13] This was the ONLY stateful hook that ignored UNBLUFF_STATE_DIR.
+    Every twin - plan_defer_guard, numbers_match_on_write, memory_hygiene_guard,
+    meta_audit_on_stop, fast_test_on_stop - reads it; this one had a module-level constant
+    overridden only inside its own selftest. Three consequences, all observed while building
+    the false-alarm scorer:
+      * NO harness could isolate it. The scorer gives every corpus entry a fresh state dir;
+        this hook ignored it, so one marker survived between runs and silenced the CONTROL on
+        every run after the first. The run reported UNMEASURED - and would have reported a
+        false 0% if the control had been trusted any less.
+      * Measuring it WROTE INTO THE USER'S REAL ~/.claude/state, the same pollution class as a
+        selftest writing to the production fire ledger.
+      * Its default directory also differed from its twins' (~/.claude/state against
+        ~/.claude/hooks/state), so even a reader who knew about the variable looked in the
+        wrong place.
+    Read at CALL time, never import time, so a harness setting it per run is obeyed.
+    """
+    return os.environ.get("UNBLUFF_STATE_DIR") or MARKER_DIR
+
+
 def _marker(session_id: str) -> str:
     sid = "".join(c for c in str(session_id or "nosession") if c.isalnum() or c in "-_")[:64]
-    return os.path.join(MARKER_DIR, "timingclaim-%s.json" % sid)
+    return os.path.join(_marker_dir(), "timingclaim-%s.json" % sid)
 
 
 def main() -> int:
@@ -148,7 +170,7 @@ def main() -> int:
     if not speak:
         return 0
     try:
-        os.makedirs(MARKER_DIR, exist_ok=True)
+        os.makedirs(_marker_dir(), exist_ok=True)
         with open(marker, "w", encoding="utf-8") as fh:
             json.dump({"fired": True}, fh)
     except OSError:
