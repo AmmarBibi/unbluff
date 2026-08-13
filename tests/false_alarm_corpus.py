@@ -34,6 +34,8 @@ against it. Add; do not edit or delete.
 
 import json
 import os
+import subprocess
+import sys
 
 # --------------------------------------------------------------------------------------
 # helpers - plant a realistic little project, so "ordinary" means ordinary
@@ -63,6 +65,63 @@ def _numbers_project(td, report_body):
 def _edit(path, td, session):
     return {"session_id": session, "cwd": td, "tool_name": "Write",
             "tool_input": {"file_path": path}}
+
+
+def _stop(td, session, transcript=""):
+    return {"session_id": session, "cwd": td, "transcript_path": transcript,
+            "stop_hook_active": False}
+
+
+def _transcript(td, assistant_content):
+    """A minimal but REAL transcript - the shape integration scenario D1 already trusts."""
+    p = os.path.join(td, "transcript.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user",
+                            "message": {"role": "user", "content": "fix the bug"}}) + "\n")
+        f.write(json.dumps({"type": "assistant",
+                            "message": {"role": "assistant",
+                                        "content": assistant_content}}) + "\n")
+    return p
+
+
+def _git_repo_with_failing_gate(td):
+    """A repo whose test gate FAILS, with a changed .py so the gate is asked to run.
+
+    Reuses integration scenario E1's trick: the gate is a `.claude/fast-test.cmd` that exits 1
+    deterministically, so this control needs NO pytest and cannot go flaky on a machine where
+    pytest is absent - which is every CI runner.
+    """
+    def git(*args):
+        subprocess.run(["git", "-C", td, *args], capture_output=True, text=True,
+                       env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+    git("init")
+    _write(os.path.join(td, ".claude", "fast-test.cmd"),
+           '"%s" -c "raise SystemExit(1)"\n' % sys.executable)
+    _write(os.path.join(td, "app.py"), "x = 1\n")
+    git("add", "-A")
+    git("commit", "-m", "init")
+    with open(os.path.join(td, "app.py"), "a", encoding="utf-8") as f:
+        f.write("y = 2  # changed source\n")
+    return td
+
+
+def _projects_root(td, memory_index):
+    """A projects root holding THIS cwd's memory dir, so memory_hygiene_guard has something
+    to read. Pointed at a fixture via UNBLUFF_PROJECTS_ROOT - never the user's real
+    ~/.claude/projects, which is the pollution class fixed in timing_claim_guard today."""
+    root = os.path.join(td, "_fixture_projects")
+    # DERIVED from the hook's own sanitize_cwd, never re-implemented here. A hand-rolled
+    # version of this exact rule is what the guard's own docstring records as a live defect:
+    # it replaced only ':' '\' and '/', so any path with an underscore or a dot resolved to a
+    # directory that does not exist and the hook returned 0 forever, indistinguishable from
+    # "this project's memory is clean". A fixture that guesses it would fail the same way -
+    # and it DID, on the first run: the control stayed silent and the scorer said so.
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "hooks"))
+    from memory_hygiene_guard import sanitize_cwd
+    _write(os.path.join(root, sanitize_cwd(td), "memory", "MEMORY.md"), memory_index)
+    return root
 
 
 # --------------------------------------------------------------------------------------
@@ -178,6 +237,47 @@ ENTRIES = (
      lambda td: _edit(_numbers_project(
          td, "# Report\n\novershoot 12.3456 and settle 99.9999\n"), td, "fa-c2")),
 
+    # ---- the Stop class. Ordinary correct work first. ----
+    ("stop_with_a_transcript_that_HAS_proof", "Stop", False, ("show_your_proof",),
+     "the assistant cites a tool result, which is what show_your_proof asks for - firing "
+     "here would nag on exactly the behaviour it is trying to produce",
+     lambda td: _stop(td, "fa-9", _transcript(td, [
+         {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest -q"}},
+         {"type": "text", "text": "The suite passes - 12 passed, shown above."}]))),
+
+    ("stop_with_a_plan_carrying_DECISION_TAGS", "Stop", False, ("meta_audit_on_stop",),
+     "a plan whose items are TAGGED (SCHEDULED/DECIDED) - meta_audit's own rule is that a "
+     "tagged line is a record, not hidden work; firing would block every plan-bearing repo",
+     lambda td: _stop(td, "fa-10", "") if _write(
+         os.path.join(td, "PLAN.md"),
+         "# Plan\n\n- SCHEDULED: build the parser\n- DECIDED: use the AST walk\n") else None),
+
+    ("stop_in_a_repo_whose_gate_PASSES", "Stop", False, ("fast_test_on_stop",),
+     "a repo with a changed .py and a test gate that SUCCEEDS - the ordinary green turn, and "
+     "the shape FASTTEST-BLOCK used to hard-block",
+     lambda td: _stop(td, "fa-11", "") if _write(
+         os.path.join(_git_repo_with_failing_gate(td), ".claude", "fast-test.cmd"),
+         '"%s" -c "raise SystemExit(0)"\n' % sys.executable) else None),
+
+    # ---- the three DISPATCHERS, so the roster has no NO-CORPUS-ENTRY rows ----
+    ("dispatcher_stop_on_a_clean_project", "Stop", False, ("stop_dispatcher",),
+     "the Stop dispatcher's aggregate verdict on a project with nothing wrong",
+     lambda td: _stop(td, "fa-12", "")),
+
+    ("dispatcher_posttooluse_on_an_ordinary_edit", "PostToolUse", False,
+     ("post_tooluse_dispatcher",),
+     "the PostToolUse dispatcher's aggregate verdict on an ordinary module edit",
+     lambda td: _edit(_write(os.path.join(td, "util.py"),
+                             "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n"),
+                      td, "fa-13")),
+
+    ("close_skills_on_a_file_that_is_NOT_the_close_signal", "PostToolUse", False,
+     ("close_skills_guard",),
+     "close_skills_guard keys on NEXT_SESSION_PROMPT.md; every other edit must pass, or it "
+     "would demand the four close skills on every write in the repo",
+     lambda td: _edit(_write(os.path.join(td, "notes.md"), "# Notes\n\nnothing to see\n"),
+                      td, "fa-14")),
+
     ("CONTROL_uncontrolled_duration", "PostToolUse", True, ("timing_claim_guard",),
      "a duration stated with a measurement verb and NO control - timing_claim_guard's whole "
      "purpose, and the pair to duration_with_a_control above",
@@ -194,4 +294,64 @@ ENTRIES = (
      lambda td: {"tool_name": "PowerShell",
                  "tool_input": {"command":
                                 "python run_selftests.py | Select-Object -First 1"}}),
+
+    # ---- Stop-class controls. Without these, the four Stop hooks were UNMEASURED: their
+    # silence could not be told apart from never having run. ----
+    ("CONTROL_claim_with_no_proof", "Stop", True, ("show_your_proof",),
+     "an assistant claiming success with NO tool call behind it - the exact shape the hook "
+     "exists for, and integration D1's fixture",
+     lambda td: _stop(td, "fa-c4", _transcript(td, [
+         {"type": "text", "text": "Done - it works now."}]))),
+
+    ("CONTROL_parked_marker_in_a_plan", "Stop", True, ("meta_audit_on_stop",),
+     "a root plan file with a parked marker carrying NO decision tag - work hidden rather "
+     "than scheduled",
+     lambda td: _stop(td, "fa-c5", "") if _write(
+         os.path.join(td, "PLAN.md"),
+         "# Plan\n\n- PARKED: investigate cache misses\n- TODO: close the socket\n") else None),
+
+    ("CONTROL_failing_test_gate", "Stop", True, ("fast_test_on_stop",),
+     "a repo with a changed .py whose test gate FAILS - deterministic, and needs no pytest, "
+     "so it cannot go flaky on a pytest-less machine",
+     lambda td: _stop(_git_repo_with_failing_gate(td), "fa-c6", "")),
+
+    ("CONTROL_memory_index_with_a_commit_hash", "Stop", True, ("memory_hygiene_guard",),
+     "a MEMORY.md index line carrying a commit hash - a rotting pointer, which is one of the "
+     "three things this guard is for. Pointed at a FIXTURE projects root, never the real one",
+     lambda td: (_stop(td, "fa-c7", ""),
+                 # The token must be 7-10 hex chars AND sit beside a context word
+                 # (commit/HEAD/pushed) - BOTH halves, read off HASH_TOKEN_RE and
+                 # HASH_CONTEXT_RE rather than assumed. The first attempt used a 12-char
+                 # token and no context word, so it satisfied neither and the control stayed
+                 # silent; the scorer reported UNMEASURED rather than a false 0%, which is
+                 # the whole reason controls exist.
+                 {"UNBLUFF_PROJECTS_ROOT": _projects_root(
+                     td, "# Memory Index\n\n- [Thing](thing.md) - fixed in commit a1b2c3d4\n")})),
+
+    # ---- DISPATCHER controls. Added as NEW entries rather than by widening an existing
+    # entry's `exercises`, because this corpus is APPEND-ONLY and editing a row in place is
+    # how a corpus silently stops meaning what an earlier measurement said it meant.
+    ("CONTROL_stop_dispatcher_aggregates_a_fire", "Stop", True, ("stop_dispatcher",),
+     "the Stop DISPATCHER must surface a sub-hook's objection - the same claim-without-proof "
+     "transcript, driven through the aggregate entry point rather than the sub-hook",
+     lambda td: _stop(td, "fa-c8", _transcript(td, [
+         {"type": "text", "text": "Done - it works now."}]))),
+
+    ("CONTROL_posttooluse_dispatcher_aggregates_a_fire", "PostToolUse", True,
+     ("post_tooluse_dispatcher",),
+     "the PostToolUse DISPATCHER must surface a sub-hook's objection - the same parked-plan "
+     "edit, driven through the aggregate entry point",
+     lambda td: _edit(_write(os.path.join(td, "MASTER_PLAN.md"),
+                             "| 1 | low-pri refactor -> park.\n"), td, "fa-c9")),
+
+    ("CONTROL_close_signal_without_the_close_skills", "PostToolUse", True,
+     ("close_skills_guard",),
+     "writing NEXT_SESSION_PROMPT.md - the session-close signal - with no close-audit skill "
+     "invoked in the transcript. This guard blocked a premature close twice on 2026-08-13. "
+     "A TRANSCRIPT is required: with none, missing_close_skills() returns [] by design - "
+     "'cannot judge -> silent' - so a control without one tests the fail-safe, not the guard",
+     lambda td: dict(_edit(_write(os.path.join(td, "NEXT_SESSION_PROMPT.md"),
+                                  "# Next session\n\nresume from here\n"), td, "fa-c10"),
+                     transcript_path=_transcript(td, [
+                         {"type": "text", "text": "wrapping up, writing the close signal"}]))),
 )

@@ -83,11 +83,20 @@ def wired_scripts() -> dict:
     return out
 
 
-def run_entry(script: str, payload: dict, cwd: str, state: str, ledger: str):
+def run_entry(script: str, payload: dict, cwd: str, state: str, ledger: str, extra_env=None):
     """Run one hook through its real entry point. Returns (rc, stdout, stderr, ledger rows)."""
     env = dict(os.environ)
     env["UNBLUFF_STATE_DIR"] = state
     env["UNBLUFF_LEDGER_PATH"] = ledger
+    # [2026-08-13] memory_hygiene_guard resolves a per-project memory dir under the PROJECTS
+    # ROOT, which defaults to the real ~/.claude/projects. Left unset, this tool's answer for
+    # that hook would depend on the maintainer's own machine - a measurement nobody else can
+    # reproduce, and the same "read/write the user's real state" class as the marker dir it
+    # was fixed for earlier today. Isolated per entry, like every other piece of hook state.
+    env["UNBLUFF_PROJECTS_ROOT"] = os.path.join(os.path.dirname(state), "_projects")
+    os.makedirs(env["UNBLUFF_PROJECTS_ROOT"], exist_ok=True)
+    if extra_env:
+        env.update(extra_env)
     try:
         p = subprocess.run([sys.executable, os.path.join(REPO, "hooks", script)],
                            input=json.dumps(payload), capture_output=True, text=True,
@@ -186,8 +195,12 @@ def score():
                 state = os.path.join(td, "_state")
                 os.makedirs(state, exist_ok=True)
                 ledger = os.path.join(td, "_ledger.jsonl")
-                payload = build(td)
-                rc, _out, err, _rows = run_entry(script, payload, td, state, ledger)
+                # build() returns a payload, or (payload, extra_env) when the entry needs to
+                # point a hook at a fixture root - kept optional so the 15 entries that need
+                # no environment stay one-liners.
+                built = build(td)
+                payload, entry_env = built if isinstance(built, tuple) else (built, None)
+                rc, _out, err, _rows = run_entry(script, payload, td, state, ledger, entry_env)
                 did = fired(rc, err)
                 if must_fire:
                     c = controls.setdefault(unit, {"total": 0, "fired": 0})
