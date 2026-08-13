@@ -230,9 +230,17 @@ def main() -> int:
     print("  NOT DRIVEN: SessionStart - %s" % UNDRIVEN_REASON)
     print()
 
-    print("%-14s %10s %12s %10s  %s" % ("hook", "exercised", "FALSE ALARM", "rate", "control"))
-    unmeasured, alarms = [], []
-    for hook in sorted(set(per_hook) | set(controls)):
+    # EVERY hook in the derived roster gets a row, including ones no corpus entry exercises.
+    # [source-coverage 2026-08-13] Reporting only the hooks that HAPPEN to be covered made the
+    # results table its own denominator: the roster held 11 and the table printed 8, so
+    # post_tooluse_dispatcher, close_skills_guard and stop_dispatcher were absent rather than
+    # visibly uncovered. A reader counting rows would infer the wrong population - which is the
+    # exact failure rule 4 exists to prevent, committed by the tool that states rule 4.
+    roster = sorted({unit_name(s) for names in entrypoint.values() for s in names})
+    print("%-24s %10s %12s %14s  %s"
+          % ("hook", "exercised", "FALSE ALARM", "rate", "control"))
+    unmeasured, alarms, uncovered = [], [], []
+    for hook in sorted(set(roster) | set(per_hook) | set(controls)):
         h = per_hook.get(hook, {"exercised": 0, "false_alarms": []})
         c = controls.get(hook, {"total": 0, "fired": 0})
         n, fa = h["exercised"], len(h["false_alarms"])
@@ -241,15 +249,24 @@ def main() -> int:
             unmeasured.append(hook)
         if fa:
             alarms.extend((hook, name, msg) for name, msg in h["false_alarms"])
-        print("%-14s %10d %12d %10s  %d/%d fired"
+        if n == 0 and c["total"] == 0:
+            uncovered.append(hook)
+            rate = "NO-CORPUS-ENTRY"
+        print("%-24s %10d %12d %14s  %d/%d fired"
               % (hook, n, fa, rate, c["fired"], c["total"]))
 
     print()
     for hook, name, msg in alarms:
         print("FALSE ALARM: %s fired on %r -> %s" % (hook, name, msg or "(no message)"))
     for hook in unmeasured:
+        if hook in uncovered:
+            continue
         print("UNMEASURED: %s - no control fired, so a quiet result here is not evidence "
               "that it stays quiet; it may simply never have run" % hook)
+    for hook in uncovered:
+        print("NO CORPUS ENTRY: %s is WIRED but no corpus entry exercises it - it is not "
+              "measured, and it is listed here so the table cannot become its own denominator"
+              % hook)
 
     # A control that does not fire means the harness never reached the hook. Reporting a rate
     # anyway is the failure this tool exists to prevent, so it is an ERROR, not a footnote.
@@ -258,8 +275,18 @@ def main() -> int:
         print("\nHARNESS ERROR: control(s) for %r never fired - the payload shape is wrong or "
               "the hook is unreachable, and every quiet result above is an artefact" % dead)
         return 1
-    print("\nscored %d hook(s); %d UNMEASURED; %d false alarm(s) on %d ordinary entr(ies)"
-          % (len(per_hook), len(unmeasured), len(alarms), len(negatives)))
+    # The three buckets are computed as SETS and asserted to partition the roster. They were
+    # briefly subtracted as counts, and because an uncovered hook lands in BOTH `unmeasured`
+    # and `uncovered` the subtraction double-counted and reported 1 MEASURED where there were
+    # 4 - a denominator bug in the tool whose fourth rule is "print the denominator".
+    no_entry = set(uncovered)
+    unproven = set(unmeasured) - no_entry
+    measured = set(roster) - unproven - no_entry
+    assert len(measured) + len(unproven) + len(no_entry) == len(roster), "buckets must partition"
+    print("\n%d wired hook(s) in the derived roster = %d MEASURED + %d UNMEASURED (no firing "
+          "control) + %d NO CORPUS ENTRY; %d false alarm(s) on %d ordinary entr(ies)"
+          % (len(roster), len(measured), len(unproven), len(no_entry),
+             len(alarms), len(negatives)))
     return 1 if alarms else 0
 
 

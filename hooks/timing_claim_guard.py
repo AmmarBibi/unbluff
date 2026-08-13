@@ -260,6 +260,26 @@ def selftest() -> int:
         return json.dumps({"session_id": sid, "tool_name": "Write",
                            "tool_input": {"file_path": p}})
 
+    # [MEASURED 2026-08-13] The env var is the ONLY isolation a harness has, and this hook was
+    # the one that ignored it. Assert it BEFORE the override below, because that override sets
+    # MARKER_DIR directly and would mask a regression that dropped the env lookup entirely -
+    # a probe that cannot fail on the defect it exists for is the hollow-pin class this repo
+    # keeps digging out (mode 1: green for an unrelated reason).
+    _env_probe = os.path.join(td, "envstate")
+    _real_env = os.environ.get("UNBLUFF_STATE_DIR")
+    os.environ["UNBLUFF_STATE_DIR"] = _env_probe
+    try:
+        if os.path.dirname(_marker("envcheck")) != _env_probe:
+            fails.append("UNBLUFF_STATE_DIR is IGNORED: the marker resolved to %r, not %r. No "
+                         "harness can isolate this hook, and measuring it writes into the "
+                         "user's real state dir" % (os.path.dirname(_marker("envcheck")),
+                                                    _env_probe))
+    finally:
+        if _real_env is None:
+            os.environ.pop("UNBLUFF_STATE_DIR", None)
+        else:
+            os.environ["UNBLUFF_STATE_DIR"] = _real_env
+
     global MARKER_DIR
     real_marker_dir = MARKER_DIR
     MARKER_DIR = os.path.join(td, "state")

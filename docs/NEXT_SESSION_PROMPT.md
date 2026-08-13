@@ -9,17 +9,33 @@ Paste the block below to start.
 ---
 
 ```
-unbluff - STEP 3 of the v1.0 finish plan, RESUMING mid-step.
+unbluff - the v1.0 finish plan. PGG-PS and STEP 4's bounded half are DONE; step 3's
+MEDIUM/LOW tail and criterion 3's Stop-class controls are next.
 Repo C:\Users\ammar\Downloads\unbluff.
 
-=== STATE, verified live 2026-08-12 ===
+=== STATE, verified live 2026-08-13 ===
 
-HEAD 0ef4e2b on main, PUSHED, CI GREEN (17 jobs, 0 failed). 17 commits landed 2026-08-12.
-run_selftests 33/33 exit 0 on an IDLE machine AND on a pytest-LESS interpreter.
-Integration 30/30. Criterion 4 CLOSED. Mutation harness 179 entries, 180 anchors.
-Full sweep 171 of 173 executed, 0 SURVIVED, 0 unproven (re-run it: the roster has grown since).
-Normal sweep runtime is ~30 MIN (measured 1770s and 1960s); far past that is a HANG,
-not a slow run - one sat at 48h with 2.2s of CPU and a 0-byte file.
+HEAD 48b80fc on main. Suite 34/34 (a 34th gate landed: false-alarm-scorer).
+Integration 30/30. Criterion 4 CLOSED. Mutation harness 186 entries, 187 anchors.
+CI run 31680643338 green on d913dde, all 17 jobs - counted by conclusion, not read off a badge.
+
+CRITERION 3 IS NO LONGER ASSERTED, IT IS MEASURED - and only partly. 0.0% each for
+piped_gate_guard / plan_defer_guard / numbers_match_on_write / timing_claim_guard, every one
+with a FIRING control. FOUR Stop-class hooks are UNMEASURED and the tool says so rather than
+printing 0% for a hook it cannot show is reachable. That is the next criterion-3 job.
+
+DO NOT TRUST THE FIRE LEDGER'S ZEROS. The dispatchers record each sub-hook's EXIT CODE, and
+several guards are ADVISORY (stderr + rc 0). "timing: 0 fires in 1252 invocations" means never
+BLOCKED, not never fired. The Opus-5 retirement pass MUST account for this or it will retire a
+guard on a false zero. Ledger detail in coverage_ledger_2026-08-09.md section N4.
+
+SWEEP RUNTIME. ~30 MIN when the box is IDLE (1770s, 1960s) - those two figures are CARRIED
+FORWARD from 2026-08-12 and were NOT re-measured on 08-13. What WAS measured on 08-13 is the
+loaded case: a sweep run ALONGSIDE other work took 44 min to reach 68 of the 179 entries then
+in the roster - that is LOAD, not a hang.
+Distinguish them by CPU: the 48h incident had 2.2s of CPU total; a working run has a child
+burning CPU continuously. Killing one leaves orphans - grandchildren survive the parent kill,
+and ~26 scratch dirs are left in TEMP because the finally: rmtree never runs.
 
 FIRST THING TO DO ON RESUME:
   1. `git status --porcelain` and `git log --oneline -8`. Expect clean at 0ef4e2b.
@@ -216,6 +232,14 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             FTB-RC4, FTB-MASK, FTB-SPELL, FTB-CFG, FTB-LAYOUT, FTB-GATES, FTB-MARKER,
             FTB-CAP, ROSTER-DERIVE, WT-CAUSE, RICH-CI, CI-JOBS + the budget control.
             8 remain, triaged with severities in ledger N3, none CRITICAL or HIGH.
+            [CORRECTED 08-13, and the correction matters because this is criterion 2's own
+            denominator] The 24 reconcile BY ROW as 16 BUILT + 1 FINALIZED-EXCLUSION (L25,
+            pytest rc 3 still blocks, decided deliberately) + 7 OPEN. So it is SEVEN open, not
+            eight - the eighth was a decision already taken. The seven are now ENUMERATED in
+            ledger N4 (L23, L34, L35, L37, L38, L39, L40) with severities; before 08-13 they
+            were nowhere enumerated at all, and N3's list of them named five items that the
+            SAME table marks BUILT. None is CRITICAL or HIGH, so step 3 stays CLOSEABLE - the
+            conclusion survived, the premise did not.
           [NEW, SCHEDULED] VERIFY-TARGET-GATE - hollow-pin mode 5 is PROSE, not a mechanism.
             A mutation whose VERIFY TARGET has no --selftest verifies nothing and reports
             SURVIVED (WT-1 did, while its probe worked). ~15 lines in check_mutation_anchors,
@@ -226,7 +250,30 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             Build the GATE, then split.
           - ENC-1: 0 of 25 hooks reconfigure stdout. cp1252 + non-ASCII path = half-printed
             report then exit 0. Silent, not a visible crash.
-          - PGG-PS: piped_gate_guard is registered matcher "Bash"; never fires for PowerShell.
+          [DONE 08-13] PGG-PS (was HIGH). Both halves - install now DERIVES its PreToolUse
+            matcher from piped_gate_guard.SHELL_TOOLS, and dialect() picks PowerShell
+            semantics off tool_name. The PRESCRIBED FIX WAS REJECTED ON MEASUREMENT: it named
+            Select-Object -Last a status-eater; measured across 15 consumers it PRESERVES the
+            exit code, and flagging it would have built a criterion-3 false alarm into a
+            criterion-2 fix. Only -First/-Index (truncate, gate never finishes, -1) and native
+            consumers like findstr destroy the evidence; sort/tee are PowerShell aliases for
+            PRESERVING cmdlets and are exempted there. Pinned PG6/PG7/PG8/PGG-PS-1, PG4
+            repointed. Ledger N4.
+          [NEW 08-13, SCHEDULED] FA-MEMHYG (MEDIUM) - the FIRST false alarm criterion 3 has
+            ever caught. memory_hygiene_guard fires on a turn ending in a CLEAN project
+            ("no memory dir for this project"), i.e. every turn end for any user without one.
+            Not patched with the finding, deliberately: it is genuinely ambiguous - this
+            repo's rule is that a check which CANNOT RUN must say so. fast_test_on_stop
+            already solved the identical tension with once-per-(path, reason) notices via
+            _nogate_reason(); that pattern is the fix.
+          [NEW 08-13, SCHEDULED] LEDGER-POLLUTION - a selftest wrote 2 records into the REAL
+            fire_ledger.jsonl (sub-hook "newg", ModuleNotFoundError: new_guard, cwd ""). The
+            Opus-5 item below says to READ that ledger rather than reason about it; an
+            instrument test runs can write to is not a clean evidence base.
+          [NEW 08-13, SCHEDULED] The 800-line rule is now broken by SIX files, not five, and
+            THREE of the increases are 08-13's: mutation_check 1309, pre_push_gate_selftest
+            1109, fast_test_on_stop_selftest 1003, install 927, duplicate_registration_check
+            858 (NEWLY over), fast_test_on_stop 832. Build the GATE, then split.
           - CA-SELFREF (now THIRD instance and SELF-PROPAGATING: each time the defect is
             documented, the documentation becomes a new instance), --dry-run, settings.json
             backup.
@@ -276,7 +323,26 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
           - The `exit 7` probe's discrimination is unpinned - needs an injectable runner.
           [criterion 2]
 
-  STEP 4  Build criterion 3 for real.
+  STEP 4  Build criterion 3 for real. **BOUNDED HALF DONE 2026-08-13; the tail is scheduled.**
+          [DONE] 4a the PAYLOAD-DRIVEN scorer + 4b a first corpus: tools/score_false_alarms.py
+            and tests/false_alarm_corpus.py, registered as gate `false-alarm-scorer`
+            (suite 33 -> 34). MEASURED: piped_gate_guard / plan_defer_guard /
+            numbers_match_on_write / timing_claim_guard all 0.0% on 15 ordinary entries, each
+            with a FIRING control. Pinned FA-1, FA-2. Denominator PRINTED and partitioned:
+            11 wired hooks = 4 MEASURED + 4 UNMEASURED + 3 NO-CORPUS-ENTRY.
+          [SCHEDULED - the criterion-3 TAIL, ~1 session] Controls for the four Stop-class
+            hooks (show_your_proof, meta_audit_on_stop, memory_hygiene_guard,
+            fast_test_on_stop) and corpus entries for the three NO-CORPUS-ENTRY hooks
+            (stop_dispatcher, post_tooluse_dispatcher, close_skills_guard). This is the part
+            that is bigger than "write more entries": a control for fast_test_on_stop or
+            show_your_proof needs a realistic failing-test repo and a realistic transcript,
+            not a two-line fixture. Until then those hooks are UNMEASURED and the tool says
+            so rather than printing a 0% it has not earned.
+          [SCHEDULED] Decide whether pre_push_gate belongs in criterion 3's population. It can
+            block a user's push but is not wired through desired_groups(), so the derived
+            roster never sees it - a gap the roster cannot find by construction.
+          The denominator question is SETTLED (ledger N4): 25 / 24 / 22 are three different
+          populations, all correct, and NONE of them is the right one for a false-alarm rate.
           4a: a PAYLOAD-DRIVEN scorer. The existing machinery scores 0 of 16 REQUIRED_HOOKS -
               13 read sys.stdin and none expose slicing_offenders(), the only entrypoint
               score_corpus.py calls. "The corpus machinery already exists" was FALSE.

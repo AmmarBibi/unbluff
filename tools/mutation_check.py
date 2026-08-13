@@ -720,6 +720,14 @@ MUTATIONS = [
      "read as a dispatcher fan-out roster again, so a hook that imports nothing is reported "
      "as double-registering a phantom module",
      [("    if not _imports_a_named_module(tree):", "    if False:")], False),
+    # [MEASURED 2026-08-13] The only stateful hook that ignored UNBLUFF_STATE_DIR. Dropping the
+    # env lookup means no harness can isolate it and measuring it writes into the user's real
+    # ~/.claude/state - which is how its once-per-session marker silenced a control across
+    # scorer runs and nearly produced a false 0%.
+    ("timing_claim_guard", "TC-ENV", "the marker directory stops honouring UNBLUFF_STATE_DIR, "
+     "so the hook cannot be isolated and measuring it pollutes the user's real state dir",
+     [('    return os.environ.get("UNBLUFF_STATE_DIR") or MARKER_DIR', "    return MARKER_DIR")],
+     False),
     # [criterion 3] The false-alarm scorer. Both mutations attack the thing that makes its
     # numbers mean anything - not its arithmetic, but its refusal to report a rate it has not
     # earned. Both failure modes below actually occurred while it was being written.
