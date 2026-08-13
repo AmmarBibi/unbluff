@@ -86,15 +86,7 @@ def wired_scripts() -> dict:
 def run_entry(script: str, payload: dict, cwd: str, state: str, ledger: str, extra_env=None):
     """Run one hook through its real entry point. Returns (rc, stdout, stderr, ledger rows)."""
     env = dict(os.environ)
-    env["UNBLUFF_STATE_DIR"] = state
-    env["UNBLUFF_LEDGER_PATH"] = ledger
-    # [2026-08-13] memory_hygiene_guard resolves a per-project memory dir under the PROJECTS
-    # ROOT, which defaults to the real ~/.claude/projects. Left unset, this tool's answer for
-    # that hook would depend on the maintainer's own machine - a measurement nobody else can
-    # reproduce, and the same "read/write the user's real state" class as the marker dir it
-    # was fixed for earlier today. Isolated per entry, like every other piece of hook state.
-    env["UNBLUFF_PROJECTS_ROOT"] = os.path.join(os.path.dirname(state), "_projects")
-    os.makedirs(env["UNBLUFF_PROJECTS_ROOT"], exist_ok=True)
+    env.update(entry_env(state, ledger))
     if extra_env:
         env.update(extra_env)
     try:
@@ -141,6 +133,24 @@ def fired(rc, err) -> bool:
     fired". Retiring a guard on that number would have been retiring it on a false zero.
     """
     return rc not in (0, None) or bool((err or "").strip())
+
+
+def entry_env(state: str, ledger: str) -> dict:
+    """Every piece of hook state this tool redirects, so a measurement is REPRODUCIBLE.
+
+    A FUNCTION rather than three inline assignments, so its guarantee can be asserted directly
+    (see the selftest) instead of only by observing a hook's behaviour afterwards.
+
+    UNBLUFF_PROJECTS_ROOT is the one that is easy to forget: memory_hygiene_guard resolves a
+    per-project memory dir under it and it defaults to the REAL ~/.claude/projects, so leaving
+    it unset made that hook's rate depend on whose machine ran the tool. Same class as the
+    marker directory fixed in timing_claim_guard on the same day.
+    """
+    projects = os.path.join(os.path.dirname(state), "_projects")
+    os.makedirs(projects, exist_ok=True)
+    return {"UNBLUFF_STATE_DIR": state,
+            "UNBLUFF_LEDGER_PATH": ledger,
+            "UNBLUFF_PROJECTS_ROOT": projects}
 
 
 def repeats_in_session(script, payload, cwd, state, ledger, extra_env=None) -> bool:
@@ -410,6 +420,21 @@ def selftest() -> int:
         if repeats_in_session("memory_hygiene_guard.py", _mp, _td, _st, _lg, _env):
             fails.append("a guard WITH a once-per-session marker repeated on the second run - "
                          "either the marker broke or this probe is not sharing state")
+
+    # (d) ISOLATION, which is what makes any of these numbers PORTABLE. Without it
+    # memory_hygiene_guard resolves against the maintainer's real ~/.claude/projects, so the
+    # answer depends on whose machine ran the tool - a regression nobody would notice, because
+    # the table would still look perfectly reasonable.
+    with _tf.TemporaryDirectory(prefix="unbluff-iso-") as _td2:
+        _st2 = os.path.join(_td2, "state")
+        _env2 = entry_env(_st2, os.path.join(_td2, "l.jsonl"))
+        real_home = os.path.join(os.path.expanduser("~"), ".claude")
+        for var in ("UNBLUFF_STATE_DIR", "UNBLUFF_LEDGER_PATH", "UNBLUFF_PROJECTS_ROOT"):
+            if var not in _env2:
+                fails.append("%s is not isolated - the hook would read or write the user's "
+                             "real state, and the measurement would not reproduce" % var)
+            elif os.path.abspath(_env2[var]).startswith(os.path.abspath(real_home)):
+                fails.append("%s points INSIDE the real ~/.claude (%r)" % (var, _env2[var]))
 
     # the roster must be DERIVED and non-empty, or rule 4 is decorative
     wired = scored_scripts()

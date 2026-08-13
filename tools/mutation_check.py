@@ -734,6 +734,14 @@ MUTATIONS = [
     ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
      "anyway, so silence from an unreachable hook reads as a perfect score",
      [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    ("tools/score_false_alarms", "FA-4", "the projects root stops being isolated, so "
+     "memory_hygiene_guard resolves against the REAL ~/.claude/projects and every rate this "
+     "tool prints depends on whose machine ran it",
+     [('    return {"UNBLUFF_STATE_DIR": state,\n'
+       '            "UNBLUFF_LEDGER_PATH": ledger,\n'
+       '            "UNBLUFF_PROJECTS_ROOT": projects}',
+       '    return {"UNBLUFF_STATE_DIR": state,\n'
+       '            "UNBLUFF_LEDGER_PATH": ledger}')], False),
     ("tools/score_false_alarms", "FA-3", "the NAG check stops re-running, so a guard that "
      "objects once and then goes silent is reported identically to one that repeats every "
      "turn - the distinction that decides whether a guard gets switched off",

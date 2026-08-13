@@ -21,7 +21,10 @@ All notable changes to this project are documented here. Format loosely follows
   and silence from a correct one are the same output.
 
 - **Criterion 3's population is now FULLY measured: 11 of 11 wired hooks**, with a firing
-  control each. Nine sit at **0.0%** on 21 ordinary entries. The two that fire -
+  control each. Nine measure **0.0%**. The corpus holds 21 ordinary entries, but each hook's
+  denominator is only the subset that DECLARES it (6, 2 or 1) - an entry is never counted
+  against a hook the event does not route to, which would inflate every denominator and dilute
+  every rate it prints. The two that fire -
   `memory_hygiene_guard` and the `stop_dispatcher` that surfaces it - do so **once per session
   and then go silent**, so the suite has **zero NAGGING false alarms**.
   The scorer now measures that distinction directly: every false alarm is re-run with the SAME

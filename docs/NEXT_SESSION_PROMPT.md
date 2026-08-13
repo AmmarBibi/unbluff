@@ -259,13 +259,16 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             consumers like findstr destroy the evidence; sort/tee are PowerShell aliases for
             PRESERVING cmdlets and are exempted there. Pinned PG6/PG7/PG8/PGG-PS-1, PG4
             repointed. Ledger N4.
-          [NEW 08-13, SCHEDULED] FA-MEMHYG (MEDIUM) - the FIRST false alarm criterion 3 has
-            ever caught. memory_hygiene_guard fires on a turn ending in a CLEAN project
-            ("no memory dir for this project"), i.e. every turn end for any user without one.
-            Not patched with the finding, deliberately: it is genuinely ambiguous - this
-            repo's rule is that a check which CANNOT RUN must say so. fast_test_on_stop
-            already solved the identical tension with once-per-(path, reason) notices via
-            _nogate_reason(); that pattern is the fix.
+          [FINALIZED-EXCLUSION 08-13] FA-MEMHYG - reported as the first criterion-3 false
+            alarm, then REFUTED BY MEASUREMENT one step before the fix was built. The claim
+            was "every turn end"; measured over three consecutive turns sharing one session,
+            turn 1 FIRES and turns 2 and 3 are SILENT - a once-per-session marker already
+            bounds it. The 100% was an artefact of the SCORER, which gives each corpus entry
+            a fresh state dir and thereby defeats that suppression. The behaviour is
+            deliberate and the code says why: silence there was a REAL prior bug. The genuine
+            finding was in the instrument, and it is fixed: the scorer now separates "once
+            per session, then SILENT" from "NAGS", and under that distinction the suite has
+            ZERO nagging false alarms. Pinned FA-3, which SURVIVED its first pin.
           [NEW 08-13, SCHEDULED] LEDGER-POLLUTION - a selftest wrote 2 records into the REAL
             fire_ledger.jsonl (sub-hook "newg", ModuleNotFoundError: new_guard, cwd ""). The
             Opus-5 item below says to READ that ledger rather than reason about it; an
@@ -330,7 +333,10 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             numbers_match_on_write / timing_claim_guard all 0.0% on 15 ordinary entries, each
             with a FIRING control. Pinned FA-1, FA-2. Denominator PRINTED and partitioned:
             11 wired hooks = 4 MEASURED + 4 UNMEASURED + 3 NO-CORPUS-ENTRY.
-          [SCHEDULED - the criterion-3 TAIL, ~1 session] Controls for the four Stop-class
+          [DONE 08-13 - the criterion-3 TAIL, well under its ~1-session estimate because the
+            fixtures ALREADY EXISTED and were reused: integration D1's transcript and E1's
+            `.claude/fast-test.cmd` trick, so no control needs pytest and none can go flaky
+            on a pytest-less runner] Controls for the four Stop-class
             hooks (show_your_proof, meta_audit_on_stop, memory_hygiene_guard,
             fast_test_on_stop) and corpus entries for the three NO-CORPUS-ENTRY hooks
             (stop_dispatcher, post_tooluse_dispatcher, close_skills_guard). This is the part
