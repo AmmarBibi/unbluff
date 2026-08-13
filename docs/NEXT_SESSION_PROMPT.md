@@ -51,10 +51,13 @@ it must be genuinely good for other people. It is my #1 project, worked on along
      *** STOPPING RULE ADDED 2026-08-12, and it is the whole point of the amendment. ***
      As written before, this criterion was UNFALSIFIABLE - there is always another defect -
      so step 3 could not end, it could only be abandoned. That is what a bug spiral feels
-     like from inside. Severity + a defined population makes it DECIDABLE. This does not
-     narrow the goal: nothing is dropped, MEDIUM/LOW become RECORDED rather than unbounded
-     hand-hunting. A recorded known-MEDIUM is honest; a hunt that stops when someone tires
-     is not.
+     like from inside. Severity + a defined population makes it DECIDABLE.
+     BE PRECISE ABOUT WHAT MOVED, because the sloppy version of this sentence is itself the
+     drift: the SHIP BAR moved (MEDIUM/LOW no longer block the tag). The SCOPE OF WORK did
+     not - nothing leaves the ledger, every MEDIUM/LOW keeps its severity and stays
+     SCHEDULED. Saying "this does not narrow the goal" full stop would be false; saying it
+     narrows what BLOCKS THE TAG while changing nothing about what is TRACKED is true.
+     A recorded known-MEDIUM is honest; a hunt that stops when someone tires is not.
   3. Each hook's FALSE-ALARM rate on ordinary correct code is MEASURED and recorded. (This is
      the criterion that decides whether it is good for other people: a guard that fires on
      correct code gets switched off, which is worse than no guard.)
@@ -101,6 +104,27 @@ THREE changes. The evidence for all three is this session's own record.
     - which the standing rule already predicts. FULL rigor stays for product logic and
     anything a user reaches. For INSTRUMENT fixes: reuse existing probes, do not invent new
     scaffolding per item. This is the rigor-right-sizing rule, applied.
+
+(4) NEW ITEM - ARE THESE GUARDS STILL NEEDED ON OPUS 5? Most of this suite was designed
+    against an older model's failure modes. A guard that NEVER FIRES is not free: it costs a
+    process per matching call, it is code that must stay correct, and it dilutes attention from
+    the guards that do fire. Schedule an evidence-based pass:
+      - For each of the 25 hooks, ask what BEHAVIOUR it guards and whether that behaviour still
+        occurs. Do not answer from opinion - the fire-ledger JSONL the dispatchers already write
+        records what actually fired. READ IT rather than reasoning about it.
+      - Candidates worth examining first, because they guard model-behaviour rather than
+        mechanical facts: rate_prompt, show_your_proof, timing_claim_guard, plan_defer_guard,
+        memory_hygiene_guard. Against them, the ones guarding MECHANICAL facts - fast_test,
+        pre_push_gate, hook_health_check, duplicate_registration_check, piped_gate_guard - are
+        model-independent and almost certainly stay.
+      - A hook with ZERO fires across the recorded history is a RETIREMENT candidate, not a
+        proven-unnecessary one: check whether it never fired because the behaviour stopped, or
+        because the hook is broken/unreachable. Those look identical from a zero count, and
+        this session found FOUR guards that were silently not running.
+      - Same question for the 4 skills and the rules. Retiring one is a criterion-1 event: its
+        README claims must go with it.
+    Materiality: MEDIUM, but it SHRINKS the surface every other criterion has to cover, so it
+    is worth doing BEFORE step 5's 243-row disposition rather than after.
 
 NOT CHANGED: nothing is abandoned. The 8 findings keep their severities in ledger N3, and
 everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are untouched.
