@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); this project uses [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **`PGG-PS` - the piped-gate guard did not exist for PowerShell users.** It was registered
+  `matcher: "Bash"`, so on Windows - where PowerShell is the primary shell - the guard never ran
+  at all, and its vocabulary was POSIX-only besides. Two independent halves, fixed and pinned
+  separately because they fail separately: the **wiring** (`install.py` now DERIVES its
+  PreToolUse matcher from `piped_gate_guard.SHELL_TOOLS`, so a shell the hook is wired for and a
+  shell it can reason about cannot drift apart) and the **vocabulary** (`dialect()` selects
+  PowerShell semantics from the payload's `tool_name`).
+  **The prescribed fix was treated as a hypothesis and REJECTED on measurement.** It named
+  `Select-Object -First/-Last` as PowerShell "status-eaters". Measured across 15 consumers on
+  2026-08-13, PowerShell is the OPPOSITE of sh: `$LASTEXITCODE` is set only by NATIVE
+  executables, so `Select-String`, `Measure-Object`, `Out-File`, `Tee-Object`, `Sort-Object`,
+  `Get-Unique` and `Select-Object -Last/-Skip` all PRESERVE a gate's exit code. Flagging `-Last`
+  would have built a criterion-3 false alarm into the fix for a criterion-2 defect. Exactly two
+  shapes destroy the evidence: `Select-Object -First/-Index`, which TRUNCATES the pipeline and
+  tears the gate down before it finishes (measured `$LASTEXITCODE = -1` with the gate's own
+  completion marker absent - strictly worse than sh, because there is no verdict to discard),
+  and a NATIVE consumer such as `findstr` (measured: the gate's exit 3 became 0, a silent
+  green). `sort` and `tee` are ALIASES for status-preserving cmdlets in PowerShell and are
+  exempted there while remaining eaters in sh. Pinned `PG6`, `PG7`, `PG8`, `PGG-PS-1`; `PG4`
+  repointed after the fix deleted the line it anchored.
+- **`duplicate_registration_check` read any ALL-CAPS tuple of strings as a dispatcher fan-out
+  roster.** It therefore believed `piped_gate_guard` dispatched to modules named `head.py`,
+  `tail.py` and `sort.py`. That was wrong SILENTLY - phantom names collided with nothing - until
+  one name appeared in a second vocabulary tuple in the same file, at which point the phantom
+  was reported as "registered 2 times" and the hook whose whole job is to be silent on a clean
+  install went red (integration scenario C2). Narrowed BEHAVIOURALLY: a file that never calls
+  `import_module` cannot dispatch to one. The three synthetic fixtures were roster-only files
+  that could never have run a sub-hook; they now carry a real dispatch call, so they still
+  prove that NAMING does not decide detection. Pinned `DR-VOCAB`.
+
 ## [1.3.1] - 2026-08-08
 
 The 1.3.1 notes below were written on 2026-07-31 and the release was never tagged. Eight further

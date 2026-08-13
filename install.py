@@ -66,6 +66,38 @@ def _cmd(script: str) -> str:
     return f'{PY} "{os.path.join(HOOKS_DIR, script)}"'
 
 
+def shell_tool_matcher() -> str:
+    """The PreToolUse matcher, DERIVED from piped_gate_guard's own SHELL_TOOLS.
+
+    [PGG-PS] This was the literal string "Bash", and that is the whole defect: a ROSTER
+    standing in for a CONCEPT (a shell), inside the guard built to catch discarded exit
+    codes. On Windows PowerShell is the primary shell, so the guard was blind exactly where
+    it was needed most - and nothing failed, because nothing asserted the matcher's VALUE.
+    tests/test_integration.py compares the set of group IDs and never looks at this string.
+
+    Reading the tuple from the guard means a shell this hook is WIRED for and a shell it can
+    REASON about cannot drift apart. The alternative - a second tuple here - is the twin
+    roster this repo has dug out four times (REQUIRED_HOOKS, _SH_SITES_REQUIRED, the
+    integration count, ROSTER-DERIVE).
+    """
+    return "|".join(_load_guard_shell_tools())
+
+
+def _load_guard_shell_tools() -> tuple:
+    """piped_gate_guard.SHELL_TOOLS, read from the guard itself. Raises rather than guessing."""
+    import importlib.util
+
+    path = os.path.join(HOOKS_DIR, "piped_gate_guard.py")
+    spec = importlib.util.spec_from_file_location("_unbluff_piped_gate_guard", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    tools = tuple(getattr(mod, "SHELL_TOOLS", ()))
+    if not tools:
+        raise ValueError("piped_gate_guard.SHELL_TOOLS is missing or empty - the guard would "
+                         "be wired to nothing, which is PGG-PS with a different spelling")
+    return tools
+
+
 def desired_groups() -> dict:
     """The hook groups this suite installs, keyed by event."""
     return {
@@ -102,13 +134,14 @@ def desired_groups() -> dict:
         # detection because their filenames did not advertise them. A hook nobody wires is a
         # hook that does not exist, however green its selftest is.
         "PreToolUse": {
-            "matcher": "Bash",
+            "matcher": shell_tool_matcher(),
             "hooks": [{"type": "command", "command": _cmd("piped_gate_guard.py"),
                        "timeout": 10}],
             "id": ID_PREFIX + "piped-gate",
-            "description": "Block a Bash command that pipes a GATE into head/tail/grep, "
-                           "because the pipeline returns the last command's exit status and "
-                           "the gate's real result is discarded.",
+            "description": "Block a shell command that destroys a GATE's exit status - in sh "
+                           "by piping it into head/tail/grep, in PowerShell by truncating it "
+                           "with Select-Object -First, which tears the gate down before it "
+                           "finishes.",
         },
         "PostToolUse": {
             "matcher": "Edit|Write|MultiEdit",
@@ -768,11 +801,41 @@ def selftest() -> int:
     except Exception as exc:                      # a probe that dies has verified NOTHING
         fails.append("the roster-derivation probe raised %r, so it verified nothing" % (exc,))
 
+    # [PGG-PS] The MATCHER's VALUE, which nothing asserted until 2026-08-13 - and that is
+    # precisely why the guard shipped blind to PowerShell for its whole life.
+    # tests/test_integration.py compares the SET OF GROUP IDS, so a matcher naming the wrong
+    # shell is invisible to it: the group is present, correctly named, and routes nothing.
+    matcher_cases = 0
+    try:
+        import re as _re
+
+        pre = desired_groups()["PreToolUse"]["matcher"]
+        guard_tools = _load_guard_shell_tools()
+        for tool in guard_tools:
+            matcher_cases += 1
+            if not _re.fullmatch(pre, tool):
+                fails.append("the PreToolUse matcher %r does not route the %r tool, so the "
+                             "piped-gate guard NEVER RUNS for that shell's users - which is "
+                             "PGG-PS verbatim" % (pre, tool))
+        # the regression itself, named: the literal that shipped for months
+        if pre == "Bash":
+            fails.append("the PreToolUse matcher is the bare literal 'Bash' again - PGG-PS")
+        # and the other direction, so widening cannot become 'route everything'
+        if _re.fullmatch(pre, "Edit") or _re.fullmatch(pre, "Write"):
+            matcher_cases += 1
+            fails.append("the PreToolUse matcher %r routes a NON-shell tool - the guard would "
+                         "run on every edit and its false-alarm rate stops meaning anything"
+                         % (pre,))
+    except Exception as exc:
+        fails.append("the matcher probe raised %r, so it verified nothing" % (exc,))
+    if not matcher_cases:
+        fails.append("the matcher probe ran ZERO cases - it is checking nothing")
+
     # DENOMINATOR, printed: a guard probed with zero cases is indistinguishable from a guard
     # that passed, which is the failure this whole repo is about.
     print("  [install-guard] %d hook + %d skill deleted-file case(s), %d synthetic, "
-          "%d user-data case(s), %d roster-derivation case(s)"
-          % (checked, skill_checked, synth, destroy, roster_cases))
+          "%d user-data case(s), %d roster-derivation case(s), %d matcher case(s)"
+          % (checked, skill_checked, synth, destroy, roster_cases, matcher_cases))
     if not roster_cases:
         fails.append("the roster-derivation probe ran ZERO cases - it is checking nothing")
     if not skill_checked:

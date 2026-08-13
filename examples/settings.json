@@ -53,7 +53,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -62,7 +62,7 @@
           }
         ],
         "id": "unbluff:piped-gate",
-        "description": "Block a Bash command that pipes a GATE into head/tail/grep, because the pipeline returns the last command's exit status and the gate's real result is discarded."
+        "description": "Block a shell command that destroys a GATE's exit status - in sh by piping it into head/tail/grep, in PowerShell by truncating it with Select-Object -First, which tears the gate down before it finishes."
       }
     ],
     "PostToolUse": [

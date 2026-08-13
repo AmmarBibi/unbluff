@@ -44,10 +44,46 @@ GATE_TOKENS = (
 STATUS_EATERS = (
     "head", "tail", "grep", "egrep", "fgrep", "wc", "sort", "uniq", "cut", "sed", "awk",
     "tee", "tr", "jq", "less", "more", "column", "rev", "xargs",
+    # `findstr` is Windows' grep and a NATIVE executable, so it sets the pipeline's status in
+    # any shell that can reach it. MEASURED 2026-08-13: the gate ran to completion and its
+    # exit 3 became 0 - the silent-green shape, identical to `| grep`.
+    "findstr",
 )
 
-# The command already protects the status - say nothing.
-PROTECTED = ("pipefail", "PIPESTATUS")
+# The command already protects the status - say nothing. `LASTEXITCODE` is PowerShell's
+# equivalent of reading ${PIPESTATUS[0]}; it is meaningless in sh, so ONE tuple serves both
+# dialects and the line below stays untouched (it is PG2's mutation anchor).
+PROTECTED = ("pipefail", "PIPESTATUS", "LASTEXITCODE")
+
+# --------------------------------------------------------------------------------------
+# PowerShell [PGG-PS]. The SAME hook, a DIFFERENT failure - and the difference was MEASURED
+# on 2026-08-13 across 15 consumers, not reasoned about, because reasoning gets it BACKWARDS.
+#
+# In sh, `gate | tail` returns TAIL's status: the gate FINISHES and its verdict is discarded.
+# In PowerShell, $LASTEXITCODE is set only by NATIVE executables, so a CMDLET consumer leaves
+# the gate's code intact - `gate | Select-String OK` still reports 3. MEASURED as preserving:
+# Select-String, Measure-Object, Out-File, Tee-Object, Sort-Object, ForEach-Object,
+# Where-Object, Out-Null, Out-String, Format-Table, Get-Unique, and Select-Object -Last/-Skip.
+# Flagging any of them would be a false alarm, and a guard that fires on correct work is
+# switched off within a week (B3-FP) - so the POSIX list is NOT reused unfiltered.
+#
+# Exactly TWO shapes destroy the evidence here:
+#   1. `Select-Object -First N` / `-Index N`, and the shipped `select` alias. These TRUNCATE
+#      the pipeline, which TEARS THE PRODUCER DOWN: measured $LASTEXITCODE = -1 with the
+#      gate's completion marker ABSENT. Strictly worse than the sh case - the gate never
+#      finished, so there is no verdict to discard. This is the shape V131 recorded by
+#      accident (`-1` while the gate itself printed OK).
+#   2. A NATIVE consumer, which sets $LASTEXITCODE itself exactly as in sh. `findstr` measured
+#      STATUS-REPLACED: the gate ran to completion and its 3 became 0 - a silent green.
+#
+# TWO POSIX SPELLINGS ARE TRAPS HERE: `sort` and `tee` are ALIASES for Sort-Object and
+# Tee-Object, both measured status-PRESERVING. They belong in STATUS_EATERS and are correct
+# there; carrying them into PowerShell would false-alarm on correct work.
+SHELL_TOOLS = ("Bash", "PowerShell")      # install.py DERIVES its PreToolUse matcher from this
+
+PS_SELECT = ("select-object", "select")   # the cmdlet and its shipped alias
+PS_TRUNCATING = ("-first", "-index")      # the parameters that tear the producer down
+PS_SAFE_ALIASES = ("sort", "tee")         # POSIX spellings that are SAFE cmdlets in PowerShell
 
 
 def _segments(command: str):
@@ -94,6 +130,11 @@ def _is_gate_token(tok: str, gate: str) -> bool:
     A gate is invoked as a SCRIPT PATH (`tools/no_regression.py`), a bare COMMAND (`pytest`),
     or a FLAG (`--selftest`) - so those are the only three shapes that count.
     """
+    # A PowerShell command names a script `tools\check_mutation_anchors.py`. os.path.basename
+    # splits on "\" ONLY when this hook happens to be running on Windows, so a backslash path
+    # is invisible on Linux - normalise first, and the answer stops depending on the box the
+    # guard runs on rather than the shell the command is written for.
+    tok = tok.replace("\\", "/")
     if tok.startswith("-"):
         return tok == gate
     if tok.endswith(".py"):
@@ -101,13 +142,47 @@ def _is_gate_token(tok: str, gate: str) -> bool:
     return os.path.basename(tok) == gate
 
 
-def piped_gates(command: str) -> list:
-    """[(gate_token, eater)] for every gate whose exit status this command discards.
+def _base(tok: str) -> str:
+    """Command name, separator-normalised, so the answer does not depend on the host OS."""
+    return os.path.basename(tok.replace("\\", "/"))
+
+
+def _eater(segment, dialect: str):
+    """The consumer in `segment` that destroys a gate's evidence, or None.
+
+    Returns (token, kind). The KIND is load-bearing because the two failures need different
+    fixes and different words:
+      "replaces"  the sh shape - the gate FINISHES and its exit code is overwritten
+      "truncates" the PowerShell -First shape - the gate is TORN DOWN and never finishes
+    """
+    # resolved past a leading env assignment or `sudo`-style prefix
+    words = [t for t in segment if "=" not in t.split(" ")[0] or t.startswith("-")]
+    lowered = [_base(w.lower()) for w in words]
+    if dialect == "powershell":
+        if any(w in PS_SELECT for w in lowered) and any(p in lowered for p in PS_TRUNCATING):
+            return (next(w for w, low in zip(words, lowered) if low in PS_SELECT), "truncates")
+        for w, low in zip(words, lowered):
+            if low in PS_SAFE_ALIASES:      # MEASURED status-preserving here - never flag
+                continue
+            if low in STATUS_EATERS:        # a NATIVE consumer behaves exactly as in sh
+                return (w, "replaces")
+        return None
+    for w, low in zip(words, lowered):
+        if low in STATUS_EATERS:
+            return (w, "replaces")
+    return None
+
+
+def piped_gates(command: str, dialect: str = "bash") -> list:
+    """[(gate_token, eater, kind)] for every gate whose evidence this command destroys.
 
     A gate qualifies only when it is a PRODUCER - i.e. it appears in a segment that is not the
     last - because the final segment's status IS the pipeline's status and nothing is lost.
     `cat log | grep run_selftests` therefore stays quiet: the gate name is an argument there,
     not a command.
+
+    `dialect` defaults to "bash", which is what every caller got before PowerShell was covered
+    at all: an unknown shell gets the STRICTER semantics rather than silently getting none.
     """
     if any(p in command for p in PROTECTED):
         return []
@@ -119,13 +194,11 @@ def piped_gates(command: str) -> list:
         gate = next((g for tok in segment for g in GATE_TOKENS if _is_gate_token(tok, g)), None)
         if gate is None:
             continue
-        # the eater is the FIRST command word of the next segment, resolved past a leading
-        # env assignment or `sudo`-style prefix
-        nxt = [t for t in segments[i + 1] if "=" not in t.split(" ")[0] or t.startswith("-")]
-        eater = next((t for t in nxt if os.path.basename(t) in STATUS_EATERS), None)
-        if eater is None:
+        found = _eater(segments[i + 1], dialect)
+        if found is None:
             continue
-        key = (gate, os.path.basename(eater))
+        eater, kind = found
+        key = (gate, _base(eater), kind)
         if key not in seen:
             seen.add(key)
             offenders.append(key)
@@ -134,15 +207,38 @@ def piped_gates(command: str) -> list:
 
 def message(offenders) -> str:
     lines = ["[piped-gate] a gate's exit code is being discarded by the pipe."]
-    for gate, eater in offenders:
-        lines.append("  `%s` is piped into `%s`, so the pipeline returns %s's status, not the "
-                     "gate's. The gate can FAIL and this command still succeed."
-                     % (gate, eater, eater))
+    for gate, eater, kind in offenders:
+        if kind == "truncates":
+            lines.append("  `%s` is piped into `%s`, which TRUNCATES the pipeline and tears "
+                         "the gate down BEFORE IT FINISHES. Measured: $LASTEXITCODE = -1 with "
+                         "the gate's own completion marker absent - there is no verdict to "
+                         "read, not merely a discarded one." % (gate, eater))
+        else:
+            lines.append("  `%s` is piped into `%s`, so the pipeline returns %s's status, not "
+                         "the gate's. The gate can FAIL and this command still succeed."
+                         % (gate, eater, eater))
     lines.append("  Fix: capture it explicitly - `CMD > out.txt; echo \"EXIT=$?\"; tail out.txt`"
                  " - or `set -o pipefail` first, or read ${PIPESTATUS[0]}.")
+    lines.append("  In PowerShell: run the gate on its own line and read $LASTEXITCODE. "
+                 "`Select-Object -Last`, `Select-String` and `Measure-Object` are SAFE there "
+                 "(measured); `-First` and `-Index` are not.")
     lines.append("  Reading the printed text instead of the exit code is not a substitute: a "
                  "gate that dies early prints nothing and looks identical to one that is quiet.")
     return "\n".join(lines)
+
+
+def dialect(tool_name) -> str:
+    """Which shell's semantics apply to this command.
+
+    Derived from the payload's tool_name, matched against SHELL_TOOLS - the same tuple
+    install.py builds its matcher from, so a shell this hook is WIRED for and a shell it can
+    REASON about cannot drift apart. Anything unrecognised gets sh semantics: that is what
+    every caller got before PowerShell was covered, so an unknown shell inherits the stricter
+    behaviour rather than silently getting none.
+    """
+    if isinstance(tool_name, str) and tool_name.strip().lower() == "powershell":
+        return "powershell"
+    return "bash"
 
 
 def main() -> int:
@@ -155,7 +251,7 @@ def main() -> int:
     command = ((payload.get("tool_input") or {}) or {}).get("command")
     if not isinstance(command, str) or not command.strip():
         return 0
-    offenders = piped_gates(command)
+    offenders = piped_gates(command, dialect(payload.get("tool_name")))
     if not offenders:
         return 0
     sys.stderr.write(message(offenders) + "\n")
@@ -197,6 +293,47 @@ SHOULD_STAY_QUIET = (
     ("a no-space pipe with no gate in it", "ls -la|head -20"),
 )
 
+# [PGG-PS] PowerShell. Every entry below is a MEASURED case, 2026-08-13, not a guess - the
+# measurement is summarised at PS_SELECT above and it CONTRADICTED the prescribed fix, which
+# named `Select-Object -Last` as a status-eater. It is not one.
+PS_SHOULD_FIRE = (
+    # the VERBATIM shape recorded in V131: -1 returned while the gate itself printed OK
+    ("the shape that produced -1 in the record",
+     r"python tools\check_mutation_anchors.py | Select-Object -First 1"),
+    ("the `select` alias truncates identically", "python run_selftests.py | select -First 1"),
+    ("-Index also tears the producer down", "python run_selftests.py | Select-Object -Index 0"),
+    ("a NATIVE consumer replaces the status exactly as in sh",
+     "python run_selftests.py | findstr OK"),
+    ("forward slashes are the same command",
+     "python tools/no_regression.py | Select-Object -First 1"),
+    ("a hook selftest is a gate here too",
+     r"python hooks\cap_shapes.py --selftest | Select-Object -First 1"),
+)
+
+# The criterion-3 half, and the reason this fix is NARROW. Each of these was measured to
+# PRESERVE $LASTEXITCODE; firing on any of them would be a false alarm on correct work.
+PS_SHOULD_STAY_QUIET = (
+    ("-Last does NOT truncate (the prescribed fix was wrong here)",
+     "python run_selftests.py | Select-Object -Last 5"),
+    ("-Skip does not truncate", "python run_selftests.py | Select-Object -Skip 1"),
+    ("Select-String is a cmdlet, not grep", "python run_selftests.py | Select-String OK"),
+    ("Measure-Object is a cmdlet, not wc", "python run_selftests.py | Measure-Object -Line"),
+    ("Out-File preserves the code", "python run_selftests.py | Out-File out.txt"),
+    ("no gate in the pipeline at all", "Get-ChildItem | Select-Object -First 5"),
+    ("$LASTEXITCODE is read explicitly",
+     'python run_selftests.py | Select-Object -First 1; exit $LASTEXITCODE'),
+)
+
+# THE SHARPEST TEST OF THE FIX: the SAME command text, opposite verdicts by dialect. `sort`
+# and `tee` are genuine status-eaters in sh and ALIASES for status-PRESERVING cmdlets in
+# PowerShell, so a guard that reused one vocabulary for both must fail exactly here.
+DIALECT_DIVERGES = (
+    ("`tee` eats the status in sh, is Tee-Object in PowerShell",
+     "python run_selftests.py | tee out.txt"),
+    ("`sort` eats the status in sh, is Sort-Object in PowerShell",
+     "python run_selftests.py | sort"),
+)
+
 
 def selftest() -> int:
     import io
@@ -210,6 +347,42 @@ def selftest() -> int:
         got = piped_gates(cmd)
         if got:
             fails.append("FALSE POSITIVE on %s: %r -> %r" % (label, cmd, got))
+
+    # [PGG-PS] the same two directions under PowerShell semantics
+    for label, cmd in PS_SHOULD_FIRE:
+        if not piped_gates(cmd, "powershell"):
+            fails.append("PS BLIND to %s: %r" % (label, cmd))
+    for label, cmd in PS_SHOULD_STAY_QUIET:
+        got = piped_gates(cmd, "powershell")
+        if got:
+            fails.append("PS FALSE POSITIVE on %s: %r -> %r" % (label, cmd, got))
+
+    # the divergence itself, asserted in BOTH directions so neither dialect can quietly
+    # inherit the other's vocabulary
+    for label, cmd in DIALECT_DIVERGES:
+        if not piped_gates(cmd, "bash"):
+            fails.append("sh must still FIRE on %s: %r" % (label, cmd))
+        if piped_gates(cmd, "powershell"):
+            fails.append("PowerShell must stay QUIET on %s: %r" % (label, cmd))
+
+    # the -First finding must be reported as a TRUNCATION, not as a replaced status: the two
+    # need different fixes, and telling a user their code was discarded when it never ran is
+    # the same class of false statement FTB-GATES was.
+    ps_kinds = {k for _g, _e, k in piped_gates(
+        "python run_selftests.py | Select-Object -First 1", "powershell")}
+    if ps_kinds != {"truncates"}:
+        fails.append("-First must be reported as 'truncates', got %r" % (ps_kinds,))
+    sh_kinds = {k for _g, _e, k in piped_gates("python run_selftests.py | tail -2", "bash")}
+    if sh_kinds != {"replaces"}:
+        fails.append("a sh eater must be reported as 'replaces', got %r" % (sh_kinds,))
+
+    # dialect() is the WIRING between install's matcher and this vocabulary. Assert it maps
+    # every tool in SHELL_TOOLS to a dialect this hook actually implements - a tool wired but
+    # unreasoned-about would be PGG-PS again, one shell along.
+    if dialect("PowerShell") != "powershell" or dialect("powershell") != "powershell":
+        fails.append("dialect() does not recognise PowerShell")
+    if dialect("Bash") != "bash" or dialect(None) != "bash" or dialect(5) != "bash":
+        fails.append("dialect() must fall back to sh semantics on anything unrecognised")
 
     # an unparseable command must stay QUIET - the one deliberate fail-open, asserted so it is
     # a decision on record rather than something a later reader discovers
@@ -229,8 +402,22 @@ def selftest() -> int:
         finally:
             sys.stdin, sys.stderr = real_in, real_err
 
-    def pl(cmd):
-        return json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+    def pl(cmd, tool="Bash"):
+        return json.dumps({"tool_name": tool, "tool_input": {"command": cmd}})
+
+    # [PGG-PS] the DECISION path under a PowerShell payload, not just the detector. This is
+    # the half that did not exist: the hook was registered matcher "Bash", so for a PowerShell
+    # user it never ran at all and its vocabulary was moot.
+    rc, err = drive(pl(r"python tools\check_mutation_anchors.py | Select-Object -First 1",
+                       "PowerShell"))
+    if rc != 2:
+        fails.append("main() must BLOCK a truncated gate in PowerShell, got rc=%r" % rc)
+    if "TRUNCATES" not in err:
+        fails.append("the PowerShell block must say the gate was TRUNCATED: %r" % err[:160])
+    rc, err = drive(pl("python run_selftests.py | Select-Object -Last 5", "PowerShell"))
+    if rc != 0 or err:
+        fails.append("main() must stay SILENT on -Last in PowerShell (measured safe), "
+                     "got rc=%r err=%r" % (rc, err[:120]))
 
     rc, err = drive(pl("python run_selftests.py 2>&1 | tail -2"))
     if rc != 2:
@@ -259,9 +446,12 @@ def selftest() -> int:
         fails.append("subprocess run wrong: rc=%s stderr=%r"
                      % (proc.returncode, (proc.stderr or "")[:140]))
 
-    print("-- piped-gate: %d gate token(s), %d status-eater(s), %d fire fixture(s), "
-          "%d quiet control(s)" % (len(GATE_TOKENS), len(STATUS_EATERS), len(SHOULD_FIRE),
-                                   len(SHOULD_STAY_QUIET)))
+    print("-- piped-gate: %d gate token(s), %d status-eater(s), %d shell(s) wired %r"
+          % (len(GATE_TOKENS), len(STATUS_EATERS), len(SHELL_TOOLS), list(SHELL_TOOLS)))
+    print("-- piped-gate: sh %d fire / %d quiet, PowerShell %d fire / %d quiet, "
+          "%d dialect-divergence pair(s) asserted both ways"
+          % (len(SHOULD_FIRE), len(SHOULD_STAY_QUIET), len(PS_SHOULD_FIRE),
+             len(PS_SHOULD_STAY_QUIET), len(DIALECT_DIVERGES)))
     for f in fails:
         print("SELFTEST FAIL:", f)
     print("SELFTEST OK" if not fails else "SELFTEST FAILED")

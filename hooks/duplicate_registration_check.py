@@ -250,6 +250,24 @@ def _digest(path: str) -> str | None:
         return None
 
 
+def _imports_a_named_module(tree) -> bool:
+    """Does this file import a module whose NAME is a value at runtime?
+
+    That is what dispatching IS - `importlib.import_module(name)` - and it is the behavioural
+    fact the roster SHAPE was standing in for. A guard that infers a behaviour from the shape
+    of a constant is the class this repo exists to catch; it is only ever a proxy, and this
+    one was measured wrong (see the caller).
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if name in ("import_module", "__import__"):
+            return True
+    return False
+
+
 def dispatched_modules(dispatcher_path: str) -> list[str]:
     """Module names in a dispatcher's fan-out list, via AST (never imports it).
 
@@ -264,6 +282,20 @@ def dispatched_modules(dispatcher_path: str) -> list[str]:
     try:
         tree = ast.parse(open(dispatcher_path, encoding="utf-8").read())
     except (OSError, SyntaxError):
+        return []
+    # [PGG-PS fallout, MEASURED 2026-08-13] A file that never imports a module BY NAME cannot
+    # dispatch to one. Without this clause the shape-match below is far too generous: EVERY
+    # module-level ALL-CAPS tuple of strings reads as a fan-out roster, so `piped_gate_guard`'s
+    # STATUS_EATERS made this hook believe in modules called head.py, tail.py and sort.py. That
+    # was wrong SILENTLY - phantom names counted once each and collided with nothing - until a
+    # name appeared in a SECOND vocabulary tuple in the same file, at which point the phantom
+    # was reported as "registered 2 times" and integration scenario C2 (this hook is SILENT on
+    # a clean install) went red. The false alarm was in the CHECKER, not the guard it read.
+    #
+    # The narrowing is BEHAVIOURAL, which is the argument the docstring above already makes for
+    # not matching the name `HOOKS`: dispatching IS `import_module(<name>)`, so ask whether the
+    # file does that rather than what its constants happen to look like.
+    if not _imports_a_named_module(tree):
         return []
     names: list[str] = []
     for node in ast.walk(tree):
@@ -423,8 +455,18 @@ def _selftest_shape_coverage() -> list:
 
         # a dispatcher whose FILENAME does not contain 'dispatcher', fanning out to a module
         # that is ALSO wired directly: two executions on one event
+        # The fixtures below carry a real `import_module` call. That is not scaffolding to
+        # satisfy the checker - it is what makes them DISPATCHERS. Before 2026-08-13 they were
+        # a bare roster and nothing else, i.e. a file that declares sub-hooks and cannot
+        # possibly run one, so they also passed for any file with an ALL-CAPS tuple of strings.
+        # The property under test is unchanged and still asserted: NAMING (the filename, the
+        # variable name) must not decide detection.
         w = script("widget.py")
-        fan = script("fanout.py", "HOOKS = ((\"widget\", \"w\"),)\n")
+        fan = script("fanout.py",
+                     "import importlib\n"
+                     "HOOKS = ((\"widget\", \"w\"),)\n"
+                     "for _m, _ in HOOKS:\n"
+                     "    importlib.import_module(_m)\n")
         out = verdict(one("Stop", [{"command": 'python "%s"' % w},
                                    {"command": 'python "%s"' % fan}]))
         if "widget.py" not in out:
@@ -433,7 +475,11 @@ def _selftest_shape_coverage() -> list:
                          + (out or "(silent)"))
 
         w2 = script("gadget.py")
-        pipe = script("stop_dispatcher2.py", "MODULES = ((\"gadget\", \"g\"),)\n")
+        pipe = script("stop_dispatcher2.py",
+                      "import importlib\n"
+                      "MODULES = ((\"gadget\", \"g\"),)\n"
+                      "for _m, _ in MODULES:\n"
+                      "    importlib.import_module(_m)\n")
         out = verdict(one("Stop", [{"command": 'python "%s"' % w2},
                                    {"command": 'python "%s"' % pipe}]))
         if "gadget.py" not in out:
@@ -441,6 +487,22 @@ def _selftest_shape_coverage() -> list:
                          "invisibly || " + (out or "(silent)"))
 
         # ---- CONTROLS: a guard that flags these is unusable ----
+
+        # [PGG-PS fallout] A VOCABULARY tuple is not a fan-out roster. This is the exact shape
+        # that broke integration scenario C2 on 2026-08-13: `piped_gate_guard` holds
+        # STATUS_EATERS and PS_SAFE_ALIASES, both ALL-CAPS tuples of strings, and `sort` is in
+        # BOTH - so a phantom module `sort.py` was reported as "registered 2 times" by a hook
+        # whose entire job is to be silent on a clean install. The two tuples here reproduce
+        # that collision exactly; the file imports NOTHING, so it dispatches nothing.
+        vocab = script("vocabulary.py",
+                       "EATERS = (\"head\", \"tail\", \"sort\")\n"
+                       "SAFE_ALIASES = (\"sort\", \"tee\")\n")
+        out = verdict(one("Stop", [{"command": 'python "%s"' % vocab}]))
+        if out.strip():
+            fails.append("a module-level tuple of ORDINARY STRINGS was read as a dispatcher "
+                         "fan-out roster, so a hook that imports nothing was reported as "
+                         "double-registering a module that does not exist || " + out)
+
         solo = script("solo.py")
         out = verdict({"Stop": [{"hooks": [{"command": 'python "%s"' % solo}]}],
                        "PreToolUse": [{"hooks": [{"command": 'python "%s"' % solo}]}]})
@@ -501,8 +563,12 @@ def _selftest() -> int:
         # identical twin -> must be reported as redundant
         for root in (a, b):
             open(os.path.join(root, "twin.py"), "w", encoding="utf-8").write("y = 0\n")
+        # carries a real import_module call, because that is what makes it a DISPATCHER - see
+        # the note beside the fanout.py fixture. Without it this file declares sub-hooks it
+        # could never run, and every ALL-CAPS tuple of strings anywhere would match it.
         open(os.path.join(b, "x_dispatcher.py"), "w", encoding="utf-8").write(
-            'HOOKS = (\n    ("widget", "w"),\n)\n')
+            'import importlib\nHOOKS = (\n    ("widget", "w"),\n)\n'
+            'for _m, _ in HOOKS:\n    importlib.import_module(_m)\n')
         open(os.path.join(a, "solo.py"), "w", encoding="utf-8").write("z = 3\n")
 
         settings = os.path.join(td, "settings.json")

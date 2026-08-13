@@ -712,6 +712,14 @@ MUTATIONS = [
        '                raw_command = h.get("command", "")\n'
        "                if False:")], False),
     # [P14 B3] The four axes the guard was blind on, plus the false-alarm axis its fix opened.
+    # [PGG-PS fallout] The FALSE-ALARM direction, and the one that actually broke something:
+    # without the behavioural precondition, any ALL-CAPS tuple of strings reads as a fan-out
+    # roster, so a hook holding a VOCABULARY (piped_gate_guard's STATUS_EATERS) was reported as
+    # double-registering a module that does not exist. It took integration scenario C2 red.
+    ("duplicate_registration_check", "DR-VOCAB", "a module-level tuple of ordinary strings is "
+     "read as a dispatcher fan-out roster again, so a hook that imports nothing is reported "
+     "as double-registering a phantom module",
+     [("    if not _imports_a_named_module(tree):", "    if False:")], False),
     ("duplicate_registration_check", "B3a", "extraction back to the hardcoded '.py' only",
      [("        if t.lower().endswith(SCRIPT_EXTS):", "        if t.lower().endswith('.py'):")],
      False),
@@ -858,9 +866,37 @@ MUTATIONS = [
      "appearing as an argument to the final consumer reads as a discarded gate",
      [("    for i, segment in enumerate(segments[:-1]):",
        "    for i, segment in enumerate(segments):")], False),
+    # PG4 REPOINTED 2026-08-13: the PGG-PS fix threads the dialect through this call, which
+    # deleted the line the old anchor quoted. Repointed rather than supplemented - a mutation
+    # whose anchor has drifted is a pin that has silently stopped pinning, and it is
+    # indistinguishable from a healthy one until a full sweep runs. Sixth drift; caught by
+    # check_mutation_anchors in seconds, as all six were.
     ("piped_gate_guard", "PG4", "the guard stops blocking and the discarded exit code ships",
-     [("    offenders = piped_gates(command)\n    if not offenders:\n        return 0",
-       "    offenders = piped_gates(command)\n    if True:\n        return 0")], False),
+     [("    offenders = piped_gates(command, dialect(payload.get(\"tool_name\")))\n"
+       "    if not offenders:\n        return 0",
+       "    offenders = piped_gates(command, dialect(payload.get(\"tool_name\")))\n"
+       "    if True:\n        return 0")], False),
+    # [PGG-PS] Both halves of the fix, pinned separately, because they fail independently:
+    # the VOCABULARY can be right while the hook is wired to no shell that uses it, and the
+    # WIRING can be right while the guard has nothing to say about that shell.
+    ("piped_gate_guard", "PG6", "the PowerShell truncators are forgotten, so "
+     "`gate | Select-Object -First 1` - the shape that returns -1 with the gate never having "
+     "finished - goes invisible again",
+     [('PS_TRUNCATING = ("-first", "-index")', "PS_TRUNCATING = ()")], False),
+    ("piped_gate_guard", "PG7", "dialect() stops recognising PowerShell, so a PowerShell "
+     "command is scored with sh vocabulary and the guard is blind on the platform where "
+     "PowerShell is the PRIMARY shell",
+     [('    if isinstance(tool_name, str) and tool_name.strip().lower() == "powershell":',
+       "    if False:")], False),
+    # The FALSE-ALARM direction, which is the one that decides whether the widening survives
+    # contact with a user: `sort` and `tee` are status-eaters in sh and status-PRESERVING
+    # cmdlet aliases in PowerShell. Dropping the exemption fires on correct PowerShell.
+    ("piped_gate_guard", "PG8", "the PowerShell-safe aliases lose their exemption, so "
+     "`gate | sort` and `gate | tee` are blocked in a shell where both PRESERVE the exit code",
+     [('PS_SAFE_ALIASES = ("sort", "tee")', 'PS_SAFE_ALIASES = ()')], False),
+    ("install", "PGG-PS-1", "the PreToolUse matcher goes back to the bare literal 'Bash', so "
+     "the piped-gate guard never runs for a PowerShell user at all",
+     [('    return "|".join(_load_guard_shell_tools())', '    return "Bash"')], False),
     ("piped_gate_guard", "PG5", "the lexer stops treating punctuation as tokens, so a pipe "
      "written without surrounding spaces - the common shape - goes invisible",
      [("        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)",
