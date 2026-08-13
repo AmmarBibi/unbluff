@@ -287,6 +287,20 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             needs, and is NOT a shared auditable record. (b) the first version used a
             60-per-gate cap and PERMANENTLY DISCARDED 140 of the 200 historical rows on its
             first run; the cap now matches the old global bound so a migration can only add.
+            AND THE TARGET ITSELF NEEDED CORRECTING: the "1 of 5 tiers" finding counted CI
+            rounds as one of the five. CI CANNOT write to a gitignored local file - the
+            runner is a different machine and the path is not in the repo - so "5 of 5" was
+            never reachable and would have read as permanently incomplete. The honest target
+            is ALL LOCAL TIERS (run_selftests, integration, mutation_sweep,
+            mutation_sweep_filtered, false_alarm_scorer - all recording as of 08-13) with CI
+            a FINALIZED EXCLUSION whose evidence is the GitHub run history instead.
+            KNOWN GAP, recorded rather than over-built: GL-1 pins the RETENTION RULE, which
+            is the subtle half, but the four `gate_ledger.record(...)` CALL SITES are
+            unpinned. Delete one and that tier silently stops recording - the exact defect
+            just fixed, and invisible. Four more mutations would be disproportionate for
+            one-line visible calls; the durable version is a single check that every
+            registered gate tier records, which needs a derived tier roster and is worth
+            building WITH the ship-bar gate rather than before it.
           [SCHEDULED] SHIP-BAR-GATE itself, now unblocked, in two independent halves:
             the STOPPING RULE (read the FINDINGS ledger, fail if any row is CRITICAL/HIGH and
             not BUILT) and the PRE-PUSH gate (require a RECORDED sweep newer than the last
