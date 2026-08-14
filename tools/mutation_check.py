@@ -734,6 +734,26 @@ MUTATIONS = [
     ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
      "anyway, so silence from an unreachable hook reads as a perfect score",
      [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    # [SHIP-BAR] Criterion 2's stopping rule. SB-1 is the rule itself; SB-2 is the LOOPHOLE -
+    # an exclusion must never rescue a CRITICAL/HIGH, or the stopping rule becomes exactly the
+    # unfalsifiable promise the 08-12 rework replaced.
+    ("tools/ship_bar_gate", "SB-1", "an open CRITICAL or HIGH stops blocking the ship bar, so "
+     "v1.0 can be tagged with the defect class criterion 2 exists to forbid",
+     [("        if r.get(\"severity\") in BLOCKING and r.get(\"state\") != \"BUILT\":",
+       "        if False:")], False),
+    ("tools/ship_bar_gate", "SB-2", "a CRITICAL marked FINALIZED-EXCLUSION is accepted, "
+     "reopening the loophole: any blocking finding can be excused in the state column instead "
+     "of re-adjudicated in the report where the change would be visible",
+     [('        if r.get("severity") in BLOCKING and st == "FINALIZED-EXCLUSION":',
+       "        if False:")], False),
+    ("tools/ship_bar_gate", "SB-4", "the findings ledger stops having to DECLARE its scope, "
+     "so the gate can report PASS over an undeclared subset - its own first version covered 24 "
+     "findings while 42 more, ten of them HIGH, sat outside an unstated boundary",
+     [('        if not scope.get(key):', "        if False:")], False),
+    ("tools/ship_bar_gate", "SB-3", "the hand-entered ledger stops being reconciled against "
+     "the report's canonical severities, so a severity can be silently downgraded by retyping",
+     [('        elif r.get("severity") not in by_where[where]:', "        elif False:")],
+     False),
     # [SHIP-BAR enabler] The gate ledger's retention rule. Reverting it to a GLOBAL cap is the
     # exact shape the original had: the cheapest, most frequent gate evicts the record of the
     # 30-minute sweep, so the tier whose last-run date actually matters is the first to vanish.
@@ -741,6 +761,10 @@ MUTATIONS = [
      "evicts the record of a rare one and the tier you most need is the first lost",
      [('        counts[gate] = counts.get(gate, 0) + 1',
        '        counts["*"] = counts.get("*", 0) + 1\n        gate = "*"')], False),
+    ("tools/score_false_alarms", "FA-5", "the verdict goes back to counting every fire, so a "
+     "once-per-session NOTICE - an adjudicated FINALIZED-EXCLUSION - fails criterion 3 and a "
+     "ship bar built on this row blocks on a condition already decided",
+     [("    return bool(nagging_hooks)", "    return True")], False),
     ("tools/score_false_alarms", "FA-4", "the projects root stops being isolated, so "
      "memory_hygiene_guard resolves against the REAL ~/.claude/projects and every rate this "
      "tool prints depends on whose machine ran it",

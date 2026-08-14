@@ -47,6 +47,11 @@ AUX_GATES = (
     # review while its comment called itself DERIVED. 9 of 25 hook files were unguarded, 5 of
     # them imported by production hooks.
     ("install-guard", ("install.py",), ("--selftest",)),
+    # [SHIP-BAR] Criterion 2's stopping rule, as a CONTROL rather than prose: no CRITICAL or
+    # HIGH may be unbuilt, severities are DERIVED from the review report every run, and the
+    # hand-adjudicated state ledger is RECONCILED against it - which is exactly the drift that
+    # made "the remaining 8 findings" unverifiable (its list named five items marked BUILT).
+    ("ship-bar", ("tools", "ship_bar_gate.py"), ("--selftest",)),
     # [SHIP-BAR enabler] The gate LEDGER's own retention rule. It recorded 1 of 5 tiers for
     # days, and the fix is not just "let other tiers write" - the cap was GLOBAL, so the
     # cheapest gate would evict the record of the 30-minute sweep as soon as both wrote.

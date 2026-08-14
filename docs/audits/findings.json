@@ -1,0 +1,226 @@
+{
+  "scope": {
+    "covers": "the 24 CONFIRMED findings of the independent adversarial review wf_a6b49ecf-667 (2026-08-12), which is the population criterion 2 names",
+    "excludes": "the 2026-08-06 guards review (42 severity-tagged rows: 10 HIGH, 26 MEDIUM, 6 LOW) and the R1/R2 AR-series",
+    "exclusion_basis": "CLOSED DECISION in coverage_ledger_2026-08-09.md: guards that can be silently DISARMED BY EDITING UNBLUFF'S OWN SOURCE are WON'T-FIX, which deletes AR-1..AR-11 and the 32 AR MEDIUM/LOW rows from the roadmap entirely. The ONLY way any returns is if criterion 1 finds a README claim depending on it.",
+    "note": "A PASS here is a PASS over `covers`, never over the whole review history. Stated in the DATA so the gate cannot imply coverage it does not have."
+  },
+  "findings": [
+    {
+      "id": "AR-01",
+      "name": "FTB-RC4",
+      "severity": "CRITICAL",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:252",
+      "finding": "C1 is FALSE: pytest rc 4 is what a BROKEN conftest.py returns, so the waiver silently disables the gate on the user's own broken code",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-02",
+      "name": "FTB-MASK",
+      "severity": "HIGH",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:603",
+      "finding": "Containment notice is once-per-project FOREVER, so a permanently-inconclusive repo ends every turn after the first with rc 0 and EMPTY stderr",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-03",
+      "name": "FTB-RC4-dup",
+      "severity": "HIGH",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:252",
+      "finding": "C1 is FALSE for rc 4: a broken conftest.py is the user's own code, and after one notice the gate is silent forever",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-04",
+      "name": "FTB-MASK-key",
+      "severity": "HIGH",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:610",
+      "finding": "The inconclusive notice is keyed by path hash alone, so a LATER, DIFFERENT nothing-verified state is permanently silent - exit 0, empty stderr, byte-identical to a green turn",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-05",
+      "name": "FTB-MASK-nogate",
+      "severity": "HIGH",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:566",
+      "finding": "_notice_no_gate has two different reasons sharing ONE state key, so the \"add a gate\" notice permanently masks the \"pytest is not importable\" notice - the exact masking _inconclusive_state_path's docstring forbids",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-06",
+      "name": "ROSTER-DERIVE",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "install.py:351",
+      "finding": "Section N's \"the roster is now the AST import closure of the wired entry points\" is false - 7 of 25 hooks reach it only via a hardcoded REQUIRED_HOOKS tuple, and dispatcher-roster drift is silent end to end",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-07",
+      "name": "REVIEWRUNS-GAP",
+      "severity": "MEDIUM",
+      "state": "SCHEDULED",
+      "where": "docs/audits/coverage_ledger_2026-08-09.md:246",
+      "finding": "review_runs.json omits the entire 2026-08-06 guards run (42 confirmed, 10 HIGH), so the ledger's \"the 42 is the complete population\" closure is complete only over what was recorded",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-08",
+      "name": "FTB-C4",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:610",
+      "finding": "C4 is FALSE after the first turn: the inconclusive notice is once-per-PROJECT and keyed only by cwd, so later turns - and later, different reasons - are byte-identical to a green run",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-09",
+      "name": "RC3-BLOCKS",
+      "severity": "MEDIUM",
+      "state": "FINALIZED-EXCLUSION",
+      "where": "hooks/fast_test_on_stop.py:250",
+      "finding": "The exit map is incomplete in the blocking direction: ExitCode.INTERNAL_ERROR (3) is by pytest's own definition not a verdict, and still hard-blocks the turn end and the push",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-10",
+      "name": "FTB-CFG",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:164",
+      "finding": "C3 false negative from a canonical-value gap: _PYTEST_CONFIG_MARKERS recognises 4 of pytest's 7 config filenames, so real pytest projects get no gate",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-11",
+      "name": "FTB-SPELL",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:264",
+      "finding": "_is_pytest_command misses `py.test` and `pytest-3`, so the FASTTEST-BLOCK hard block survives verbatim for those spellings in BOTH gates",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-12",
+      "name": "FTB-LAYOUT",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:235",
+      "finding": "C3 is false: looks_like_pytest_project rejects three of the most common genuine pytest layouts, and README claims 'auto-detects pytest'",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-13",
+      "name": "FTB-CAP",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:224",
+      "finding": "_PYTEST_FILE_CAP counts every file, so a tests/ tree with >5000 non-Python fixtures and ZERO .py files is classified as a pytest project",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-14",
+      "name": "FTB-MARKER",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:192",
+      "finding": "_has_pytest_config matches its markers inside comments and strings, and reads config without utf-8-sig while _read_override uses it",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-15",
+      "name": "FTB-SPELL-pytest",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop.py:264",
+      "finding": "`py.test` - pytest's own still-shipped console script - is not recognised, so FASTTEST-BLOCK survives verbatim for that spelling",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-16",
+      "name": "FTB-C2-CONTROLS",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/fast_test_on_stop_selftest.py:287",
+      "finding": "The C2 control loop is decorative: none of its three commands contains the substring 'pytest', so a substring match passes it",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-17",
+      "name": "FTB-GATES",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/pre_push_gate.py:220",
+      "finding": "The two gates DISAGREE about a real pytest project whose pytest is not importable: the Stop gate names the reason, the push gate says \"has no test command - nothing to verify\"",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-18",
+      "name": "STALE-DOCSTRINGS",
+      "severity": "MEDIUM",
+      "state": "SCHEDULED",
+      "where": "hooks/fast_test_on_stop.py:9",
+      "finding": "Stale detection claims the fix did not update: fast_test_on_stop's own module docstring, pre_push_gate's docstring, the repo's .claude/fast-test.cmd comment, and a CHANGELOG with no entry for the behaviour change",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-19",
+      "name": "C2-FALSE",
+      "severity": "MEDIUM",
+      "state": "SCHEDULED",
+      "where": "hooks/fast_test_on_stop.py:264",
+      "finding": "Design claim C2 is false: _is_pytest_command misclassifies non-pytest commands, and the repo's own push-gate selftest is built on that misclassification",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-20",
+      "name": "WT-CAUSE",
+      "severity": "MEDIUM",
+      "state": "BUILT",
+      "where": "hooks/pre_push_gate_selftest.py:842",
+      "finding": "A failing `git commit` is misreported as \"git worktree unavailable\", silently drops worktree-delegation (and scenarios 17+18) from the denominator, and the suite still exits 0",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-21",
+      "name": "SH-CONTRADICTORY",
+      "severity": "MEDIUM",
+      "state": "SCHEDULED",
+      "where": "hooks/pre_push_gate_selftest.py:98",
+      "finding": "`_sh_delegation_fails` can emit three mutually contradictory statements in one run, and the probe asserts only the verdict and the numerator - never the message",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-22",
+      "name": "OPEN-COUNT-ZERO",
+      "severity": "LOW",
+      "state": "SCHEDULED",
+      "where": "tools/check_review_freshness.py:154",
+      "finding": "_open_count() maps an ABSENT `open` field to 0, and 45 of 68 ledger entries have no such field - the ledger reads unknown as zero",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-23",
+      "name": "MARKER-UNPINNED",
+      "severity": "LOW",
+      "state": "SCHEDULED",
+      "where": "hooks/fast_test_on_stop_selftest.py:174",
+      "finding": "_has_pytest_config's marker check is unpinned - dropping it re-introduces FASTTEST-BLOCK on every Python repo and the suite stays green",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    },
+    {
+      "id": "AR-24",
+      "name": "CAP-UNPINNED",
+      "severity": "LOW",
+      "state": "SCHEDULED",
+      "where": "hooks/fast_test_on_stop.py:224",
+      "finding": "The three-state cap in _has_collectible_tests is unpinned; collapsing None to False silently disables the gate on any large tests/ tree",
+      "source": "docs/audits/adversarial_review_2026-08-12.md#confirmed"
+    }
+  ]
+}

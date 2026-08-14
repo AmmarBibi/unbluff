@@ -6,6 +6,21 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`tools/ship_bar_gate.py` + `docs/audits/findings.json` - criterion 2's stopping rule is now
+  a CONTROL, not prose.** Nothing previously stopped a v1.4.0 tag while a CRITICAL sat open, and
+  the open-finding count was itself unverifiable: the ledger's list of "the remaining 8" named
+  five items the same table marked BUILT. Registered as the `ship-bar` gate (suite 35 -> 36).
+  **It refuses to parse prose.** SEVERITY is DERIVED, every run, from the review report's own
+  `## Confirmed` table; STATE (BUILT / SCHEDULED / FINALIZED-EXCLUSION) is the only
+  hand-adjudicated field; and the two are RECONCILED on every run, so a severity cannot be
+  downgraded by retyping and a row cannot exist in one and not the other.
+  **A CRITICAL or HIGH cannot be excluded.** `FINALIZED-EXCLUSION` rescues MEDIUM/LOW only -
+  otherwise any blocking finding could be excused in the state column instead of re-adjudicated
+  in the report where the change is visible. Pinned `SB-1` (the rule), `SB-2` (that loophole)
+  and `SB-3` (the reconciliation).
+  **First run, and it settles a disputed number mechanically:** 24 findings = 1 CRITICAL BUILT,
+  4 HIGH BUILT, 11 MEDIUM BUILT, 1 MEDIUM FINALIZED-EXCLUSION, 4 MEDIUM + 3 LOW SCHEDULED.
+  **PASS** - and **SEVEN** open rows, not eight; the eighth was a decision already taken.
 - **`tools/gate_ledger.py` - the gate ledger now records more than one tier**, which is the
   ENABLER the ship bar's verify-before-pushing half was blocked on. The writer had lived inside
   `run_selftests.py` as a private function with the gate name HARDCODED, so exactly one of five

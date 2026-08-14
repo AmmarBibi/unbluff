@@ -301,7 +301,40 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             one-line visible calls; the durable version is a single check that every
             registered gate tier records, which needs a derived tier roster and is worth
             building WITH the ship-bar gate rather than before it.
-          [SCHEDULED] SHIP-BAR-GATE itself, now unblocked, in two independent halves:
+          [DONE 08-14] SHIP-BAR-GATE, the STOPPING-RULE half. tools/ship_bar_gate.py +
+            docs/audits/findings.json, gate `ship-bar`, pinned SB-1/SB-2/SB-3.
+            IT REFUSES TO PARSE PROSE - severity is DERIVED from the review report's own
+            Confirmed table every run, STATE is the only hand-adjudicated field, and the two
+            are RECONCILED (a retyped severity, or a row in one and not the other, FAILS).
+            A CRITICAL/HIGH cannot be rescued by FINALIZED-EXCLUSION; the honest move is to
+            re-adjudicate the SEVERITY in the report where it is visible.
+            FIRST RUN: 24 findings = 1 CRITICAL + 4 HIGH all BUILT, 11 MEDIUM BUILT, 1 MEDIUM
+            excluded, 4 MEDIUM + 3 LOW SCHEDULED. PASS, and SEVEN open - mechanically, from
+            the canonical report, settling the count the plan had wrong.
+            NOTE the harness lesson: its selftest first read the REAL report and was RED in
+            every mutation scratch tree (the harness copies hooks/tools/tests/skills/.github
+            and three root files, NOT docs/), so all three pins reported "baseline already
+            RED" and proved nothing. Now hermetic against a synthetic report, still checking
+            the real one when reachable.
+          [NEW 08-14, SCHEDULED] SHIP-BAR's own stated LIMIT, and it is the one that decides
+            whether its PASS means anything: STATE is HAND-ADJUDICATED. The gate proves no
+            CRITICAL/HIGH is MARKED anything but BUILT, and that severities have not drifted
+            from the report. It does NOT prove a row marked BUILT was actually fixed - a
+            wrongly-typed BUILT passes silently, which is the same shape as the "remaining 8"
+            list that named five items the table already marked BUILT.
+            DURABLE CLOSURE: give every BUILT row a `pinned_by` field naming the MUTATION that
+            pins it, and have the gate assert that id exists in mutation_check.MUTATIONS. Then
+            BUILT means "a test fails without the fix" instead of "someone typed BUILT". The
+            data is mostly known already (FTB-RC4 -> FTB-7, FTB-MASK -> FTB-8, FTB-SPELL ->
+            FTB-9, FTB-CFG/LAYOUT -> FTB-10/11/12, ROSTER-DERIVE -> RD-1/RD-2, WT-CAUSE ->
+            WT-1), so this is a mapping job plus ~10 lines of assertion.
+          [EVIDENCE 08-14, and it is the argument for building the remaining half] The gate
+            ledger ANSWERED the pre-push question before the pre-push gate exists. At close it
+            read: run_selftests / integration / false_alarm_scorer / ship_bar all PASS at
+            2026-08-14T21:4x, and mutation_sweep PASS at 2026-08-13T14:04 - i.e. the 30-minute
+            sweep was STALE relative to the day's source changes, and the LEDGER said so rather
+            than someone remembering. That is the whole mechanism, demonstrated.
+          [SCHEDULED] SHIP-BAR-GATE's REMAINING half:
             the STOPPING RULE (read the FINDINGS ledger, fail if any row is CRITICAL/HIGH and
             not BUILT) and the PRE-PUSH gate (require a RECORDED sweep newer than the last
             source change - it cannot run a 30-minute sweep but it can now ask when one

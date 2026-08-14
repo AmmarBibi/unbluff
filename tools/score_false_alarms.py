@@ -251,6 +251,23 @@ def score():
     return per_hook, controls, entrypoint
 
 
+def blocks(nagging_hooks) -> bool:
+    """Does this measurement FAIL criterion 3?
+
+    Iff some hook fires on ordinary correct work and KEEPS firing. A guard that objects once
+    per session and then goes quiet is a NOTICE - the repo's own rule is that a check which
+    cannot run must say so, and `memory_hygiene_guard`'s inconclusive notice is a recorded
+    FINALIZED-EXCLUSION on exactly that ground. What gets a guard switched off, and what this
+    criterion exists to prevent, is the one that fires EVERY TURN.
+
+    A FUNCTION, deliberately, because its predecessor was an inline `1 if alarms else 0` that
+    no probe could reach - the same shape as FA-3, which SURVIVED its first pin for precisely
+    that reason (hollow mode 3: helper tested, CALL SITE not). Extracted BEFORE pinning this
+    time rather than after being caught.
+    """
+    return bool(nagging_hooks)
+
+
 def rate_for(exercised: int, false_alarms: int, controls_fired: int) -> str:
     """The reported false-alarm rate, or UNMEASURED.
 
@@ -338,22 +355,40 @@ def main() -> int:
     unproven = set(unmeasured) - no_entry
     measured = set(roster) - unproven - no_entry
     assert len(measured) + len(unproven) + len(no_entry) == len(roster), "buckets must partition"
+    # THE VERDICT IS THE NAGGING COUNT, NOT THE RAW FIRE COUNT - and the difference is an
+    # ADJUDICATED decision, not a softening. A guard that objects ONCE per session and then
+    # goes quiet is a NOTICE; the repo's own rule is that a check which cannot run must SAY
+    # so, and `memory_hygiene_guard`'s inconclusive notice is a recorded FINALIZED-EXCLUSION
+    # on exactly that ground. What criterion 3 exists to prevent is the guard that fires on
+    # correct work EVERY TURN, because that is what gets a guard switched off.
+    #
+    # Found 2026-08-13 by reading this tool's OWN ledger row back: it recorded FAIL while
+    # `nagging` was 0, so a ship-bar gate consuming that row would have blocked on a
+    # condition already excluded by decision. The tool disagreed with the adjudication it was
+    # measuring for.
+    nagging = sorted(h for h, v in per_hook.items() if v.get("nags"))
+    notices = len(alarms) - sum(len(per_hook[h]["nags"]) for h in nagging)
     print("\n%d wired hook(s) in the derived roster = %d MEASURED + %d UNMEASURED (no firing "
-          "control) + %d NO CORPUS ENTRY; %d false alarm(s) on %d ordinary entr(ies)"
+          "control) + %d NO CORPUS ENTRY; %d NAGGING false alarm(s) + %d once-per-session "
+          "notice(s) on %d ordinary entr(ies)"
           % (len(roster), len(measured), len(unproven), len(no_entry),
-             len(alarms), len(negatives)))
+             len(nagging), notices, len(negatives)))
+    if notices and not nagging:
+        print("VERDICT: PASS - every fire on correct work is a once-per-session NOTICE, not "
+              "nagging. Notices are reported, never counted as a failure; see FA-MEMHYG's "
+              "FINALIZED-EXCLUSION in the coverage ledger.")
     # Criterion 3's numbers are a PUBLISHED claim, so when they were last measured has to be
     # answerable from the record rather than from a commit message.
     try:
         import gate_ledger
-        gate_ledger.record("false_alarm_scorer", "FAIL" if alarms else "PASS",
+        gate_ledger.record("false_alarm_scorer", "FAIL" if blocks(nagging) else "PASS",
                            measured=len(measured), unmeasured=len(unproven),
                            no_corpus_entry=len(no_entry), false_alarms=len(alarms),
-                           nagging=len([1 for h in per_hook.values() if h.get("nags")]),
+                           nagging=len(nagging), notices=notices,
                            ordinary_entries=len(negatives))
     except Exception:
         pass
-    return 1 if alarms else 0
+    return 1 if blocks(nagging) else 0
 
 
 def selftest() -> int:
@@ -393,6 +428,18 @@ def selftest() -> int:
         fails.append("a hook with a firing control and no false alarms must report 0.0%%")
     if rate_for(4, 1, 1) != "25.0%":
         fails.append("the rate arithmetic is wrong: 1 of 4 must be 25.0%%")
+
+    # (a2) THE VERDICT. A once-per-session notice must NOT fail the criterion; a hook that
+    # keeps firing on correct work must. Asserted through the real decision function, because
+    # its predecessor was an inline expression no probe could reach - the same shape that let
+    # FA-3 survive its first pin.
+    if blocks([]):
+        fails.append("a run with ZERO nagging hooks was reported as failing criterion 3 - a "
+                     "once-per-session notice is an adjudicated FINALIZED-EXCLUSION, and a "
+                     "ship bar reading this would block on it")
+    if not blocks(["memory_hygiene_guard"]):
+        fails.append("a hook that keeps firing on ordinary correct work did NOT fail the "
+                     "criterion - which is the only thing criterion 3 exists to catch")
 
     # (b) an ADVISORY hook fires with rc 0 and a message. Scoring by rc alone recorded
     # timing_claim_guard as silent on an input it had just objected to in full, which is
