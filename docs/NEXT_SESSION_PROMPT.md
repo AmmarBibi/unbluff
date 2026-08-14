@@ -328,6 +328,30 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             data is mostly known already (FTB-RC4 -> FTB-7, FTB-MASK -> FTB-8, FTB-SPELL ->
             FTB-9, FTB-CFG/LAYOUT -> FTB-10/11/12, ROSTER-DERIVE -> RD-1/RD-2, WT-CAUSE ->
             WT-1), so this is a mapping job plus ~10 lines of assertion.
+          [NEW 08-14, SCHEDULED - HIGH for the process, and it BLOCKED a clean sweep]
+            SELFTEST-BUDGET-FLAKE HAS RECURRED, in a form the 2026-08-12 control does not
+            cover. MEASURED: meta_audit_on_stop's selftest takes 6.08s of its 17.50s budget
+            STANDALONE (35% used) and 64.03s / 65.35s INSIDE a full mutation sweep - so its
+            baseline is RED in the scratch tree and #M6 and #D5-twin reported "baseline
+            already RED" and proved NOTHING that run. Full sweep exited 1 on that alone
+            (191 CAUGHT, 0 SURVIVED, 2 HARNESS ERROR).
+            THE CONTROL IS WORKING AND STILL INSUFFICIENT, which is the useful part: it
+            measured the box at 2.5x and 2.1x slower and normalised 64.03s -> 25.71s, still
+            over 17.50s. The real slowdown is ~10x (6s -> 64s). The control times a CPU-BOUND
+            loop; under a sweep the bottleneck is I/O - every mutation copies the whole repo
+            tree - and meta_audit's selftest is itself I/O-heavy. IT NORMALISES THE WRONG
+            DIMENSION.
+            Fix direction: make the control exercise the same MIX the selftest does (or
+            measure I/O separately), or have the harness declare "a sweep is in progress" so
+            the budget check reports INCONCLUSIVE rather than FAIL. Do NOT simply widen the
+            budget - the 08-12 row is explicit that a selftest genuinely over its share of the
+            25s cap IS reported to users as ERRORED.
+            Both affected pins were re-verified CAUGHT in a targeted run and in the previous
+            full sweep, so they are proven - just not in the same run.
+          [NEW 08-14, SCHEDULED - LOW] Mutation IDs COLLIDE across units: selftest_budget has
+            SB-1/SB-2 and tools/ship_bar_gate now also has SB-1..SB-4. duplicate_ids() keys on
+            (unit, finding) so the harness is correct, but `mutation_check SB-1` and any human
+            reading a report cannot tell them apart. Rename the ship-bar series (SHIPBAR-n).
           [EVIDENCE 08-14, and it is the argument for building the remaining half] The gate
             ledger ANSWERED the pre-push question before the pre-push gate exists. At close it
             read: run_selftests / integration / false_alarm_scorer / ship_bar all PASS at
