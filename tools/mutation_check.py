@@ -329,10 +329,14 @@ MUTATIONS = [
     ("selftest_budget", "SB-1", "the budget assertion loses its CONTROL and goes back to raw "
      "wall clock, so a slow or loaded machine false-fails a selftest that is not slow",
      [("    over = normalised > b", "    over = elapsed > b")], False),
+    # SB-2 REPOINTED 2026-08-14: adding the I/O half of the control deleted the line this
+    # anchored to. Repointed rather than supplemented - a drifted anchor is a pin that has
+    # silently stopped pinning, and is indistinguishable from a healthy one until a sweep runs.
+    # SEVENTH drift, and the seconds-long anchors gate caught this one too.
     ("selftest_budget", "SB-2", "the load factor loses its cap, so a pathologically slow box "
      "scales the budget without bound and the check silently stops being able to fail",
-     [("        return max(1.0, min(_LOAD_FACTOR_CAP, _calibrate() / _CALIB_REF_S))",
-       "        return max(1.0, _calibrate() / _CALIB_REF_S * 1e6)")], False),
+     [("        return max(1.0, min(_LOAD_FACTOR_CAP, max(cpu, io)))",
+       "        return max(1.0, max(cpu, io) * 1e6)")], False),
     ("pre_push_gate", "FTB-GATES", "the push gate stops naming WHY there is no command, so a "
      "pytest project whose pytest is unimportable is told it 'has no test command'",
      [("        _, why_no_gate = fast_test._nogate_reason(root)",
@@ -734,23 +738,41 @@ MUTATIONS = [
     ("tools/score_false_alarms", "FA-1", "a hook whose CONTROL never fired is given a rate "
      "anyway, so silence from an unreachable hook reads as a perfect score",
      [("    if controls_fired <= 0 or exercised <= 0:", "    if False:")], False),
+    # [2026-08-14] The budget control goes back to CPU-only. MEASURED: under a tree-copy load
+    # a filesystem round-trip slowed 3.00x while the CPU loop measured 0.90x - not slower at
+    # all - so the correction under-shoots exactly when a sweep is running, which is how
+    # meta_audit's selftest read 64s against a 2.5x normalisation and took two mutations down
+    # with it ("baseline already RED").
+    ("selftest_budget", "SB-IO", "the load control stops measuring I/O and goes back to a "
+     "CPU-only probe, which is blind to the contention that actually causes the overruns",
+     [("        return max(1.0, min(_LOAD_FACTOR_CAP, max(cpu, io)))",
+       "        return max(1.0, min(_LOAD_FACTOR_CAP, cpu))")], False),
+    # [800-LINE RULE] The ratchet. FS-1 is the direction that matters: a file that is ALREADY
+    # over the limit must not be allowed to grow, or the debt rises while the gate stays green.
+    ("tools/check_file_size", "FS-1", "an already-over-limit file is allowed to GROW, so the "
+     "800-line debt rises while the gate reports OK - the exact monotonic decay that let five "
+     "files become seven with every individual addition looking justified",
+     [("            if n > was:", "            if False:")], False),
+    ("tools/check_file_size", "FS-2", "a NEW file over the limit is accepted, which is how "
+     "no_regression.py reached 805 lines while appearing in nobody's list",
+     [("        if rel not in baseline:", "        if False:")], False),
     # [SHIP-BAR] Criterion 2's stopping rule. SB-1 is the rule itself; SB-2 is the LOOPHOLE -
     # an exclusion must never rescue a CRITICAL/HIGH, or the stopping rule becomes exactly the
     # unfalsifiable promise the 08-12 rework replaced.
-    ("tools/ship_bar_gate", "SB-1", "an open CRITICAL or HIGH stops blocking the ship bar, so "
+    ("tools/ship_bar_gate", "SHIPBAR-1", "an open CRITICAL or HIGH stops blocking the ship bar, so "
      "v1.0 can be tagged with the defect class criterion 2 exists to forbid",
      [("        if r.get(\"severity\") in BLOCKING and r.get(\"state\") != \"BUILT\":",
        "        if False:")], False),
-    ("tools/ship_bar_gate", "SB-2", "a CRITICAL marked FINALIZED-EXCLUSION is accepted, "
+    ("tools/ship_bar_gate", "SHIPBAR-2", "a CRITICAL marked FINALIZED-EXCLUSION is accepted, "
      "reopening the loophole: any blocking finding can be excused in the state column instead "
      "of re-adjudicated in the report where the change would be visible",
      [('        if r.get("severity") in BLOCKING and st == "FINALIZED-EXCLUSION":',
        "        if False:")], False),
-    ("tools/ship_bar_gate", "SB-4", "the findings ledger stops having to DECLARE its scope, "
+    ("tools/ship_bar_gate", "SHIPBAR-4", "the findings ledger stops having to DECLARE its scope, "
      "so the gate can report PASS over an undeclared subset - its own first version covered 24 "
      "findings while 42 more, ten of them HIGH, sat outside an unstated boundary",
      [('        if not scope.get(key):', "        if False:")], False),
-    ("tools/ship_bar_gate", "SB-3", "the hand-entered ledger stops being reconciled against "
+    ("tools/ship_bar_gate", "SHIPBAR-3", "the hand-entered ledger stops being reconciled against "
      "the report's canonical severities, so a severity can be silently downgraded by retyping",
      [('        elif r.get("severity") not in by_where[where]:', "        elif False:")],
      False),

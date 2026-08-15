@@ -40,6 +40,8 @@ from __future__ import annotations
 import ast
 import glob
 import os
+import shutil
+import tempfile
 import time
 
 # The clock starts when the hook imports this, which every hook does at the top of its file.
@@ -105,8 +107,25 @@ def line(elapsed: float, share: float, name: str, over: bool) -> str:
 #   raw over, normalised under               -> INCONCLUSIVE (this box is slow/loaded), NOT a
 #                                               failure, and said out loud rather than hidden
 #   normalised over                          -> a genuine overrun, FAILS as before
+# [2026-08-14] A CPU PROBE ALONE MEASURES THE WRONG DIMENSION, and the flake recurred because
+# of it. MEASURED: meta_audit_on_stop's selftest is 6.08s standalone and 64.03s inside a full
+# mutation sweep - ~10x - while the CPU control measured only 2.5x, so the normalised figure
+# was STILL over budget, the baseline went RED, and two mutations reported "baseline already
+# RED" and proved nothing.
+#
+# The reason, measured directly rather than inferred: under a deliberate I/O load (repeated
+# tree copies - exactly what the mutation harness does for EVERY entry) a filesystem
+# round-trip slowed 3.00x while the CPU loop measured 0.90x, i.e. NOT SLOWER AT ALL. A
+# CPU-bound probe is blind to I/O contention, and the selftests that overrun are I/O-heavy.
+# The MIN-of-rounds compounds it: it exists to discard hiccups, and sustained I/O contention
+# never touches the CPU loop to begin with.
+#
+# So the control measures BOTH and takes the WORSE ratio. A probe that cannot observe the
+# resource actually under contention is not a control.
 _CALIB_ITERS = 300000
 _CALIB_REF_S = 0.0123      # MEASURED idle on the reference box: median of 7, spread x1.08
+_CALIB_IO_FILES = 40
+_CALIB_IO_REF_S = 0.0148   # MEASURED idle on the same box: median of 7 (40 write+read pairs)
 _LOAD_FACTOR_CAP = 6.0     # a machine slower than this is reported, never silently absorbed
 
 
@@ -124,14 +143,45 @@ def _calibrate(rounds: int = 3) -> float:
     return best if best else _CALIB_REF_S
 
 
+def _calibrate_io(rounds: int = 3) -> float:
+    """Seconds for a fixed FILESYSTEM round-trip. MIN of `rounds`, like the CPU probe.
+
+    Exists because the CPU probe cannot see the contention that actually causes the overruns -
+    measured 0.90x on a box where this probe measured 3.00x. Small files, written and read
+    back, because that is the shape of the work the slow selftests do.
+    """
+    best = None
+    for _ in range(rounds):
+        d = tempfile.mkdtemp(prefix="unbluff-cal-")
+        try:
+            t = time.perf_counter()
+            for i in range(_CALIB_IO_FILES):
+                p = os.path.join(d, "f%d.txt" % i)
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write("x" * 512)
+                with open(p, encoding="utf-8") as fh:
+                    fh.read()
+            el = time.perf_counter() - t
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        best = el if best is None else min(best, el)
+    return best if best else _CALIB_IO_REF_S
+
+
 def load_factor() -> float:
     """How many times slower this box is than the reference, floored at 1.0 and CAPPED.
+
+    The WORSE of a CPU ratio and an I/O ratio. Either resource being contended makes a
+    selftest slow, so normalising by only one of them under-corrects exactly when it matters -
+    which is how the flake came back on 2026-08-14.
 
     Capped so a pathologically slow machine cannot scale the budget to infinity and silently
     disable the check; when the cap binds, report() says so rather than absorbing it.
     """
     try:
-        return max(1.0, min(_LOAD_FACTOR_CAP, _calibrate() / _CALIB_REF_S))
+        cpu = _calibrate() / _CALIB_REF_S
+        io = _calibrate_io() / _CALIB_IO_REF_S
+        return max(1.0, min(_LOAD_FACTOR_CAP, max(cpu, io)))
     except Exception:
         return 1.0        # never let the CONTROL break the check it is controlling
 
@@ -309,6 +359,22 @@ def selftest() -> int:
     # deterministic. Without the third probe the inconclusive branch would be unexercised -
     # and an unexercised branch in a checking instrument is exactly what this repo treats as
     # not existing.
+    # [2026-08-14] The I/O half of the control must PARTICIPATE. Asserted by forcing the I/O
+    # probe high rather than by generating load, so it is deterministic: a load-dependent
+    # assertion in the very check that exists to survive load would be its own flake.
+    # Without this, reverting to a CPU-only factor is invisible - and that revert is exactly
+    # what let meta_audit's selftest read 64s against a 2.5x correction.
+    _real_io_probe = globals()["_calibrate_io"]
+    try:
+        globals()["_calibrate_io"] = lambda rounds=3: _CALIB_IO_REF_S * 4.0
+        _f = load_factor()
+        if _f < 3.5:
+            fails.append("load_factor() ignored a 4x I/O probe (got %.2fx) - the control is "
+                         "CPU-only again, and a CPU probe measured 0.90x on a box where I/O "
+                         "was 3.00x slower" % _f)
+    finally:
+        globals()["_calibrate_io"] = _real_io_probe
+
     #   raw over, normalised UNDER  -> inconclusive, returns NO problem
     if report(0.5, "inconclusive-probe", t0=time.time() - 20.0, factor=4.0):
         fails.append("a run that is over budget only because the box is 4x slow must be "

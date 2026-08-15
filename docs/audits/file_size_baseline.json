@@ -1,0 +1,14 @@
+{
+  "_note": "The 800-line offenders as they stood when the gate was built, DERIVED by walking the tree - not the hand-maintained list the plan carried, which was missing tools/no_regression.py at 805 lines. The gate is a RATCHET: a new offender or a recorded one growing is a FAILURE; shrinking is reported so this file can be re-recorded tighter. Every entry here is DEBT, and it can only go down.",
+  "recorded_utc": "2026-08-14",
+  "limit": 800,
+  "over_limit": {
+    "hooks/duplicate_registration_check.py": 858,
+    "hooks/fast_test_on_stop.py": 832,
+    "hooks/fast_test_on_stop_selftest.py": 1003,
+    "hooks/pre_push_gate_selftest.py": 1109,
+    "install.py": 927,
+    "tools/mutation_check.py": 1377,
+    "tools/no_regression.py": 805
+  }
+}

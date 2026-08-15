@@ -47,6 +47,11 @@ AUX_GATES = (
     # review while its comment called itself DERIVED. 9 of 25 hook files were unguarded, 5 of
     # them imported by production hooks.
     ("install-guard", ("install.py",), ("--selftest",)),
+    # [800-LINE RULE] Enforced by NOTHING until 2026-08-14, and the count it was tracked with
+    # was wrong: the plan carried a hand-maintained list of offenders that each session added
+    # to, and nobody walked the tree - tools/no_regression.py at 805 lines was over the limit
+    # and in no list at all. A RATCHET, not a hard fail: red-for-weeks gets disabled.
+    ("file-size", ("tools", "check_file_size.py"), ("--selftest",)),
     # [SHIP-BAR] Criterion 2's stopping rule, as a CONTROL rather than prose: no CRITICAL or
     # HIGH may be unbuilt, severities are DERIVED from the review report every run, and the
     # hand-adjudicated state ledger is RECONCILED against it - which is exactly the drift that
