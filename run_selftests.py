@@ -21,6 +21,12 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# [2026-08-14] The suite's own DURATION. It grew from ~56s to 109.1s in a day and
+# silently approached the pre-push gate's 120s ceiling until that gate BLOCKED a correct
+# push. Growth that is only discovered at the ceiling is growth nobody was watching, so
+# it is recorded in the gate ledger beside the result.
+import time as _time
+_STARTED = _time.perf_counter()
 sys.path.insert(0, os.path.join(HERE, "hooks"))
 
 # ONE detector, imported - not a second copy. This file and hook_health_check.py each carried
@@ -230,7 +236,7 @@ def main():
     if os.path.exists(fresh):
         subprocess.run([sys.executable, fresh], stdin=subprocess.DEVNULL)
 
-    record_gate_run(ran, failed, skipped)
+    record_gate_run(ran, failed, skipped, round(_time.perf_counter() - _STARTED, 1))
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
         return 1
@@ -241,7 +247,7 @@ def main():
     return 0
 
 
-def record_gate_run(ran, failed, skipped=()):
+def record_gate_run(ran, failed, skipped=(), seconds=0.0):
     """Append this run to docs/audits/gate_runs.json.
 
     A gate that did not run leaves no trace in the code or the docs, so "were the gates
@@ -260,7 +266,8 @@ def record_gate_run(ran, failed, skipped=()):
         sys.path.insert(0, os.path.join(HERE, "tools"))
         import gate_ledger
         gate_ledger.record("run_selftests", "PASS" if not failed else "FAIL",
-                           ran=ran, failed=sorted(failed), skipped=sorted(skipped))
+                           ran=ran, failed=sorted(failed), skipped=sorted(skipped),
+                           seconds=seconds)
     except Exception:
         pass
 
