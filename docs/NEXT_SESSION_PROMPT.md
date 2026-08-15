@@ -328,6 +328,37 @@ everything deferred keeps a home. The DoD is not widened and criteria 1/3/4 are 
             data is mostly known already (FTB-RC4 -> FTB-7, FTB-MASK -> FTB-8, FTB-SPELL ->
             FTB-9, FTB-CFG/LAYOUT -> FTB-10/11/12, ROSTER-DERIVE -> RD-1/RD-2, WT-CAUSE ->
             WT-1), so this is a mapping job plus ~10 lines of assertion.
+          [NEW 08-14, SCHEDULED - FIRST NEXT SESSION] An INDEPENDENT ADVERSARIAL REVIEW of the
+            three gates authored on 08-14: tools/ship_bar_gate.py, tools/check_file_size.py,
+            tools/gate_ledger.py, plus the selftest_budget I/O control. The repo's rule 6 is
+            not optional here - I wrote all three AND every one of their probes, which is
+            precisely "the author's probe set and the author's blind spot are the same
+            object". These are GATE and GOVERNANCE logic, the exact risk class rule 6 names as
+            REQUIRED. Not run on 08-14 because context was ~86% and a 6.84M-token fan-out
+            could not be consumed responsibly; running it badly is worse than scheduling it.
+            EVIDENCE THAT IT IS NEEDED, from the same day: the file-size gate was registered
+            with ("--selftest",) instead of (), so the suite verified the ratchet LOGIC and
+            never applied it to the repo - mutation_check.py grew 1377 -> 1399 with the suite
+            reporting 37/37 while the gate run BY HAND said FAIL. That is a gate wired in a
+            mode that cannot catch anything, found by the close ritual rather than by any
+            probe I wrote.
+          [NEW 08-14, SCHEDULED] meta_audit_on_stop's selftest is at 15.22s of its 17.50s
+            budget - 87% - so it tips over on ordinary variance. Independent of the I/O
+            control fix, and it is the next thing to trip. Either make the selftest cheaper or
+            re-derive its share; do NOT just widen the budget.
+          [NEW 08-14, SCHEDULED] tools/mutation_check.py is the TOP SPLIT CANDIDATE at 1399
+            lines. The file-size baseline records an ACCEPTED growth 1377 -> 1399 (new
+            mutation entries, i.e. coverage not bloat) and says so out loud, because
+            RE-RECORDING IS THE LOOPHOLE in a ratchet design. The next growth should be
+            preceded by the split, not by another re-record.
+          [NEW 08-14, SCHEDULED] tools/no_regression.py at 805 lines - over the limit and in
+            NO list until the tree was walked on 08-14. It has no other debt attached; it is
+            listed so the discovery is not lost.
+          [NEW 08-14, SCHEDULED - LOW] Run `silent-failure-hunter` over the day's new code.
+            gate_ledger.record(), the ledger call sites in mutation_check / run_selftests /
+            score_false_alarms / test_integration, and ship_bar's import all swallow
+            exceptions deliberately (bookkeeping must never fail a gate) - but "deliberate"
+            and "unreviewed" are different words, and that is the skill's exact subject.
           [NEW 08-14, SCHEDULED - HIGH for the process, and it BLOCKED a clean sweep]
             SELFTEST-BUDGET-FLAKE HAS RECURRED, in a form the 2026-08-12 control does not
             cover. MEASURED: meta_audit_on_stop's selftest takes 6.08s of its 17.50s budget

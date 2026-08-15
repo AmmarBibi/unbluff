@@ -57,12 +57,24 @@ AUX_GATES = (
     # was wrong: the plan carried a hand-maintained list of offenders that each session added
     # to, and nobody walked the tree - tools/no_regression.py at 805 lines was over the limit
     # and in no list at all. A RATCHET, not a hard fail: red-for-weeks gets disabled.
-    ("file-size", ("tools", "check_file_size.py"), ("--selftest",)),
+    # Registered as the MEASUREMENT, not --selftest. Registering the selftest was the first
+    # version and it was WORTHLESS: the suite verified that the ratchet LOGIC works and never
+    # applied it to the repo, so mutation_check.py grew 1377 -> 1399 with the suite reporting
+    # 37/37 while the gate itself, run by hand, said FAIL. A gate wired in a mode that cannot
+    # catch anything is this repo's own defect class, committed while building the gate for it.
+    # (Contrast false-alarm-scorer, where --selftest IS the gate for a stated reason: its
+    # measurement carries a known, adjudicated false alarm and would keep the suite red.)
+    ("file-size", ("tools", "check_file_size.py"), ()),
     # [SHIP-BAR] Criterion 2's stopping rule, as a CONTROL rather than prose: no CRITICAL or
     # HIGH may be unbuilt, severities are DERIVED from the review report every run, and the
     # hand-adjudicated state ledger is RECONCILED against it - which is exactly the drift that
     # made "the remaining 8 findings" unverifiable (its list named five items marked BUILT).
-    ("ship-bar", ("tools", "ship_bar_gate.py"), ("--selftest",)),
+    # MEASUREMENT, not --selftest, for the same reason as file-size above and found in the
+    # same close ritual: registered as a selftest this verified that the stopping RULE works
+    # while never once reading the real findings ledger. A stopping rule that never looks at
+    # the findings is not a control, it is a unit test with a gate's name. Its logic stays
+    # pinned by SHIPBAR-1..4, whose verify target IS the selftest.
+    ("ship-bar", ("tools", "ship_bar_gate.py"), ()),
     # [SHIP-BAR enabler] The gate LEDGER's own retention rule. It recorded 1 of 5 tiers for
     # days, and the fix is not just "let other tiers write" - the cap was GLOBAL, so the
     # cheapest gate would evict the record of the 30-minute sweep as soon as both wrote.
