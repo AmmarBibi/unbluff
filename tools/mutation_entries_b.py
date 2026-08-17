@@ -575,4 +575,19 @@ ENTRIES = [
      "being enforced, so a silently dropped table row reads as a smaller population",
      [("    if declared is not None and declared != len(report_rows):",
        "    if False and declared != len(report_rows):")], False),
+    # [FILE-SIZE 2026-08-16] The three defects review wf_f63b9ccf-816 confirmed in the ratchet's
+    # inputs rather than in its rule - which is why the rule's five existing pins were all green.
+    ("tools/check_file_size", "FS-TRISTATE", "an unreadable baseline collapses back to an empty "
+     "one, so 'I could not look' is reported as seven substantive NEW-offender failures",
+     [('    except ValueError:\n        return {}, "unreadable"',
+       '    except ValueError:\n        return {}, "absent"')], False),
+    ("tools/check_file_size", "FS-REVERSE", "the reverse walk stops naming baseline entries "
+     "that no longer qualify, so the recorded count silently overstates the debt",
+     [("    out = []\n    for rel in sorted(baseline):", "    out = []\n    for rel in []:")],
+     False),
+    ("tools/check_file_size", "FS-COUNT", "line_count returns 0 for every file, leaving the "
+     "gate green with a healthy-looking denominator and no file ever over the limit",
+     [("    with io.open(path, encoding=\"utf-8\", errors=\"replace\") as f:\n"
+       "        return sum(1 for _ in f)",
+       "    return 0")], False),
 ]
