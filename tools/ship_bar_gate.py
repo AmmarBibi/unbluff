@@ -124,16 +124,63 @@ def violations(findings) -> list:
     return out
 
 
-def reconcile(findings, report_rows) -> list:
-    """Problems that make the COUNT itself untrustworthy, before any verdict is given."""
+def declared_count(path=REPORT):
+    """The N the report itself claims in '## Confirmed (N)', or None if it does not say.
+
+    [2026-08-16] The report's own declared total was parsed by NOTHING, so the gate printed two
+    denominators in one PASS and reconciled neither. A heading that disagrees with the table
+    beneath it means the table was edited and the heading was not - or the parser silently
+    dropped a row whose shape it did not recognise, which is the failure that matters.
+    """
+    text = io.open(path, encoding="utf-8").read()
+    m = re.search(r"^##\s+Confirmed\s*\((\d+)\)", text, re.M)
+    return int(m.group(1)) if m else None
+
+
+def reconcile(findings, report_rows, declared=None) -> list:
+    """Problems that make the COUNT itself untrustworthy, before any verdict is given.
+
+    A BIJECTION, as of 2026-08-16. It used to compare len() and then walk findings -> report
+    only, matching on `where`, which is not unique. Review wf_f63b9ccf-816 confirmed three
+    separate escapes through that (findings #3, #7, #10, #11):
+      - a confirmed HIGH present in the report and ABSENT from findings.json passed, because
+        nothing ever walked report -> findings;
+      - a row could be swapped for a DUPLICATE of another row and the length still matched;
+      - a HIGH could be laundered into a shippable MEDIUM by editing one field, because the
+        severity histogram was printed but never compared.
+    Comparing multisets of (severity, where) closes all three at once, and reports BOTH
+    directions with counts rather than a single length mismatch.
+    """
     problems = []
-    if len(findings) != len(report_rows):
-        problems.append("findings.json has %d row(s), the report's Confirmed table has %d - "
-                        "one of them is stale, and the open-count cannot be trusted until "
-                        "they agree" % (len(findings), len(report_rows)))
-    by_where = {}
+    report_ms = {}
     for sev, where, _f in report_rows:
-        by_where.setdefault(where, []).append(sev)
+        report_ms[(sev, where)] = report_ms.get((sev, where), 0) + 1
+    findings_ms = {}
+    for r in findings:
+        key = (r.get("severity"), r.get("where"))
+        findings_ms[key] = findings_ms.get(key, 0) + 1
+
+    for key in sorted(set(report_ms) | set(findings_ms), key=lambda k: (str(k[0]), str(k[1]))):
+        in_report, in_findings = report_ms.get(key, 0), findings_ms.get(key, 0)
+        if in_report == in_findings:
+            continue
+        sev, where = key
+        if in_findings < in_report:
+            problems.append("the report has %d row(s) of [%s] %r and findings.json has %d - a "
+                            "confirmed finding present in the canonical table and missing from "
+                            "the ledger is UNADJUDICATED, not absent"
+                            % (in_report, sev, where, in_findings))
+        else:
+            problems.append("findings.json has %d row(s) of [%s] %r and the report has %d - the "
+                            "ledger claims an adjudication the canonical table does not carry"
+                            % (in_findings, sev, where, in_report))
+
+    if declared is not None and declared != len(report_rows):
+        problems.append("the report's heading declares '## Confirmed (%d)' but %d row(s) parsed "
+                        "out of its table - either the heading is stale or a row shape was "
+                        "silently dropped by the parser, and both make the total a guess"
+                        % (declared, len(report_rows)))
+
     for r in findings:
         st = r.get("state")
         if st not in STATES:
@@ -142,15 +189,9 @@ def reconcile(findings, report_rows) -> list:
             problems.append("%s is %s and marked FINALIZED-EXCLUSION - an exclusion cannot "
                             "rescue a CRITICAL or HIGH; re-adjudicate the SEVERITY in the "
                             "report instead" % (r.get("id"), r.get("severity")))
-        where = r.get("where")
-        if where not in by_where:
-            problems.append("%s cites %r, which appears in no report row - severity is DERIVED "
-                            "from the report, so a row that cannot be matched is unverified"
-                            % (r.get("id"), where))
-        elif r.get("severity") not in by_where[where]:
-            problems.append("%s records severity %s but the report says %r for %s - the "
-                            "hand-entered ledger has drifted from the canonical table"
-                            % (r.get("id"), r.get("severity"), by_where[where], where))
+    # The old per-row `where` and severity-membership checks lived here. The multiset diff above
+    # subsumes both and is strictly stronger: membership accepted ANY row sharing a `where`,
+    # which is what let a duplicate stand in for a missing row.
     return problems
 
 
@@ -158,11 +199,22 @@ def main() -> int:
     try:
         scope, findings = load_findings()
         report_rows = confirmed_from_report()
+        declared = declared_count()
     except (OSError, ValueError) as exc:
         print("ship-bar: CANNOT RUN - %s" % exc)
         return 1
 
-    problems = reconcile(findings, report_rows)
+    # [2026-08-16] The FLOOR now lives here, in main(), not only in selftest(). It was asserted
+    # exclusively in selftest() - which no registered invocation executes - so the stopping rule
+    # would have passed over a ZERO-row population with the suite reporting green. A stopping
+    # rule that cannot tell "nothing blocks" from "I read nothing" is not a control.
+    if not findings or not report_rows:
+        print("ship-bar: CANNOT RUN - parsed %d finding(s) and %d report row(s). A stopping "
+              "rule over an empty population is not a PASS, it is a gate that read nothing."
+              % (len(findings), len(report_rows)))
+        return 1
+
+    problems = reconcile(findings, report_rows, declared=declared)
     blocking = violations(findings)
     counts = {}
     for r in findings:
@@ -220,11 +272,18 @@ def selftest() -> int:
         fails.append("a CRITICAL marked FINALIZED-EXCLUSION was accepted - that reopens the "
                      "loophole the stopping rule exists to close")
 
-    # DRIFT: a hand-entered severity that disagrees with the report must FAIL
+    # DRIFT: a hand-entered severity that disagrees with the report must FAIL.
+    # [2026-08-16] This asserted `any("drifted" in p)` - the wording of the old one-directional
+    # message. The bijection that replaced it reports the SAME defect more completely, as two
+    # problems naming both sides, so the assertion now checks the BEHAVIOUR (both severities are
+    # named) instead of a substring. Strictly stronger: the old text could be produced while the
+    # report-side row went unmentioned, which is the direction that used to pass silently.
     probs = reconcile([{"id": "x", "severity": "LOW", "state": "BUILT", "where": "z"}],
                       [("CRITICAL", "z", "f")])
-    if not any("drifted" in p for p in probs):
-        fails.append("a ledger severity that contradicts the canonical report was accepted")
+    if not (probs and any("CRITICAL" in p for p in probs) and any("LOW" in p for p in probs)):
+        fails.append("a ledger severity that contradicts the canonical report was accepted, or "
+                     "was reported without naming both the claimed and the canonical severity: "
+                     "%r" % (probs,))
 
     # COUNT drift both ways
     if not any("row(s)" in p for p in reconcile([], [("LOW", "z", "f")])):
@@ -285,6 +344,35 @@ def selftest() -> int:
         except ValueError:
             pass
 
+    # [BIJECTION 2026-08-16] The three escapes review wf_f63b9ccf-816 confirmed through the old
+    # one-directional, non-unique-key reconcile. Each is asserted against the RULE, not the file.
+    _rep = [("HIGH", "a.py", "finding A"), ("MEDIUM", "b.py", "finding B")]
+    _led = [{"id": "1", "severity": "HIGH", "where": "a.py", "state": "BUILT"},
+            {"id": "2", "severity": "MEDIUM", "where": "b.py", "state": "BUILT"}]
+    if reconcile(_led, _rep):
+        fails.append("a ledger that MATCHES the report was reported as a problem: %r"
+                     % (reconcile(_led, _rep),))
+    # (a) a confirmed row present in the report and absent from the ledger. The old code walked
+    #     findings -> report only, so this direction passed silently.
+    if not reconcile(_led[:1], _rep):
+        fails.append("a report row missing from findings.json passed reconcile - the direction "
+                     "report -> ledger is unchecked again, and an unadjudicated HIGH ships")
+    # (b) a DUPLICATE standing in for a missing row. Lengths still match, so a count comparison
+    #     cannot see it and `where`-membership accepted any row sharing the key.
+    _dup = [dict(_led[0]), dict(_led[0], id="2")]
+    if not reconcile(_dup, _rep):
+        fails.append("a duplicated row substituted for a missing one passed reconcile - the "
+                     "count matches, which is exactly why a count is not a reconciliation")
+    # (c) severity laundering: one field edited turns a blocking HIGH into a shippable MEDIUM.
+    _laundered = [dict(_led[0], severity="MEDIUM"), _led[1]]
+    if not reconcile(_laundered, _rep):
+        fails.append("a HIGH rewritten as MEDIUM in the ledger passed reconcile - severity is "
+                     "supposed to be DERIVED from the report, so this is the whole design")
+    # (d) the report's own declared total must be enforced, not just printed.
+    if not reconcile(_led, _rep, declared=99):
+        fails.append("a '## Confirmed (N)' heading disagreeing with its own table passed - the "
+                     "gate printed two denominators and reconciled neither")
+
     # and the REAL report, when it is reachable (it is not, inside a mutation scratch tree)
     real = 0
     if os.path.isfile(REPORT):
@@ -292,8 +380,12 @@ def selftest() -> int:
         if real < 20:
             fails.append("only %d confirmed row(s) parsed from the real report - the table "
                          "shape changed and every severity is unverified" % real)
+        _declared = declared_count()
+        if _declared is not None and _declared != real:
+            fails.append("the real report declares %d confirmed but %d row(s) parse out of its "
+                         "table" % (_declared, real))
 
-    print("-- ship-bar: rule asserted both directions; synthetic parse OK; real report %s"
+    print("-- ship-bar: rule asserted both directions; bijection asserted 4 ways; real report %s"
           % ("%d row(s)" % real if real else "not reachable here (scratch tree)"))
     for f in fails:
         print("SELFTEST FAIL:", f)

@@ -168,10 +168,15 @@ ENTRIES = [
      "so the gate can report PASS over an undeclared subset - its own first version covered 24 "
      "findings while 42 more, ten of them HIGH, sat outside an unstated boundary",
      [('        if not scope.get(key):', "        if False:")], False),
+    # [2026-08-16] Anchor repointed. This targeted `elif r.get("severity") not in
+    # by_where[where]` - the one-directional membership check that the multiset bijection
+    # replaced. The DEFECT it pins is unchanged (a severity silently downgraded by retyping);
+    # only the code that decides it moved. Left as a stale anchor it would have been a mutation
+    # that cannot be PLACED, which proves nothing and must never read as a pass.
     ("tools/ship_bar_gate", "SHIPBAR-3", "the hand-entered ledger stops being reconciled against "
      "the report's canonical severities, so a severity can be silently downgraded by retyping",
-     [('        elif r.get("severity") not in by_where[where]:', "        elif False:")],
-     False),
+     [("        if in_report == in_findings:\n            continue",
+       "        if True:\n            continue")], False),
     # [SHIP-BAR enabler] The gate ledger's retention rule. Reverting it to a GLOBAL cap is the
     # exact shape the original had: the cheapest, most frequent gate evicts the record of the
     # 30-minute sweep, so the tier whose last-run date actually matters is the first to vanish.
@@ -557,4 +562,17 @@ ENTRIES = [
      [('gate_ledger.record("file_size", "FAIL" if failing else "PASS"',
        'gate_ledger.record("not_file_size", "FAIL" if failing else "PASS"')],
      False, "./run_selftests"),
+    # [BIJECTION 2026-08-16] reconcile() was one-directional and keyed on a non-unique field, so
+    # a confirmed HIGH could be absent from the ledger, a duplicate could stand in for a missing
+    # row, and a HIGH could be laundered into a shippable MEDIUM - all with the count matching.
+    ("tools/ship_bar_gate", "SHIPBAR-BIJ", "reconcile goes back to walking ledger -> report "
+     "only, so a confirmed finding missing from findings.json is never noticed",
+     [("        in_report, in_findings = report_ms.get(key, 0), findings_ms.get(key, 0)\n"
+       "        if in_report == in_findings:\n            continue",
+       "        in_report, in_findings = report_ms.get(key, 0), findings_ms.get(key, 0)\n"
+       "        if in_report >= in_findings:\n            continue")], False),
+    ("tools/ship_bar_gate", "SHIPBAR-DECL", "the report's own '## Confirmed (N)' heading stops "
+     "being enforced, so a silently dropped table row reads as a smaller population",
+     [("    if declared is not None and declared != len(report_rows):",
+       "    if False and declared != len(report_rows):")], False),
 ]
