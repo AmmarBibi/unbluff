@@ -31,6 +31,19 @@ BASELINE = os.path.join(REPO, "docs", "audits", "file_size_baseline.json")
 LIMIT = 800
 SKIP_DIRS = (".git", "__pycache__", "node_modules", ".venv", "venv")
 
+# [2026-08-16] Was `import gate_ledger` inside main()'s try/except, which resolved ONLY because
+# `python tools/check_file_size.py` happens to put tools/ at sys.path[0]. Under `python -m` or
+# any in-process import from another cwd it raised, the blanket except swallowed it, and the
+# gate passed, exited 0 and recorded NOTHING - a tier silently missing from the ledger that a
+# ship bar reads. Import once, at module scope, with the path set explicitly, and SAY SO when it
+# fails instead of treating "could not record" as indistinguishable from "recorded".
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import gate_ledger
+except ImportError as _e:                          # narrow: only the import, not the recording
+    gate_ledger = None
+    print("[file-size] NOTE: gate_ledger unavailable (%s) - this run will not be recorded" % _e)
+
 
 def line_count(path: str) -> int:
     with io.open(path, encoding="utf-8", errors="replace") as f:
@@ -100,16 +113,20 @@ def main() -> int:
     if shrunk:
         print("file-size: %d recorded offender(s) SHRANK - re-record to tighten the ratchet: %s"
               % (len(shrunk), ", ".join("%s %d->%d" % (r, w, n) for r, n, w in shrunk)))
-    if new_offenders or grown:
+    # RECORD ON EVERY EXIT PATH, with the REAL verdict. The record call used to sit below the
+    # failure return with the result hardcoded "PASS", so this gate could not appear red in the
+    # ledger at all: a failing run wrote nothing and last_run() kept returning the previous
+    # PASS. Any ship bar built on that ledger reads a stale green. Found by review
+    # wf_f63b9ccf-816 as two findings (#4, #15) against the two gates that shared the shape.
+    failing = bool(new_offenders or grown)
+    if gate_ledger is not None:
+        gate_ledger.record("file_size", "FAIL" if failing else "PASS", walked=len(sizes),
+                           over_limit=len(still_over), new=len(new_offenders),
+                           grown=len(grown), shrunk=len(shrunk))
+    if failing:
         print("file-size: FAIL")
         return 1
     print("file-size: OK - no new offender, none grew")
-    try:
-        import gate_ledger
-        gate_ledger.record("file_size", "PASS", walked=len(sizes),
-                           over_limit=len(still_over), new=0, grown=0)
-    except Exception:
-        pass
     return 0
 
 

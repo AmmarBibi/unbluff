@@ -190,6 +190,43 @@ SELFTEST_IS_THE_GATE = {
 }
 
 
+# [RECORD-SITES] Which tiers must leave a row in the gate ledger, and under what gate name.
+# The ship bar's verify-before-pushing half reads this ledger, so a tier that stops recording
+# makes that gate read a STALE result rather than no result - the failure is silent and looks
+# like success. Review wf_f63b9ccf-816 finding #40: deleting the recording from both gates left
+# every gate, selftest and anchor check green. Checked in BOTH directions, like NOT_A_GATE.
+RECORDING_TIERS = {
+    "run_selftests.py": "run_selftests",
+    os.path.join("tools", "mutation_check.py"): "mutation_sweep",
+    os.path.join("tools", "ship_bar_gate.py"): "ship_bar",
+    os.path.join("tools", "check_file_size.py"): "file_size",
+    os.path.join("tools", "score_false_alarms.py"): "false_alarm_scorer",
+    os.path.join("tests", "test_integration.py"): "integration",
+}
+
+
+def unrecorded_tiers(root: str, tiers=RECORDING_TIERS) -> list:
+    """Tiers that no longer call gate_ledger.record() under their declared gate name.
+
+    Textual on purpose: the question is whether the CALL SITE still exists in the source, and an
+    import-and-execute would run the tier. A tier whose recording is deleted still passes every
+    other check in this repo, which is exactly why this one is cheap and textual.
+    """
+    gone = []
+    for rel, gate in sorted(tiers.items()):
+        path = os.path.join(root, rel)
+        try:
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+        except OSError:
+            gone.append("%s (unreadable - a tier that cannot be read is not a tier that records)"
+                        % rel)
+            continue
+        if "gate_ledger.record(" not in src or '"%s"' % gate not in src:
+            gone.append("%s (no gate_ledger.record(...) under the name %r)" % (rel, gate))
+    return gone
+
+
 def enforcing_mode_gaps(root: str, gates=AUX_GATES, adjudicated=SELFTEST_IS_THE_GATE) -> tuple:
     """(unadjudicated, stale_adjudications) for gates registered in --selftest mode.
 
@@ -367,6 +404,16 @@ def main():
               f"{stale_adjudications}. Remove them, or the list rots into cover.")
         failed.append("gate-modes")
 
+    # [RECORD-SITES] A tier that stops recording makes the ship bar read a STALE row instead of
+    # no row - silent, and it looks like success. Denominator printed either way.
+    unrecorded = unrecorded_tiers(HERE)
+    print(f"-- ledger call sites: {len(RECORDING_TIERS)} tier(s) declared, "
+          f"{len(RECORDING_TIERS) - len(unrecorded)} still recording")
+    if unrecorded:
+        print(f"FAIL: {len(unrecorded)} declared tier(s) no longer record to the gate ledger, so "
+              f"last_run() would serve a stale result forever: {unrecorded}")
+        failed.append("ledger-call-sites")
+
     # Informational every run, a BLOCKER only at release (--release). Printing it here is the
     # point: "CI green" and "reviewed since it last changed" are different questions, and the
     # second one had no answer at all until this ledger existed.
@@ -489,6 +536,32 @@ def selftest() -> int:
         if enforcing_mode_gaps(td, gates=flipped_back, adjudicated={})[0] != ["enforcing"]:
             fails.append("flipping () -> ('--selftest',) went UNDETECTED, which is exactly the "
                          "one-token disarm this control exists to stop")
+
+    # 4. [RECORD-SITES] the rule on a synthetic tree, then the live one. A tier whose recording
+    #    is deleted keeps passing every other check in this repo, so this assertion is the only
+    #    thing standing between "the ship bar reads a fresh row" and "it reads a stale one".
+    with tempfile.TemporaryDirectory() as td:
+        good = os.path.join(td, "good.py")
+        with open(good, "w", encoding="utf-8") as f:
+            f.write('gate_ledger.record("mine", "PASS")\n')
+        silent = os.path.join(td, "silent.py")
+        with open(silent, "w", encoding="utf-8") as f:
+            f.write('print("I am a tier that forgot to record")\n')
+        wrong = os.path.join(td, "wrong.py")
+        with open(wrong, "w", encoding="utf-8") as f:
+            f.write('gate_ledger.record("somebody_elses_name", "PASS")\n')
+        got = unrecorded_tiers(td, tiers={"good.py": "mine", "silent.py": "mine",
+                                          "wrong.py": "mine", "absent.py": "mine"})
+        flagged = sorted(g.split(" ")[0] for g in got)
+        if flagged != ["absent.py", "silent.py", "wrong.py"]:
+            fails.append("unrecorded_tiers() flagged %r; a tier that records under ANOTHER "
+                         "gate's name, one that records nothing, and one that cannot be read "
+                         "must all be reported, and a correct one must not" % (flagged,))
+
+    live_unrecorded = unrecorded_tiers(HERE)
+    if live_unrecorded:
+        fails.append("%d declared tier(s) no longer record to the gate ledger: %r"
+                     % (len(live_unrecorded), live_unrecorded))
 
     # ...and the live table must be clean right now, or the suite is lying about itself.
     live_gaps, live_stale = enforcing_mode_gaps(HERE)

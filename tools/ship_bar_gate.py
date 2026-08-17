@@ -47,6 +47,17 @@ FINDINGS = os.path.join(REPO, "docs", "audits", "findings.json")
 BLOCKING = ("CRITICAL", "HIGH")
 STATES = ("BUILT", "SCHEDULED", "FINALIZED-EXCLUSION")
 
+# [2026-08-16] Same fix as check_file_size.py, and for the same measured reason: this was
+# `import gate_ledger` inside main()'s try/except, so it resolved only under `python
+# tools/ship_bar_gate.py`. Any other invocation raised, the blanket except ate it, and the gate
+# exited 0 having recorded nothing.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import gate_ledger
+except ImportError as _e:                          # narrow: only the import, not the recording
+    gate_ledger = None
+    print("[ship-bar] NOTE: gate_ledger unavailable (%s) - this run will not be recorded" % _e)
+
 
 def confirmed_from_report(path=REPORT) -> list:
     """[(severity, where, finding)] parsed from the report's own Confirmed table. DERIVED."""
@@ -171,18 +182,20 @@ def main() -> int:
     for r in blocking:
         print("ship-bar BLOCK: %s [%s] is %s, not BUILT - %s"
               % (r.get("id"), r.get("severity"), r.get("state"), r.get("where")))
-    if problems or blocking:
+    # RECORD ON EVERY EXIT PATH with the REAL verdict - see the twin fix in check_file_size.py.
+    # Recording only below the failure return, with "PASS" hardcoded, meant this gate could not
+    # appear red in the ledger and last_run() kept serving a stale PASS after a failing run.
+    open_rows = [r for r in findings if r.get("state") == "SCHEDULED"]
+    failing = bool(problems or blocking)
+    if gate_ledger is not None:
+        gate_ledger.record("ship_bar", "FAIL" if failing else "PASS", findings=len(findings),
+                           report_rows=len(report_rows), problems=len(problems),
+                           blocking=len(blocking), scheduled=len(open_rows))
+    if failing:
         print("ship-bar: FAIL - v1.0 cannot ship")
         return 1
-    open_rows = [r for r in findings if r.get("state") == "SCHEDULED"]
     print("ship-bar: PASS - no CRITICAL or HIGH is unbuilt. %d MEDIUM/LOW ship as written "
           "rows (%s)" % (len(open_rows), ", ".join(sorted(r["id"] for r in open_rows))))
-    try:
-        import gate_ledger
-        gate_ledger.record("ship_bar", "PASS", findings=len(findings),
-                           blocking=len(blocking), scheduled=len(open_rows))
-    except Exception:
-        pass
     return 0
 
 

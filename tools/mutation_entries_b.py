@@ -535,4 +535,26 @@ ENTRIES = [
      "reader is sent to fix an anchor that is fine",
      [('                cache[path] = (None' ', e)', '                cache[path] = ("", e)')],
      False, "tools/check_mutation_anchors"),
+    # [LEDGER 2026-08-16] Review wf_f63b9ccf-816 confirmed four ways gate_ledger could lose the
+    # record it exists to keep, and one reason none were caught: the selftest asserted
+    # prune/last_run/tiers and never once executed record(), the ONE function every caller uses.
+    ("tools/gate_ledger", "GL-REC", "record() hardcodes the gate name again, so every tier "
+     "writes under one label and the ledger reports 1 of 6 tiers - the original defect",
+     [('        row = {"gate": gate, "utc": _utc(), "result": result}',
+       '        row = {"gate": "run_selftests", "utc": _utc(), "result": result}')], False),
+    ("tools/gate_ledger", "GL-CORRUPT", "an unparseable ledger reads back as OK, so 'the file "
+     "is corrupt' and 'nothing ever ran' become the same answer again",
+     [('    except ValueError:\n        return [], "corrupt"',
+       '    except ValueError:\n        return [], "ok"')], False),
+    ("tools/gate_ledger", "GL-LOCK", "the lock is taken even while another writer holds it, so "
+     "two concurrent tiers clobber each other's rows and both report success",
+     [("            if age <= stale_s:\n                return None",
+       "            if False:\n                return None")], False),
+    # [RECORD-SITES] finding #40: deleting a tier's recording left every gate, selftest and
+    # anchor check green, so the ship bar would read a STALE row rather than no row.
+    ("tools/check_file_size", "SITES-1", "the file-size tier records under another gate's name, "
+     "so its own last_run() serves the previous PASS forever",
+     [('gate_ledger.record("file_size", "FAIL" if failing else "PASS"',
+       'gate_ledger.record("not_file_size", "FAIL" if failing else "PASS"')],
+     False, "./run_selftests"),
 ]
