@@ -182,8 +182,14 @@ def load_factor() -> float:
         cpu = _calibrate() / _CALIB_REF_S
         io = _calibrate_io() / _CALIB_IO_REF_S
         return max(1.0, min(_LOAD_FACTOR_CAP, max(cpu, io)))
-    except Exception:
-        return 1.0        # never let the CONTROL break the check it is controlling
+    except Exception as e:   # noqa: BLE001 - never let the CONTROL break the check it controls
+        # SAY SO. Returning a bare 1.0 made the error value IDENTICAL to the healthy value
+        # ("this box is exactly the reference speed"), and the failure message downstream then
+        # asserted a measurement that was never taken - "normalised for a machine measured 1.0x
+        # slower" when nothing was measured at all. Finding #36.
+        print("[selftest-budget] NOTE: the load control could not run (%s), so the elapsed time "
+              "was NOT normalised. Treat any budget verdict below as unnormalised." % e)
+        return 1.0
 
 
 def report(share: float = DEFAULT_SHARE, name: str = "", t0: float = 0.0,
@@ -201,7 +207,14 @@ def report(share: float = DEFAULT_SHARE, name: str = "", t0: float = 0.0,
     lf = factor if factor else load_factor()
     b = budget_s(share)
     normalised = elapsed / lf if lf else elapsed
-    over = normalised > b
+    # [2026-08-16] THE RAW CEILING BITES REGARDLESS OF THE CONTROL, and without this the whole
+    # check was structurally unable to fire. ARITHMETIC, not opinion: `normalised > b` needs
+    # elapsed > b * lf, and with the factor capped at 6.0 that is up to 6x the budget - but
+    # hook_health_check KILLS the subprocess at SELFTEST_TIMEOUT_S unconditionally. On any box
+    # measuring more than SELFTEST_TIMEOUT_S/b (~1.43x here) the process dies before the budget
+    # can ever report over, so the control normalised the check straight out of existence. The
+    # kill is not normalised, so the ceiling that predicts it must not be either. Finding #9.
+    over = normalised > b or elapsed > SELFTEST_TIMEOUT_S
     print(line(elapsed, share, name or "selftest", over)
           + (" [control: this box is %.1fx the reference, so %.2fs normalises to %.2fs]"
              % (lf, elapsed, normalised) if lf > 1.0 else ""))
@@ -216,6 +229,12 @@ def report(share: float = DEFAULT_SHARE, name: str = "", t0: float = 0.0,
               "beyond that is NOT being normalised away." % (name or "selftest", _LOAD_FACTOR_CAP))
     if not over:
         return []
+    if elapsed > SELFTEST_TIMEOUT_S:
+        return ["the selftest took %.2fs, past the %ds cap hook_health_check applies - it would "
+                "be KILLED there and reported to users as ERRORED/timed out. The load control "
+                "does not apply to this verdict: the kill is unconditional, so normalising the "
+                "prediction of it would only hide it (measured %.1fx, normalised %.2fs)."
+                % (elapsed, SELFTEST_TIMEOUT_S, lf, normalised)]
     return ["the selftest took %.2fs (%.2fs normalised for a machine measured %.1fx slower "
             "than the reference), over its %.2fs budget (share %.2f of the %ds cap "
             "hook_health_check applies when it runs this selftest in the weekly sweep). A "
@@ -364,14 +383,26 @@ def selftest() -> int:
     # assertion in the very check that exists to survive load would be its own flake.
     # Without this, reverting to a CPU-only factor is invisible - and that revert is exactly
     # what let meta_audit's selftest read 64s against a 2.5x correction.
+    # [2026-08-16] The stub is an ABSOLUTE duration, not a multiple of the constant under test.
+    # It used to be `_CALIB_IO_REF_S * 4.0`, and load_factor computes `_calibrate_io() /
+    # _CALIB_IO_REF_S` - so the constant CANCELLED and the ratio was 4.0 whatever the reference
+    # was. The probe therefore could not move no matter how the calibration constants were
+    # edited, which is the tautology finding #14 names: an assertion the implementation cannot
+    # violate. 0.0592 is 4x the RECORDED reference (0.0148), so shrinking _CALIB_IO_REF_S now
+    # changes the measured ratio and this assertion notices.
     _real_io_probe = globals()["_calibrate_io"]
     try:
-        globals()["_calibrate_io"] = lambda rounds=3: _CALIB_IO_REF_S * 4.0
+        globals()["_calibrate_io"] = lambda rounds=3: 0.0592
         _f = load_factor()
         if _f < 3.5:
             fails.append("load_factor() ignored a 4x I/O probe (got %.2fx) - the control is "
                          "CPU-only again, and a CPU probe measured 0.90x on a box where I/O "
                          "was 3.00x slower" % _f)
+        if _f > 4.6:
+            fails.append("a 0.0592s I/O probe produced %.2fx, but 0.0592s is 4x the RECORDED "
+                         "reference %.4fs - the calibration constant has been edited, which "
+                         "saturates the control at its cap and disables the budget check"
+                         % (_f, _CALIB_IO_REF_S))
     finally:
         globals()["_calibrate_io"] = _real_io_probe
 
@@ -383,6 +414,18 @@ def selftest() -> int:
     if not report(0.5, "genuine-overrun-probe", t0=time.time() - 200.0, factor=4.0):
         fails.append("a genuinely slow selftest must still FAIL after normalisation - the "
                      "control must not be able to absorb a real overrun")
+    #   [2026-08-16] PAST THE KILL, but normalised comfortably under budget. This is the state
+    #   the control could not report, and it is not a corner case - it is every overrun on any
+    #   box measuring more than SELFTEST_TIMEOUT_S/budget. 30s elapsed at 6.0x normalises to
+    #   5.0s against a 12.5s budget, so the old code returned NO problem for a selftest that
+    #   hook_health_check would have KILLED. The kill is unconditional; the prediction of it
+    #   must be too.
+    if not report(0.5, "past-the-kill-probe", t0=time.time() - (SELFTEST_TIMEOUT_S + 5.0),
+                  factor=_LOAD_FACTOR_CAP):
+        fails.append("a selftest that runs past the %ds kill was reported as fine because the "
+                     "load control normalised it under budget - the control had normalised the "
+                     "check out of existence, which is the only state it must never reach"
+                     % SELFTEST_TIMEOUT_S)
     #   the control itself must be bounded and never below 1.0
     _lf = load_factor()
     if not (1.0 <= _lf <= _LOAD_FACTOR_CAP):

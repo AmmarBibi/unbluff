@@ -590,4 +590,15 @@ ENTRIES = [
      [("    with io.open(path, encoding=\"utf-8\", errors=\"replace\") as f:\n"
        "        return sum(1 for _ in f)",
        "    return 0")], False),
+    # [BUDGET 2026-08-16] The control had normalised the check out of existence: with the factor
+    # capped at 6.0, `normalised > b` needs up to 6x the budget, but the subprocess is KILLED at
+    # SELFTEST_TIMEOUT_S. On any box above ~1.43x the budget check could not fire at all.
+    ("selftest_budget", "SB-KILL", "the raw ceiling is dropped, so a selftest that runs past "
+     "the unconditional kill is normalised under budget and reported as fine",
+     [("    over = normalised > b or elapsed > SELFTEST_TIMEOUT_S", "    over = normalised > b")],
+     False),
+    ("selftest_budget", "SB-IOREF", "the I/O calibration reference is shrunk, which saturates "
+     "the load factor at its cap and silently disables the budget check - SB-2's defect reached "
+     "from the constant instead of from the cap",
+     [("_CALIB_IO_REF_S = 0.0148", "_CALIB_IO_REF_S = 0.0037")], False),
 ]
