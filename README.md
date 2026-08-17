@@ -161,8 +161,10 @@ usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  install-guard: OK
 file-size: OK  ship-bar: OK  gate-ledger: OK  false-alarm-scorer: OK
 python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
-no-regression: OK  hook-provenance: OK  mutation-anchors: OK  corpus-scorer: OK
-all 37 selftests passed
+no-regression: OK  hook-provenance: OK  hook-provenance-selftest: OK
+mutation-anchors: OK  corpus-scorer: OK
+-- gate modes: 16 row(s) examined, 5 adjudicated as selftest-is-the-gate
+all 38 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

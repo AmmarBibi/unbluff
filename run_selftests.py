@@ -12,6 +12,7 @@ name listed there must remain self-testable, and losing its dispatch is an error
 than a silent skip.
 """
 
+import ast
 import datetime
 import glob
 import json
@@ -108,7 +109,14 @@ AUX_GATES = (
     # No gate in this repo read git's own wiring (core.hooksPath, .git/hooks), so nothing could
     # see it. This one asks provenance instead of directory-equality, so it keeps working after
     # the duplicate directory is deleted.
-    ("hook-provenance", ("tools", "hook_divergence_report.py"), ("--selftest",)),
+    # [MODE-CONTROL 2026-08-16] Was registered ("--selftest",) ALONE, so its enforcing
+    # measurement - the half that actually reads git's wiring on this machine - was invoked by
+    # nothing: not the suite, not CI, not the push path. An independent review found it; the
+    # new enforcing_mode_gaps() control then flagged it on its first run. Both halves are
+    # registered now, because they answer different questions: the measurement asks "is anything
+    # foreign wired HERE", the selftest asks "could this gate still see an offender at all".
+    ("hook-provenance", ("tools", "hook_divergence_report.py"), ()),
+    ("hook-provenance-selftest", ("tools", "hook_divergence_report.py"), ("--selftest",)),
     # [P14 M1] A mutation entry finds its target by a literal string, so an unrelated fix that
     # edits that line disarms the mutation SILENTLY - it stays green everywhere except the full
     # ~25-minute sweep, which is CI-only. Measured 2026-08-05: the B3 encoding change broke
@@ -128,6 +136,12 @@ AUX_GATES = (
 # check below fails if a tool appears in neither list, or if a name here stops existing.
 NOT_A_GATE = {
     "mutation_check.py",            # a gate, but minutes-long: CI runs it as its own job
+    # [SPLIT 2026-08-16] Pure DATA - the mutation table, moved out of mutation_check.py when it
+    # hit 1415 lines against the 800 limit. Not gates: they define no check and expose no
+    # dispatch, and mutation_check re-exports their contents as MUTATIONS, so the gate that
+    # runs them is the one already classified above.
+    "mutation_entries_a.py",
+    "mutation_entries_b.py",
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
     # [P14 B1] grades a cap-guard against tests/cap_spelling_corpus.py and prints the
@@ -137,6 +151,101 @@ NOT_A_GATE = {
     # reproduce.
     "make_hook_screenshot.py",      # docs asset generation
 }
+
+# [MODE-CONTROL] Labels whose --selftest registration IS the gate, each with the reason.
+#
+# WHY THIS EXISTS. AUX_GATES' third element is the argv a gate is invoked with, and until now
+# NOTHING read it. Registering a gate ("--selftest",) instead of () makes it check its own logic
+# and apply to nothing, while the suite, CI, readme-fresh and the mutation sweep all stay green -
+# readme-fresh because a mode flip changes no cardinality, and the sweep because every mutation is
+# verified via `<unit> --selftest`, which is identical in both modes. That is not hypothetical: it
+# happened to file-size and ship-bar on 2026-08-14, was fixed BY HAND in both, and no control was
+# built - so on 2026-08-16 an independent review reproduced it in one token on a clean clone,
+# planting a 900-line offender and getting `file-size: OK`.
+#
+# The prose at the AUX_GATES entries above already explained which rows are deliberately
+# --selftest. Prose is advisory; only a gate is a control (tooling-discipline 7.3). This dict is
+# the same reasoning in a form `enforcing_mode_gaps()` can FAIL on, and it is checked in BOTH
+# directions: a row that needs an adjudication and has none is a failure, and an adjudication for
+# a row that no longer needs one is a failure too, so the list cannot rot into cover the way an
+# exemption list does.
+SELFTEST_IS_THE_GATE = {
+    "consistency-audit-skill":
+        "audit.py's enforcing mode requires --deliverable and --sources; this repo ships no "
+        "deliverable to audit, so the selftest is the only runnable form of the gate",
+    "install-guard":
+        "install.py's enforcing mode INSTALLS into ~/.claude. Running it in the suite would "
+        "mutate the developer's machine on every test run, so the guard's selftest is the gate",
+    "false-alarm-scorer":
+        "the measurement carries a known, adjudicated false alarm (a corpus row). Wiring it "
+        "enforcing would either hold the suite permanently red or create pressure to delete the "
+        "corpus entry that found it - see the entry comment above",
+    "review-freshness-scope":
+        "its enforcing mode is --release, which blocks only at a release; the default run is a "
+        "measurement. The SCOPE check - does it ask about every tracked file - is the selftest",
+    "hook-provenance-selftest":
+        "the PAIRED row. Its enforcing form is registered separately as 'hook-provenance' with "
+        "argv (), so both halves run; this row exists because the measurement cannot prove the "
+        "gate can still SEE an offender on a machine that happens to have none wired",
+}
+
+
+def enforcing_mode_gaps(root: str, gates=AUX_GATES, adjudicated=SELFTEST_IS_THE_GATE) -> tuple:
+    """(unadjudicated, stale_adjudications) for gates registered in --selftest mode.
+
+    DERIVES the mode from the target's source rather than trusting the argv tuple, which is the
+    whole point: the tuple is what gets flipped. A row needs an adjudication when all three hold -
+    it is registered ("--selftest",), the target defines a `selftest`, and the target's `main` can
+    return non-zero. That last clause is what separates a real enforcing mode from a file whose
+    non-selftest path only prints (gate_ledger) or cannot fail (score_corpus).
+
+    can-fail is deliberately FAIL-SAFE: a `main` counts as able to fail unless EVERY exit path is
+    a literal 0. A first version counted only `return <non-zero literal>` and reported that
+    mutation-anchors and install-guard had no failure path at all, which is false - both return a
+    variable. A detector that answers "no failure path" for a real gate is this repo's own defect
+    class, so the uncertain case must resolve to "needs adjudication", never to "fine".
+
+    Pure and root-parameterised, like missing_gates() above, so the selftest can build trees where
+    the answer is known instead of asserting against the live repo only.
+    """
+    needs = []
+    for label, parts, extra in gates:
+        path = os.path.join(root, *parts)
+        try:
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+        except (OSError, SyntaxError):
+            # An unreadable/unparseable gate is missing_gates()' and the gate's own problem, not
+            # this one's. Never silently treat it as adjudicated.
+            continue
+        funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        if tuple(extra) != ("--selftest",) or "selftest" not in funcs:
+            continue
+        if _can_fail(funcs.get("main")):
+            needs.append(label)
+    return (sorted(set(needs) - set(adjudicated)),
+            sorted(set(adjudicated) - set(needs)))
+
+
+def _can_fail(fn) -> bool:
+    """True unless every exit path of `fn` is provably a literal 0. See enforcing_mode_gaps."""
+    if fn is None:
+        return False
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Return):
+            if node.value is None or (isinstance(node.value, ast.Constant)
+                                      and node.value.value in (0, None)):
+                continue
+            return True
+        if isinstance(node, ast.Raise):
+            return True
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", "") or getattr(node.func, "attr", "")
+            if name in ("exit", "_exit", "SystemExit") and node.args:
+                first = node.args[0]
+                if not (isinstance(first, ast.Constant) and first.value in (0, None)):
+                    return True
+    return False
 
 
 def missing_gates(root: str, gates=AUX_GATES) -> list:
@@ -241,6 +350,23 @@ def main():
               f"(the exemption is rotting): {stale_exempt}")
         failed.append("tools-classification")
 
+    # [MODE-CONTROL] The argv a gate is registered with, CHECKED rather than trusted. Print the
+    # denominator every run: "0 gaps" is only meaningful beside how many rows were examined.
+    unadjudicated, stale_adjudications = enforcing_mode_gaps(HERE)
+    print(f"-- gate modes: {len(AUX_GATES)} row(s) examined, "
+          f"{len(SELFTEST_IS_THE_GATE)} adjudicated as selftest-is-the-gate")
+    if unadjudicated:
+        print(f"FAIL: {len(unadjudicated)} gate(s) are registered ('--selftest',) but their "
+              f"main() can fail - the enforcing mode exists and is NOT being run: "
+              f"{unadjudicated}. Either register them enforcing, or add a reason to "
+              f"SELFTEST_IS_THE_GATE saying why the selftest IS the gate.")
+        failed.append("gate-modes")
+    if stale_adjudications:
+        print(f"FAIL: SELFTEST_IS_THE_GATE adjudicates {len(stale_adjudications)} row(s) that no "
+              f"longer need it (renamed, re-registered, or the target changed): "
+              f"{stale_adjudications}. Remove them, or the list rots into cover.")
+        failed.append("gate-modes")
+
     # Informational every run, a BLOCKER only at release (--release). Printing it here is the
     # point: "CI green" and "reviewed since it last changed" are different questions, and the
     # second one had no answer at all until this ledger existed.
@@ -318,6 +444,60 @@ def selftest() -> int:
         if stale != ["deleted_tool.py"]:
             fails.append("classify_tools() did not flag an exemption for a file that no longer "
                          "exists: %r" % (stale,))
+
+    # 3. [MODE-CONTROL] the argv check itself. Asserted on a SYNTHETIC tree, so the assertion
+    #    states what the rule is rather than restating whatever the live table happens to say -
+    #    a golden that round-trips the current registration would pin nothing.
+    with tempfile.TemporaryDirectory() as td:
+        enforcing = os.path.join(td, "enforcing_gate.py")
+        with open(enforcing, "w", encoding="utf-8") as f:
+            f.write("def selftest():\n    return 0\n\n\ndef main():\n    if 1:\n"
+                    "        return 1\n    return 0\n")
+        printer = os.path.join(td, "printer.py")           # gate_ledger's shape: no main() at all
+        with open(printer, "w", encoding="utf-8") as f:
+            f.write("def selftest():\n    return 0\n")
+        harmless = os.path.join(td, "harmless.py")         # a main() that cannot fail
+        with open(harmless, "w", encoding="utf-8") as f:
+            f.write("def selftest():\n    return 0\n\n\ndef main():\n    return 0\n")
+
+        rows = (("enforcing", ("enforcing_gate.py",), ("--selftest",)),
+                ("printer", ("printer.py",), ("--selftest",)),
+                ("harmless", ("harmless.py",), ("--selftest",)))
+        gaps, stale_adj = enforcing_mode_gaps(td, gates=rows, adjudicated={})
+        if gaps != ["enforcing"]:
+            fails.append("enforcing_mode_gaps() flagged %r, expected exactly ['enforcing'] - a "
+                         "gate registered --selftest whose main() CAN fail is the 2026-08-14 "
+                         "defect, and a printer or a can't-fail main is not" % (gaps,))
+        if stale_adj:
+            fails.append("enforcing_mode_gaps() invented a stale adjudication: %r" % (stale_adj,))
+
+        # an adjudication silences it, and an adjudication for a row that does not need one is
+        # itself reported - the exemption must not be able to rot
+        gaps2, stale2 = enforcing_mode_gaps(td, gates=rows,
+                                            adjudicated={"enforcing": "reason", "ghost": "gone"})
+        if gaps2 != []:
+            fails.append("an explicit adjudication did not silence the gap: %r" % (gaps2,))
+        if stale2 != ["ghost"]:
+            fails.append("a stale adjudication was not reported: %r" % (stale2,))
+
+        # THE MUTATION THIS EXISTS TO CATCH: flipping an ENFORCING row to --selftest must be
+        # detected. This is the one-token edit that reproduced on a clean clone.
+        flipped = (("enforcing", ("enforcing_gate.py",), ()),)
+        if enforcing_mode_gaps(td, gates=flipped, adjudicated={})[0]:
+            fails.append("an enforcing registration was reported as a gap - false positive")
+        flipped_back = (("enforcing", ("enforcing_gate.py",), ("--selftest",)),)
+        if enforcing_mode_gaps(td, gates=flipped_back, adjudicated={})[0] != ["enforcing"]:
+            fails.append("flipping () -> ('--selftest',) went UNDETECTED, which is exactly the "
+                         "one-token disarm this control exists to stop")
+
+    # ...and the live table must be clean right now, or the suite is lying about itself.
+    live_gaps, live_stale = enforcing_mode_gaps(HERE)
+    if live_gaps:
+        fails.append("live AUX_GATES has %d unadjudicated --selftest registration(s): %r"
+                     % (len(live_gaps), live_gaps))
+    if live_stale:
+        fails.append("live SELFTEST_IS_THE_GATE has %d stale adjudication(s): %r"
+                     % (len(live_stale), live_stale))
 
     for f in fails:
         print("SELFTEST FAIL:", f)

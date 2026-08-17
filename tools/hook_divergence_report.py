@@ -429,10 +429,22 @@ def main() -> int:
     print("  references to OUR hooks: %d ours, %d foreign, %d unparsed, %d bare-name"
           % (len(r["matched"]), len(r["foreign"]), len(r["unparsed"]), len(r["bare"])))
 
-    if r["examined"] == 0:
-        print("\n  NOTE: no wiring surface on this machine declared any hook. This gate proved "
-              "nothing here;\n        it is the --selftest that shows it can still see an "
+    # [MODE-CONTROL follow-up] A zero denominator has TWO causes and they are not the same fact.
+    # No surface at all = this machine has no wiring, so the gate is inapplicable (a fresh CI
+    # checkout). Surfaces that exist but declare no hook command = something we READ produced
+    # nothing, which is a broken parse wearing a clean result. The old code printed one NOTE for
+    # both and returned 0 either way, so the second - the only one that is a defect - was
+    # indistinguishable from the first.
+    if r["examined"] == 0 and not r["surfaces"]:
+        print("\n  NOTE: no wiring surface on this machine declared any hook. This gate is "
+              "INAPPLICABLE here;\n        it is the --selftest that shows it can still see an "
               "offender.")
+    elif r["examined"] == 0:
+        print("\nFAIL: %d wiring surface(s) were read and NOT ONE hook command was examined. A "
+              "denominator of\nzero from surfaces that exist is a broken parse, not a clean "
+              "machine - the surfaces were:\n   %s"
+              % (len(r["surfaces"]), "\n   ".join(r["surfaces"])))
+        return 1
 
     for f in r["foreign"]:
         print("\nFOREIGN COPY WIRED: %s" % f["name"])

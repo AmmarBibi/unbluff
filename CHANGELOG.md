@@ -6,6 +6,25 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`enforcing_mode_gaps()` in `run_selftests.py` - a gate's registered MODE is now DERIVED and
+  checked, not trusted.** `AUX_GATES`' third element is the argv each gate is invoked with, and
+  until now nothing anywhere read it. Registering a gate `("--selftest",)` instead of `()` makes
+  it check its own logic and apply to nothing, while the suite, CI, `readme-fresh` and the
+  mutation sweep all stay green - `readme-fresh` because a mode flip changes no cardinality, and
+  the sweep because every mutation is verified via `<unit> --selftest`, which is identical in
+  both modes. That is not hypothetical: it happened to `file-size` and `ship-bar` on 2026-08-14,
+  was fixed BY HAND in both, and no control was built. An independent adversarial review
+  (`wf_f63b9ccf-816`, 46 agents, 41 findings produced, 40 confirmed) reproduced it on a clean
+  clone in ONE TOKEN - planting a 900-line offender and getting `file-size: OK` where the
+  enforcing gate returns rc 1.
+  The check reads each target's AST rather than its argv tuple: a row needs an explicit
+  adjudication when it is registered `("--selftest",)`, the target defines a `selftest`, AND the
+  target's `main()` can fail. "Can fail" is deliberately FAIL-SAFE - a `main` counts as able to
+  fail unless EVERY exit path is a literal 0, because a first version counted only non-zero
+  literal returns and claimed `mutation-anchors` and `install-guard` had no failure path at all.
+  `SELFTEST_IS_THE_GATE` carries the reason for each legitimate case and is checked in BOTH
+  directions, so an adjudication cannot rot into cover. Pinned by `MODE-1` (the one-token flip,
+  against the live table) and `MODE-2` (the detector disarmed, against a synthetic tree).
 - **`tools/ship_bar_gate.py` + `docs/audits/findings.json` - criterion 2's stopping rule is now
   a CONTROL, not prose.** Nothing previously stopped a v1.4.0 tag while a CRITICAL sat open, and
   the open-finding count was itself unverifiable: the ledger's list of "the remaining 8" named
@@ -75,6 +94,25 @@ All notable changes to this project are documented here. Format loosely follows
   anywhere else.
 
 ### Fixed
+- **`hook-provenance` was registered in `--selftest` mode, so its enforcing half ran nowhere.**
+  Found by the 2026-08-16 review, then flagged by the new mode control on its first execution -
+  a THIRD instance of the 08-14 defect, which the 08-14 close ritual did not catch. Its
+  measurement - the half that reads git's actual wiring on this machine - was invoked by
+  nothing: not the suite, not CI, not the push path. Both halves are registered now
+  (`hook-provenance` enforcing, plus the paired `hook-provenance-selftest`, adjudicated in
+  `SELFTEST_IS_THE_GATE`), and the enforcing run examines 56 hook commands where previously it
+  examined none.
+- **`hook_divergence_report` reported a broken parse and an inapplicable machine identically.**
+  A zero denominator returned 0 with the same NOTE whether no wiring surface existed (a fresh CI
+  checkout - genuinely inapplicable) or surfaces WERE read and produced no hook command at all
+  (a broken parse wearing a clean result). Only the second is a defect; it now fails and names
+  the surfaces it read.
+- **`transcript_util`'s twin-classifier exemption followed the data.** It named
+  `tools/mutation_check.py`; when the `MUTATIONS` table moved, the transcript vocabulary went
+  with it, leaving the old entry as dead cover while the new file tripped the rule unexempted.
+  The gate caught both halves in one run - the USED check earning its keep exactly as its own
+  note predicted.
+
 - **`timing_claim_guard` was the only stateful hook that ignored `UNBLUFF_STATE_DIR`.** Its
   marker directory was a module-level constant overridden only inside its own selftest, so no
   harness could isolate it: the false-alarm scorer gave every corpus entry a fresh state dir,
@@ -115,6 +153,20 @@ All notable changes to this project are documented here. Format loosely follows
   `import_module` cannot dispatch to one. The three synthetic fixtures were roster-only files
   that could never have run a sub-hook; they now carry a real dispatch call, so they still
   prove that NAMING does not decide detection. Pinned `DR-VOCAB`.
+
+### Changed
+- **`tools/mutation_check.py` split 1415 -> 377 lines**, with the `MUTATIONS` table moved to
+  `tools/mutation_entries_a.py` (541) and `tools/mutation_entries_b.py` (538). This honours the
+  standing instruction recorded in `file_size_baseline.json` on 2026-08-14 - "the next growth
+  should be preceded by the split, not by another re-record" - rather than repeating the
+  re-record loophole to fund growth in the very file that documents the loophole. The cut is at
+  an entry boundary and order is unchanged, so all 200 entries and 201 anchors are preserved and
+  the sweep iterates an identical list. `mutation_check.py` is removed from the offender
+  baseline entirely, which TIGHTENS the ratchet. The re-export carries an explicit
+  `sys.path.insert` rather than a bare sibling import, so `python -m tools.mutation_check` no
+  longer silently empties the table - the review found that exact invocation-dependent-import
+  defect elsewhere in the repo, and introducing a fresh instance of it to save two lines would
+  have been a poor trade.
 
 ## [1.3.1] - 2026-08-08
 

@@ -1,7 +1,9 @@
 {
   "_note": "The 800-line offenders, DERIVED by walking the tree - not the hand-maintained list the plan carried, which was missing tools/no_regression.py at 805 lines. RATCHET: a new offender or a recorded one GROWING fails; shrinking is reported so this file can be re-recorded tighter. Every entry is DEBT and can only go down.",
   "_accepted_growth": "2026-08-14: mutation_check.py re-recorded 1377 -> 1399. The growth is new mutation ENTRIES (SB-IO, FS-1, FS-2 - the pins for the day's new gates), i.e. coverage, not bloat. RE-RECORDING IS THE LOOPHOLE IN THIS DESIGN, so it is stated here rather than done quietly: this file is now the TOP split candidate, and the next growth should be preceded by the split, not by another re-record.",
-  "recorded_utc": "2026-08-14",
+  "_split_2026_08_16": "The 08-14 instruction above was HONOURED rather than repeated. Adding the MODE-1/MODE-2 pins took mutation_check.py 1399 -> 1415, so the split came first: the MUTATIONS table moved to tools/mutation_entries_a.py (541) and tools/mutation_entries_b.py (538), leaving mutation_check.py at 377. All 200 entries and 201 anchors preserved - the cut is at an entry boundary and order is unchanged, so the sweep iterates an identical list. tools/mutation_check.py is REMOVED from over_limit below: it is no longer over the limit, and the ratchet only turns one way.",
+  "_reverse_walk_gap": "Observed 2026-08-16 while doing the above, and it is the 08-16 review's finding #19: when mutation_check.py fell off this list the gate printed '7 recorded offender(s)' and listed 6, with no SHRANK line, because verdict() only inspects files that are CURRENTLY over the limit and never walks the baseline in reverse. A stale baseline entry is therefore invisible. Scheduled in the plan as task #12; this note exists so the discrepancy is not mistaken for a miscount.",
+  "recorded_utc": "2026-08-16",
   "limit": 800,
   "over_limit": {
     "hooks/duplicate_registration_check.py": 858,
@@ -9,7 +11,6 @@
     "hooks/fast_test_on_stop_selftest.py": 1003,
     "hooks/pre_push_gate_selftest.py": 1109,
     "install.py": 927,
-    "tools/mutation_check.py": 1399,
     "tools/no_regression.py": 805
   }
 }

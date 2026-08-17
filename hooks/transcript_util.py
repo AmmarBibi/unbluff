@@ -201,9 +201,14 @@ _HARNESS_TAGS = ("<bash-stdout>", "<bash-stderr>", "<command-args>", "<command-n
 # Every entry needs a REASON, and an entry naming a file that no longer exists is itself
 # reported - otherwise the roster rots into cover for whatever gets added next.
 TWIN_EXEMPTIONS = {
-    "tools/mutation_check.py":
-        "mutates hook SOURCE, so it necessarily contains the marker strings it rewrites; it "
-        "classifies nothing at runtime",
+    # [SPLIT 2026-08-16] The exemption FOLLOWED THE DATA. It named tools/mutation_check.py until
+    # the MUTATIONS table was moved out of that file; the vocabulary went with the table, so the
+    # old entry became dead cover and the new file tripped the rule unexempted. This gate caught
+    # both halves of that in one run - which is the USED check earning its keep, exactly as the
+    # note below predicted.
+    "tools/mutation_entries_a.py":
+        "holds mutation ENTRIES that rewrite hook SOURCE, so it necessarily contains the marker "
+        "strings they rewrite; it is pure data and classifies nothing at runtime",
 }
 # The audit that designed this rule measured TWO exemptions (the other being
 # tools/compare_delivery_gate.py). By the time the rule was built that file no longer touched
