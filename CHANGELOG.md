@@ -156,7 +156,15 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Changed
 - **`tools/mutation_check.py` split 1415 -> 377 lines**, with the `MUTATIONS` table moved to
-  `tools/mutation_entries_a.py` (541) and `tools/mutation_entries_b.py` (538). This honours the
+  `tools/mutation_entries_a.py` (541) and `tools/mutation_entries_b.py` (538). Those four
+  figures are the measurement **at the moment of the split**, and this session's own
+  consistency audit caught them going stale within hours: later work added the
+  `sys.path.insert` re-export fix and eleven more mutation entries, so the current sizes are
+  387 / 541 / 604 and the table now holds 211 entries with 212 anchors, not the 200/201 the
+  split preserved. Both readings are true of different instants, which is exactly why the
+  instant is now stated - an undated measurement presented as a current fact is the drift this
+  project exists to catch, and it does not stop being that when the author is the one drifting.
+  This honours the
   standing instruction recorded in `file_size_baseline.json` on 2026-08-14 - "the next growth
   should be preceded by the split, not by another re-record" - rather than repeating the
   re-record loophole to fund growth in the very file that documents the loophole. The cut is at
