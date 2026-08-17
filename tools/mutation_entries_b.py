@@ -555,6 +555,19 @@ ENTRIES = [
      "two concurrent tiers clobber each other's rows and both report success",
      [("            if age <= stale_s:\n                return None",
        "            if False:\n                return None")], False),
+    # [2026-08-17] This pin was DRAFTED with GL-REC/GL-CORRUPT/GL-LOCK and did not survive into
+    # the commit - the session's own meta-review caught that the atomic write, the most
+    # load-bearing change in the file, had no pin at all. It is the hardest of the four to
+    # detect, because truncate-then-write produces a correct file on the happy path; only an
+    # INTERRUPTED write tells the two apart, which is why the selftest now fails mid-write.
+    ("tools/gate_ledger", "GL-ATOMIC", "the ledger is truncated before the payload is built, "
+     "restoring the window where an interrupted write destroys all history unrecoverably",
+     [('        payload = json.dumps(prune(history), indent=2)      '
+       '# serialise BEFORE touching target\n        tmp = LEDGER + ".tmp"\n'
+       '        with open(tmp, "w", encoding="utf-8") as f:\n            f.write(payload)\n'
+       '        os.replace(tmp, LEDGER)',
+       '        with open(LEDGER, "w", encoding="utf-8") as f:\n'
+       '            json.dump(prune(history), f, indent=2)')], False),
     # [RECORD-SITES] finding #40: deleting a tier's recording left every gate, selftest and
     # anchor check green, so the ship bar would read a STALE row rather than no row.
     ("tools/check_file_size", "SITES-1", "the file-size tier records under another gate's name, "

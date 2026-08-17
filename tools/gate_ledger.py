@@ -324,6 +324,30 @@ def selftest() -> int:
             if len(_load(LEDGER)) != before + 1:
                 fails.append("a STALE lock was not stolen, so a killed process wedges the "
                              "ledger permanently")
+
+            # [2026-08-17] ATOMICITY, asserted by INTERRUPTING the write. Added by the session's
+            # own meta-review, which found that the atomic-write fix - the most load-bearing
+            # change in this file - had NO pin at all: a truncate-then-write still produces a
+            # correct file on the happy path, so every other assertion here passes against the
+            # defective version. The only way to tell them apart is to fail mid-write and look
+            # at what survived.
+            _real_prune = globals()["prune"]
+            survived = len(_load(LEDGER))
+            try:
+                def _explode(history, keep=KEEP_PER_GATE):
+                    raise RuntimeError("simulated failure between truncate and write")
+                globals()["prune"] = _explode
+                record("zeta", "PASS")
+            finally:
+                globals()["prune"] = _real_prune
+            after_rows, after_status = read(LEDGER)
+            if after_status != "ok" or len(after_rows) != survived:
+                fails.append("a write that failed mid-flight destroyed the ledger: %d row(s) "
+                             "and status %r, expected %d rows still intact. The payload must be "
+                             "serialised BEFORE the target is touched and moved into place with "
+                             "os.replace(), or an interrupted run loses history that is "
+                             "GITIGNORED and therefore unrecoverable"
+                             % (len(after_rows), after_status, survived))
     finally:
         LEDGER = saved
 
