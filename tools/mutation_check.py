@@ -19,6 +19,7 @@ code that does not exist on POSIX, which must SKIP on Linux rather than report S
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import shutil
 import subprocess
@@ -38,7 +39,15 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the harness measuring its own missing fixture. Found immediately rather than by inference,
 # because the baseline now prints WHY (see BASE-WHY below); before that fix this would have
 # read as a bare `rc=1`.
-COPY_TREES = ("hooks", "tools", "tests", "skills", ".github")
+# [ENFORCING 2026-08-18] `docs/audits` and `examples` joined for the same reason `.github` did,
+# and the reason was MEASURED rather than reasoned: with the old roster, 5 of the 9 gates
+# registered in ENFORCING mode went RED at BASELINE in a scratch tree - ship-bar could not find
+# findings.json, file-size could not find its baseline and reported six recorded offenders as
+# NEW, examples-settings-fresh could not find examples/settings.json. A baseline that is already
+# red makes every mutation verified through it prove nothing (see [HIGH-6] below).
+# `docs/audits` and NOT `docs`: the audits subtree is 964K; the whole of docs/ is 5.3M of gifs
+# and screenshots no gate reads, and it would be copied once per entry across a 200-entry sweep.
+COPY_TREES = ("hooks", "tools", "tests", "skills", ".github", "docs/audits", "examples")
 # README.md is an INPUT to check_readme_fresh, not just documentation: without it that gate's
 # main() returns "cannot read README.md" and never reaches its checks, so every mutation of
 # that file died at baseline. The roster has to contain what the gates READ, not only what
@@ -74,6 +83,135 @@ def unit_path(root: str, name: str) -> str:
     if os.path.isfile(rooted):
         return rooted
     return hooked  # absent either way: report against the conventional location
+
+
+VERIFY_KEYS = ("unit", "mode", "marker")
+VERIFY_MODES = ("selftest", "enforcing")
+
+
+def verify_spec(verify) -> tuple:
+    """(unit, mode, marker, error) from an entry's 6th field. FAILS CLOSED on anything unknown.
+
+    Two accepted forms, and the plain string is unchanged so all pre-existing entries keep their
+    exact meaning:
+
+        ""  / "some_unit"        -> verify by `<unit> --selftest`      (the original contract)
+        {"mode": "enforcing"}    -> verify by running the unit the way it is REGISTERED
+
+    WHY A SECOND MODE EXISTS. Every pin in this table verified via `<unit> --selftest`, so no
+    line in any gate's `main()` was reachable by a mutation - the 2026-08-16 meta-review lists
+    six behaviours left unpinned for that one reason, among them two FLOORS whose entire job is
+    to stop a gate that read NOTHING from reporting OK. A harness that cannot reach main() also
+    cannot tell a gate registered in the wrong MODE from a working one, which is the defect an
+    independent review reproduced on a clean clone in one token.
+
+    `marker` is the other half, and it is not a convenience. A fix whose whole content is SAYING
+    SOMETHING - printing which source a derivation used, printing that a control could not run -
+    changes no exit code, so an rc-only harness certifies it as pinned while the mutation is
+    inert. The contract is asserted in BOTH directions in run(): the BASELINE output must
+    CONTAIN the marker (or the probe is not measuring what it claims) and the mutant must not.
+    """
+    if verify is None:
+        verify = ""
+    if isinstance(verify, str):
+        return verify, "selftest", "", ""
+    if not isinstance(verify, dict):
+        return "", "", "", ("verify field is %r; it must be a unit name or a dict"
+                            % type(verify).__name__)
+    unknown = sorted(set(verify) - set(VERIFY_KEYS))
+    if unknown:
+        return "", "", "", ("verify dict has unknown key(s) %r - a typo'd key would otherwise "
+                            "select the DEFAULT mode silently" % unknown)
+    mode = verify.get("mode", "selftest")
+    if mode not in VERIFY_MODES:
+        return "", "", "", "verify mode %r is not one of %r" % (mode, VERIFY_MODES)
+    return verify.get("unit", ""), mode, verify.get("marker", ""), ""
+
+
+def aux_gates(root: str) -> tuple:
+    """(rows, error) - run_selftests' AUX_GATES, read from `root` with NO import side effects.
+
+    `ast.literal_eval` rather than `import run_selftests`: importing it executes a module that
+    inserts hooks/ on sys.path and pulls in the hook layer, inside a harness whose entire job is
+    to run OTHER programs in a controlled tree. Reading it as data also means the registration
+    that gets read is the one in the SCRATCH tree - the tree actually under test.
+    """
+    path = os.path.join(root, "run_selftests.py")
+    try:
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+    except (OSError, SyntaxError) as e:
+        return (), "cannot read AUX_GATES from %s (%s)" % (path, e)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "AUX_GATES"
+                                                for t in node.targets):
+            try:
+                return tuple(ast.literal_eval(node.value)), ""
+            except ValueError as e:
+                return (), "AUX_GATES is not a literal this harness can read (%s)" % e
+    return (), "no AUX_GATES assignment in %s" % path
+
+
+def enforcing_argv(root: str, target: str) -> tuple:
+    """(argv, error) - the argv `target` is REGISTERED with, DERIVED from AUX_GATES.
+
+    Never a literal in the mutation table. The whole point of this mode is that a gate wired
+    ("--selftest",) applies to nothing while every other signal stays green; a mutation entry
+    carrying its own hand-written argv would assert the mode it WISHED for and could not notice
+    the flip - a declared roster standing in for a derived one, which is this repo's most
+    repeated defect and the one `check_file_size` was built for.
+
+    FAILS CLOSED, both ways. No enforcing registration is an error, not a fallback to
+    `--selftest`: silently verifying the other mode is precisely how a mutation comes to prove
+    nothing while reporting CAUGHT. Two enforcing registrations is an error too, because the
+    entry would otherwise pick one by list order and the report could not say which.
+    """
+    rows, err = aux_gates(root)
+    if err:
+        return (), err
+    want = os.path.normpath(os.path.abspath(target))
+    hits = [(label, tuple(extra)) for label, parts, extra in rows
+            if os.path.normpath(os.path.abspath(os.path.join(root, *parts))) == want]
+    if not hits:
+        return (), ("%s is in no AUX_GATES row, so it has no registered enforcing mode to "
+                    "verify" % os.path.basename(target))
+    enforcing = [(label, extra) for label, extra in hits if extra != ("--selftest",)]
+    if not enforcing:
+        return (), ("%s is registered ONLY as %r - there is no enforcing invocation to mutate "
+                    "against. Register it enforcing, or verify this entry via the selftest"
+                    % (os.path.basename(target), [e for _l, e in hits]))
+    if len(enforcing) > 1:
+        return (), ("%s has %d enforcing registrations (%r); the entry cannot say which one it "
+                    "pins" % (os.path.basename(target), len(enforcing),
+                              [lab for lab, _e in enforcing]))
+    return enforcing[0][1], ""
+
+
+def make_git_repo(scratch: str) -> str:
+    """Make the scratch tree a real git repo. '' on success, else why not.
+
+    An enforcing gate's SUBJECT is a repository, and several of them derive from git -
+    `population()` prefers `git ls-files` and falls back to a walk. In a plain tempdir that
+    preference can never be exercised, so a mutation of the git branch takes the fallback,
+    produces an identical answer and reports SURVIVED for a reason that has nothing to do with
+    the test. Measured at 0.47s per tree, and paid only by entries that ask for enforcing mode.
+
+    The developer's own git config is excluded deliberately: a machine-dependent `core.hooksPath`
+    or template dir would make this fixture mean something different on every box, and a harness
+    whose fixture varies by machine cannot be used to adjudicate anything.
+    """
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_TERMINAL_PROMPT="0")
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"]):
+        try:
+            p = subprocess.run(cmd, cwd=scratch, capture_output=True, text=True, timeout=120,
+                               env=env, encoding="utf-8", errors="replace")
+        except (OSError, subprocess.SubprocessError) as e:
+            return "%s could not run (%s)" % (" ".join(cmd), e)
+        if p.returncode != 0:
+            return "%s exited %s: %s" % (" ".join(cmd), p.returncode,
+                                         (p.stderr or p.stdout or "").strip()[:200])
+    return ""
 
 
 def missing_anchors(live_text: str, edits) -> list:
@@ -166,12 +304,21 @@ def anchor_audit(root: str = REPO, mutations=None) -> tuple:
     return problems, anchors, sorted(units), multi
 
 
-def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str = "") -> str:
-    """Mutate `hook`, then run `verify`'s selftest (default: the mutated hook's own).
+def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify="") -> str:
+    """Mutate `hook`, then run `verify` and require it to notice (default: the hook's own selftest).
 
     They differ when the defect lives in one file and the test that catches it lives in
     another - which is exactly the shape of a TWIN defect, so the harness has to express it.
+
+    `verify` may also be a dict selecting ENFORCING mode and/or an output MARKER - see
+    verify_spec(). In enforcing mode the verifier is invoked with the argv it is REGISTERED
+    with, in a scratch tree that is a real git repo, with cwd set to that tree: an enforcing
+    gate's subject is a repository, and if cwd stayed on the live repo the gate would read the
+    developer's real tree while the mutation sat in the scratch one.
     """
+    unit, mode, marker, spec_err = verify_spec(verify)
+    if spec_err:
+        return "HARNESS ERROR: %s" % spec_err
     # Validate the ANCHOR even when the mutation will be skipped. The early return used to
     # precede this, so a #30 anchor that had drifted was never checked on the authoring
     # machine and the harness still printed "all mutations caught".
@@ -197,14 +344,30 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
     try:
         _ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
         for tree in COPY_TREES:
-            src = os.path.join(REPO, tree)
+            parts = tree.split("/")          # nested entries: "docs/audits" is one SUBtree
+            src = os.path.join(REPO, *parts)
             if os.path.isdir(src):
-                shutil.copytree(src, os.path.join(scratch, tree), ignore=_ignore)
+                shutil.copytree(src, os.path.join(scratch, *parts), ignore=_ignore)
         for name in COPY_FILES:
             src = os.path.join(REPO, name)
             if os.path.isfile(src):
                 shutil.copy2(src, os.path.join(scratch, name))
-        verify_target = unit_path(scratch, verify or hook)
+        verify_target = unit_path(scratch, unit or hook)
+
+        # The INVOCATION, chosen once and used for BOTH the baseline and the mutant. Deriving it
+        # twice is how the two runs come to differ in something other than the mutation.
+        argv, cwd = ["--selftest"], None
+        if mode == "enforcing":
+            argv, argv_err = enforcing_argv(scratch, verify_target)
+            if argv_err:
+                return "HARNESS ERROR: %s" % argv_err
+            argv, cwd = list(argv), scratch
+            git_err = make_git_repo(scratch)
+            if git_err:
+                return ("HARNESS ERROR: the scratch tree could not be made a git repo (%s), so "
+                        "any git-derived path in the verifier would take its fallback and the "
+                        "mutation would prove nothing about the derivation" % git_err)
+        shown = " ".join(argv) or "(no argv - enforcing)"
 
         # [HIGH-6] BASELINE FIRST, on the UNMUTATED copy. If the verifying selftest is already
         # red in a scratch tree - e.g. meta_audit's asserted something about the REAL
@@ -212,9 +375,10 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
         # a reason unrelated to the mutation and the harness certifies them all as CAUGHT.
         # Two mutations (M6, D5-twin) were certified exactly that way.
         try:
-            base = subprocess.run([sys.executable, verify_target, "--selftest"],
-                                  capture_output=True, text=True, timeout=400,
+            base = subprocess.run([sys.executable, verify_target] + argv,
+                                  capture_output=True, text=True, timeout=400, cwd=cwd,
                                   stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+            base_out = (base.stdout or "") + (base.stderr or "")
             if base.returncode not in (0, 77):
                 # [BASE-WHY] Say WHY, not just that. This reported only an rc, so a baseline-red
                 # on a CI runner that does not reproduce locally was undiagnosable from the log
@@ -222,16 +386,22 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
                 # #C5 passed its baseline in the SAME SECOND, and the reason had to be inferred
                 # from the neighbours rather than read. A checking instrument that cannot
                 # explain its own failure is the defect class this repo exists to catch.
-                tail = "\n".join(
-                    ln for ln in ((base.stdout or "") + (base.stderr or "")).splitlines()
-                    if ln.strip())[-800:]
-                return ("HARNESS ERROR: baseline already RED before mutating (%s --selftest "
+                tail = "\n".join(ln for ln in base_out.splitlines() if ln.strip())[-800:]
+                return ("HARNESS ERROR: baseline already RED before mutating (%s %s "
                         "rc=%s) - this mutation would prove nothing. Baseline said:\n%s"
-                        % (os.path.basename(verify_target), base.returncode, tail))
+                        % (os.path.basename(verify_target), shown, base.returncode, tail))
+            # The MARKER, asserted against the baseline BEFORE it is used to judge anything.
+            # A marker the healthy run never prints would make every mutant "lose" it, and the
+            # entry would report CAUGHT for as long as the string stayed misspelled - a probe
+            # that cannot fail, which is the class this file exists to catch.
+            if marker and marker not in base_out:
+                return ("HARNESS ERROR: the baseline output does not contain the marker %r, so "
+                        "its absence after mutating would prove nothing about the mutation"
+                        % marker[:70])
         except subprocess.TimeoutExpired:
-            return "HARNESS ERROR: baseline selftest timed out before mutating"
+            return "HARNESS ERROR: baseline timed out before mutating"
         except (OSError, subprocess.SubprocessError) as e:
-            return "HARNESS ERROR: baseline selftest could not run (%s)" % e
+            return "HARNESS ERROR: baseline could not run (%s)" % e
 
         target = unit_path(scratch, hook)
         text = open(target, encoding="utf-8").read()
@@ -243,19 +413,31 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify: str
             f.write(text)
         target = verify_target
         try:
-            p = subprocess.run([sys.executable, target, "--selftest"], capture_output=True,
-                               text=True, timeout=400, stdin=subprocess.DEVNULL,
+            p = subprocess.run([sys.executable, target] + argv, capture_output=True,
+                               text=True, timeout=400, stdin=subprocess.DEVNULL, cwd=cwd,
                                encoding="utf-8", errors="replace")
             rc = p.returncode
         except subprocess.TimeoutExpired:
             return "CAUGHT (the mutated hook hung - the bound is real)"
-        if rc == 0:
-            return "SURVIVED - the test for finding %s is DECORATIVE" % finding
         if rc == 77:
             # SKIP_RC. The verifying selftest could not RUN (no git/sh), so it asserted
             # nothing - counting a non-zero rc as "caught" certified 13 pre_push_gate
             # mutations as pinned on any machine without git.
             return "UNPROVEN (the verifying selftest could not run - rc 77)"
+        if marker:
+            # WHEN A MARKER IS DECLARED IT IS THE WHOLE VERDICT, and the rc is deliberately not
+            # consulted. Reading "rc != 0 OR the marker vanished" as CAUGHT would have shipped a
+            # pin that cannot fail: FS-CANNOTRUN exits 1 with the guard present (it says CANNOT
+            # RUN) and exits 1 with the guard deleted (every recorded offender is re-reported as
+            # NEW), so an rc-first rule reports CAUGHT for both and proves nothing about the
+            # branch it names. The marker is the only thing that differs between them.
+            out = (p.stdout or "") + (p.stderr or "")
+            if marker not in out:
+                return "CAUGHT (rc=%s, and the marker %r is gone)" % (rc, marker[:40])
+            return ("SURVIVED - the test for finding %s is DECORATIVE (%r still printed at "
+                    "rc=%s)" % (finding, marker[:40], rc))
+        if rc == 0:
+            return "SURVIVED - the test for finding %s is DECORATIVE" % finding
         return "CAUGHT (rc=%s)" % rc
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -299,7 +481,12 @@ def main() -> int:
         # "tools/mutation_check", and a filter that only compared the full string made those
         # entries unreachable from the CLI - i.e. silently unrunnable, which is this file's
         # own failure mode.
-        _names = {hook, verify, hook.rsplit("/", 1)[-1], verify.rsplit("/", 1)[-1]}
+        # verify may be a dict (enforcing mode), so the filter takes the UNIT out of the spec
+        # rather than assuming a string. A filter that raised here would make every entry in
+        # the new mode unreachable from the CLI - unrunnable, which is this file's own failure
+        # mode and the reason [HIGH-5] below counts what it skipped.
+        _vunit = verify_spec(verify)[0]
+        _names = {hook, _vunit, hook.rsplit("/", 1)[-1], _vunit.rsplit("/", 1)[-1]}
         if args.only and args.only not in _names:
             # [HIGH-5] COUNT the filtered-out entries. They were recorded in no bucket while
             # the denominator stayed len(MUTATIONS), so `mutation_check.py pre_push_gate`

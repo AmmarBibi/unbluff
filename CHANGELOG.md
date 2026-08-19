@@ -6,6 +6,35 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **`tools/mutation_check.py` can now verify a pin through a gate's ENFORCING invocation, and
+  through its OUTPUT - so `main()` is reachable and a fix that only SAYS something is pinnable.**
+  Every entry in the table verified via `<unit> --selftest`, so no line in any gate's `main()`
+  could be reached by a mutation at all; the 2026-08-16 meta-review lists six behaviours as
+  fixed-but-UNPINNED for that single shared reason, two of them FLOORS whose entire purpose is
+  to stop a gate that read NOTHING from printing OK. The pinning tool carried the defect class
+  it exists to catch.
+  `{"mode": "enforcing"}` derives the argv from `AUX_GATES` by `ast.literal_eval` - never a
+  literal in the entry, because an entry carrying its own argv would assert the mode it WISHED
+  for and could not notice a flip, which is a declared roster standing in for a derived one. It
+  fails CLOSED on zero or ambiguous registrations rather than falling back to `--selftest`.
+  MEASURED while building it: 5 of the 9 enforcing gates went RED at BASELINE until `docs/audits`
+  and `examples` joined the copy roster (the roster has to contain what the gates READ), and the
+  scratch tree is now a real git repo - 0.47s - because `population()` prefers `git ls-files` and
+  in a plain tempdir that branch can never be taken, so a mutation of it takes the fallback,
+  returns an identical answer and reports SURVIVED for a reason unrelated to the test.
+  `{"marker": ...}` is the second half and not a convenience: a fix whose whole content is SAYING
+  SOMETHING changes no exit code. The marker must be present in the BASELINE output (or the probe
+  is not measuring what it claims) and absent after mutating, and when declared it is the WHOLE
+  verdict - `FS-CANNOTRUN` exits 1 both with its guard and without it, so an rc-first rule would
+  have reported CAUGHT for both while pinning nothing.
+  Four pins added - `SHIPBAR-FLOOR`, `FS-FLOOR`, `FS-GIT-DERIVE`, `FS-CANNOTRUN` - and each was
+  verified to FAIL when the guard it names is deleted, not merely to pass. That probe paid for
+  itself immediately: `SHIPBAR-FLOOR` as first written **could not fail**, because
+  `SHIPBAR-DECL`'s heading-vs-rows guard absorbed it; silencing `declared_count` in the same
+  mutation isolates the floor, and only then does the gate print `ship-bar: PASS` over a ZERO-row
+  population without it. Two of the six behaviours remain unpinned and need different mechanisms
+  (a selftest that injects a raising calibrator; a planted wiring fixture) - recorded as open,
+  not reported as done.
 - **`enforcing_mode_gaps()` in `run_selftests.py` - a gate's registered MODE is now DERIVED and
   checked, not trusted.** `AUX_GATES`' third element is the argv each gate is invoked with, and
   until now nothing anywhere read it. Registering a gate `("--selftest",)` instead of `()` makes

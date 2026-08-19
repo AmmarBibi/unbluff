@@ -614,4 +614,48 @@ ENTRIES = [
      "the load factor at its cap and silently disables the budget check - SB-2's defect reached "
      "from the constant instead of from the cap",
      [("_CALIB_IO_REF_S = 0.0148", "_CALIB_IO_REF_S = 0.0037")], False),
+
+    # ---------------------------------------------------------------------------------------
+    # [ENFORCING 2026-08-18] The first entries verified through a gate's REGISTERED invocation
+    # rather than its --selftest. Everything above this line reaches only code the selftest
+    # calls, which is why the 2026-08-16 meta-review could list six behaviours as fixed-but-
+    # UNPINNED for one shared reason: nothing in any `main()` was reachable. Two of the six are
+    # FLOORS whose entire purpose is to stop a gate that read NOTHING from printing OK, so they
+    # were the exact shape this repo exists to catch, sitting unpinned inside the pinning tool.
+    #
+    # Read `{"mode": "enforcing"}` as "run it the way it is REGISTERED" - the argv is derived
+    # from AUX_GATES, never written here, so an entry cannot assert a mode the repo does not
+    # actually wire. See verify_spec() and enforcing_argv() in mutation_check.py.
+    ("tools/ship_bar_gate", "SHIPBAR-FLOOR", "the stopping rule passes over an EMPTY population "
+     "- both readers return nothing and the gate reports PASS, which is a gate that read "
+     "nothing, not a repo with nothing blocking it",
+     # THREE edits, and the third is the one that makes this pin mean anything. With only the
+     # two readers silenced the mutation is still CAUGHT - but by SHIPBAR-DECL's guard ("the
+     # heading declares 24 and 0 rows parsed"), not by the floor. MEASURED 2026-08-19: delete
+     # the floor and the gate STILL exits 1, so the entry could not fail and was certifying a
+     # guard it never reached. Silencing declared_count removes the absorbing guard, and only
+     # then does the floor decide the verdict: rc 1 with it, "ship-bar: PASS" over a ZERO-row
+     # population without it. A pin absorbed by a neighbour is decoration wearing a pin's name.
+     [("    return rows", "    return []"),
+      ("    return scope, rows", "    return scope, []"),
+      ("    return int(m.group(1)) if m else None", "    return None")], False,
+     {"mode": "enforcing"}),
+    ("tools/check_file_size", "FS-FLOOR", "the population collapses to zero and the ratchet "
+     "still reports OK - the 'examined almost nothing' floor is what stops it",
+     [('            return [r for r in rels if os.path.isfile(os.path.join(root, r))], "git"',
+       '            return [], "git"')], False, {"mode": "enforcing"}),
+    # The two below are pinned by a MARKER, not by an exit code, and neither could be pinned
+    # any other way. FS-GIT-DERIVE changes WHICH derivation ran and nothing else - same files,
+    # same verdict, rc 0 either way. FS-CANNOTRUN exits 1 with the guard present AND with it
+    # deleted, so an rc-only pin would report CAUGHT for both and prove nothing.
+    ("tools/check_file_size", "FS-GIT-DERIVE", "the population stops asking version control and "
+     "silently falls back to the walk - the fallback that put thousands of vendored files in "
+     "the population whenever a virtualenv was not spelled .venv",
+     [("        if out.returncode == 0 and out.stdout.strip():", "        if False:")], False,
+     {"mode": "enforcing", "marker": "(source: git)"}),
+    ("tools/check_file_size", "FS-CANNOTRUN", "an unreadable baseline stops halting the gate, so "
+     "'I could not look' is reported as a per-file verdict over every recorded offender",
+     [('BASELINE = os.path.join(REPO, "docs", "audits", "file_size_baseline.json")',
+       'BASELINE = os.path.join(REPO, "README.md")')], False,
+     {"mode": "enforcing", "marker": ".py file(s) in population"}),
 ]
