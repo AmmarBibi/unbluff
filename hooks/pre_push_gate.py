@@ -7,6 +7,10 @@ unverified. Silence and success look identical from outside; this makes them dif
 moment it matters.
 
 Mechanical by design (no reasoning):
+  0. <project>/.claude/pre-push-always.cmd, if present, runs FIRST and is never cached away.
+     Steps 3-5 below are correct for TESTS (their verdict is a function of the source) and wrong
+     for checks whose input is not the source - a ledger, a staleness comparison, an external
+     artifact. Those move while every source byte stays put, and `git commit` touches no mtime.
   1. command = <project>/.claude/pre-push.cmd if present, else fast_test_on_stop's own detect()
      (same file format: line1 = command, optional "timeout=N"). A project can therefore run a
      STRICTER gate at push time than at turn end - pushes are rare, turns are not.
@@ -101,6 +105,30 @@ def _common_git_dir(target: str) -> str | None:
         root = _repo_root(target)
         d = os.path.join(root or target, d)
     return os.path.normpath(d)
+
+
+def resolve_always(root: str) -> tuple[str | None, int]:
+    """(command, timeout_s) for `.claude/pre-push-always.cmd` - the check the CACHE MAY NOT SKIP.
+
+    The fast path in gate() ("verified Ns ago, no source touched since") is correct for TESTS:
+    their verdict is a function of the source, so an unchanged tree cannot change it. It is WRONG
+    for any check whose input is NOT the source - a gate-run ledger, a freshness or staleness
+    comparison, an external artifact. Those change while every source byte stays put, and
+    `git commit` touches no mtime at all.
+
+    Measured in ghg-copilot 2026-08-18, on the exact incident path the check there exists to close:
+    edit a governed file -> the turn-end gate records a PASS newer than that edit -> commit -> push.
+    A check chained into `.claude/pre-push.cmd` would never have run, and the gate would have been
+    green by construction on the one push it was written to stop.
+
+    Same file format as `.claude/pre-push.cmd`, same PUSH_OPTIONS ceiling. Non-zero BLOCKS. There is
+    no fast path here and there must not be one - that is the entire purpose of the file.
+    """
+    ov = os.path.join(root, ".claude", "pre-push-always.cmd")
+    if not os.path.exists(ov):
+        return None, fast_test.DEFAULT_TIMEOUT_S
+    cmd, timeout_s, _ = fast_test._read_override(ov, fast_test.PUSH_OPTIONS)
+    return cmd, timeout_s
 
 
 def resolve_command(root: str) -> tuple[str | None, int]:
@@ -214,7 +242,45 @@ run_tests = fast_test.run_tests
 _kill_tree = fast_test._kill_tree
 
 
+def run_always(root: str) -> int:
+    """Run `.claude/pre-push-always.cmd` if the project declares one. Non-zero BLOCKS the push.
+
+    Deliberately BEFORE the cached-pass short-circuit in gate(), and deliberately not cached itself.
+    A timeout here BLOCKS rather than warns: this file is for checks a project has declared
+    non-skippable, and "did not run" resolving to "allowed" is the exact asymmetry
+    [P14 D1-FIND-2] removed from the test path below.
+    """
+    cmd, timeout_s = resolve_always(root)
+    if not cmd:
+        return 0
+    sys.stderr.write(f"[pre-push] always-run check: {cmd}\n")
+    try:
+        rc, output = run_tests(cmd, root, timeout_s)
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        sys.stderr.write(f"[pre-push] BLOCKED - the always-run check could not be started ({e}). "
+                         f"Fix it, or bypass with: git push --no-verify\n")
+        return 1
+    tail = "\n".join(ln for ln in (output or "").splitlines() if ln.strip())[-2000:]
+    if rc is None:
+        sys.stderr.write(f"[pre-push] BLOCKED - the always-run check exceeded {timeout_s}s and was "
+                         f"killed, so it did not run.\n{tail}\n"
+                         f"[pre-push] Raise timeout= in .claude/pre-push-always.cmd, or bypass "
+                         f"with: git push --no-verify\n")
+        return 1
+    if rc != 0:
+        sys.stderr.write(f"\n[pre-push] BLOCKED by the always-run check (exit {rc}):\n{tail}\n"
+                         f"\n[pre-push] Fix it, or bypass with: git push --no-verify\n")
+        return 1
+    sys.stderr.write("[pre-push] always-run check passed.\n")
+    return 0
+
+
 def gate(root: str) -> int:
+    # The always-run check comes first and is not subject to the cached-pass short-circuit below.
+    # See resolve_always() for the measurement that put it here.
+    rc_always = run_always(root)
+    if rc_always != 0:
+        return rc_always
     cmd, timeout_s = resolve_command(root)
     name = os.path.basename(root.rstrip("/\\")) or root
     if not cmd:

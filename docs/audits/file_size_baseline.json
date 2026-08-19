@@ -3,13 +3,14 @@
   "_accepted_growth": "2026-08-14: mutation_check.py re-recorded 1377 -> 1399. The growth is new mutation ENTRIES (SB-IO, FS-1, FS-2 - the pins for the day's new gates), i.e. coverage, not bloat. RE-RECORDING IS THE LOOPHOLE IN THIS DESIGN, so it is stated here rather than done quietly: this file is now the TOP split candidate, and the next growth should be preceded by the split, not by another re-record.",
   "_split_2026_08_16": "The 08-14 instruction above was HONOURED rather than repeated. Adding the MODE-1/MODE-2 pins took mutation_check.py 1399 -> 1415, so the split came first: the MUTATIONS table moved to tools/mutation_entries_a.py and tools/mutation_entries_b.py. AT THE SPLIT the three files measured 377 / 541 / 538 and all 200 entries and 201 anchors were preserved - the cut is at an entry boundary and order is unchanged, so the sweep iterates an identical list. THOSE ARE AN INSTANT, NOT A CURRENT FACT: later work the same session added the sys.path re-export fix and eleven more entries, so the sizes are now 387 / 541 / 604 across 211 entries and 212 anchors. The session's own consistency audit caught the undated versions of these numbers going stale within hours, which is the drift class this repo exists to catch. tools/mutation_check.py is REMOVED from over_limit below: it is no longer over the limit, and the ratchet only turns one way.",
   "_reverse_walk_gap": "Observed 2026-08-16 while doing the above, and it is the 08-16 review's finding #19: when mutation_check.py fell off this list the gate printed '7 recorded offender(s)' and listed 6, with no SHRANK line, because verdict() only inspects files that are CURRENTLY over the limit and never walks the baseline in reverse. A stale baseline entry is therefore invisible. Scheduled in the plan as task #12; this note exists so the discrepancy is not mistaken for a miscount.",
-  "recorded_utc": "2026-08-16",
+  "_accepted_growth_2026_08_18": "pre_push_gate_selftest.py re-recorded 1109 -> 1131. The growth is scenario 5a, which asserts the new .claude/pre-push-always.cmd hook point from INSIDE the fast-path state scenario 5 establishes - i.e. coverage of a real hole, not bloat: a check whose input is not the source (a ledger, a staleness comparison) was previously cached away by the 'no source touched since' short-circuit, and `git commit` touches no mtime at all. Measured in ghg-copilot on that exact incident path. STATED, NOT DONE QUIETLY, per the 08-14 note above. THE 08-14 INSTRUCTION NOW APPLIES TO THIS FILE: it is the top split candidate at 1131 lines, and the next growth should be preceded by the split (the natural seam is the four _selftest_* helpers, which are already module-level functions, versus the numbered scenario walk in selftest()).",
+  "recorded_utc": "2026-08-18",
   "limit": 800,
   "over_limit": {
     "hooks/duplicate_registration_check.py": 858,
     "hooks/fast_test_on_stop.py": 832,
     "hooks/fast_test_on_stop_selftest.py": 1003,
-    "hooks/pre_push_gate_selftest.py": 1109,
+    "hooks/pre_push_gate_selftest.py": 1131,
     "install.py": 927,
     "tools/no_regression.py": 805
   }
