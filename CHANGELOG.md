@@ -35,6 +35,33 @@ All notable changes to this project are documented here. Format loosely follows
   population without it. Two of the six behaviours remain unpinned and need different mechanisms
   (a selftest that injects a raising calibrator; a planted wiring fixture) - recorded as open,
   not reported as done.
+  **Then an independent adversarial review of that commit (8 lenses, 36 agents, 28 findings, 24
+  refuted) found four more defects in it, and all four were real.** Recorded because the author
+  wrote both the mechanism and its only probe, which is the one case where more care does not
+  help - the author's probe set and the author's blind spot are the same object.
+  - **Widening the copy roster ARMED a check that had been vacuous.** `docs/audits` puts
+    `review_runs.json` into every scratch tree, which makes `check_review_freshness`'s ambient
+    ORPHAN assertion live - and that assertion runs BEFORE its "not a git checkout" skip. Its unit
+    roster is `UNIT_GLOBS`, which covers `scripts/*.py`; `COPY_TREES` did not. So the gate's own
+    prescribed `--record --unit scripts/make_demos.py` would have turned five unrelated pins into
+    HARNESS ERROR, 25 minutes into a sweep - and recording exactly that is what the next task's
+    sweep of never-reviewed files does. Fixed by adding `scripts`, and GENERALLY by
+    `check_mutation_anchors.roster_gaps()`, which DERIVES the copy roster's adequacy from
+    `UNIT_GLOBS` rather than trusting two hand-kept lists to stay in step. Verified against the
+    shipped roster: it names `scripts/*.py` before the fix and is silent after. Pinned `ROSTER-1`.
+  - **The enforcing/selftest predicate was written as exact tuple equality, twice.** Every gate
+    dispatches on MEMBERSHIP (`"--selftest" in sys.argv`), so `("--selftest", "")` was skipped by
+    `enforcing_mode_gaps` AND accepted as enforcing by `enforcing_argv`, while the target ran its
+    selftest - a one-token disarm of the mode control, reintroduced by the commit that was fixing
+    the mode control. The rule now lives once, in `tools/gate_modes.py`, imported by both. Every
+    pre-existing fixture used exactly `("--selftest",)`, so no case could tell the two spellings
+    apart; three selftest-shaped-but-not-equal rows now do. Pinned `MODE-3`.
+  - **`make_git_repo` leaked its scratch trees silently.** `git add -A` writes loose objects at
+    mode 0444, `shutil.rmtree(..., ignore_errors=True)` cannot unlink them on Windows, and the
+    error was discarded. MEASURED: 21 orphaned `unbluff-mut-*` trees, each holding nothing but a
+    1.1 MB `.git`, 23 MB total - accumulated behind a clean summary line. `rmtree` now clears the
+    read-only bit and retries, `purge_scratch()` sweeps what earlier runs left, and what still
+    cannot be removed is PRINTED. "Do not fail" and "do not say" are different decisions.
 - **`enforcing_mode_gaps()` in `run_selftests.py` - a gate's registered MODE is now DERIVED and
   checked, not trusted.** `AUX_GATES`' third element is the argv each gate is invoked with, and
   until now nothing anywhere read it. Registering a gate `("--selftest",)` instead of `()` makes

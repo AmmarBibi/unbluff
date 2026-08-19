@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import ast
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -47,7 +48,18 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # red makes every mutation verified through it prove nothing (see [HIGH-6] below).
 # `docs/audits` and NOT `docs`: the audits subtree is 964K; the whole of docs/ is 5.3M of gifs
 # and screenshots no gate reads, and it would be copied once per entry across a 200-entry sweep.
-COPY_TREES = ("hooks", "tools", "tests", "skills", ".github", "docs/audits", "examples")
+# [ROSTER-GLOB 2026-08-19] `scripts` joined after an independent review found that widening the
+# roster had ARMED a check that used to be vacuous. `docs/audits` brings review_runs.json into
+# every scratch tree, which makes check_review_freshness's ambient ORPHAN assertion live - and
+# that assertion runs BEFORE its "not a git checkout" skip. Its unit roster is UNIT_GLOBS, which
+# covers `scripts/*.py`; this roster did not. So the moment anyone runs the gate's own prescribed
+# `--record --unit scripts/make_demos.py`, every scratch tree reports a unit the gate "never asks
+# about" and five pre-existing pins turn into HARNESS ERROR. That record is not hypothetical: it
+# is exactly what task #17's sweep of the never-reviewed files is going to do.
+# The general fix is the guard in check_mutation_anchors.py, which DERIVES this roster's
+# adequacy from UNIT_GLOBS instead of trusting that someone kept the two lists in step.
+COPY_TREES = ("hooks", "tools", "tests", "skills", ".github", "docs/audits", "examples",
+              "scripts")
 # README.md is an INPUT to check_readme_fresh, not just documentation: without it that gate's
 # main() returns "cannot read README.md" and never reaches its checks, so every mutation of
 # that file died at baseline. The roster has to contain what the gates READ, not only what
@@ -175,7 +187,11 @@ def enforcing_argv(root: str, target: str) -> tuple:
     if not hits:
         return (), ("%s is in no AUX_GATES row, so it has no registered enforcing mode to "
                     "verify" % os.path.basename(target))
-    enforcing = [(label, extra) for label, extra in hits if extra != ("--selftest",)]
+    # MEMBERSHIP via the shared predicate, never `extra != ("--selftest",)`. That spelling read
+    # ("--selftest", "") as an ENFORCING registration and handed it back as the argv to verify
+    # through - so the mutation would have run the gate's SELFTEST, the one thing this mode
+    # exists to escape, while run_selftests skipped the row for the same reason. See gate_modes.
+    enforcing = [(label, extra) for label, extra in hits if not is_selftest_argv(extra)]
     if not enforcing:
         return (), ("%s is registered ONLY as %r - there is no enforcing invocation to mutate "
                     "against. Register it enforcing, or verify this entry via the selftest"
@@ -214,6 +230,50 @@ def make_git_repo(scratch: str) -> str:
     return ""
 
 
+def _force_writable(func, path, _exc):
+    """rmtree onerror: clear the read-only bit and retry once.
+
+    `git add -A` writes loose objects at mode 0444. On Windows os.unlink refuses a read-only file,
+    so `shutil.rmtree(..., ignore_errors=True)` failed on every enforcing entry and DISCARDED the
+    error. MEASURED 2026-08-19, after one sweep: 21 orphaned `unbluff-mut-*` trees in %TEMP%,
+    every one containing nothing but a 1.1 MB `.git`, 23 MB in total - while the harness printed a
+    clean summary and exited 0. "Do not fail" and "do not say" are different decisions; this makes
+    the cleanup work, and purge_scratch() below reports whatever it still cannot remove.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        pass
+
+
+def purge_scratch(tmpdir: str = "") -> tuple:
+    """(removed, left) - delete orphaned scratch trees from earlier runs. Bounded footprint.
+
+    A leak that only ever grows is invisible until a disk is full; this makes each run clean up
+    after the ones before it, and RETURN what it could not remove so main() can say so rather than
+    leaving the reader to discover 23 MB of `.git` by accident.
+    """
+    root = tmpdir or tempfile.gettempdir()
+    removed, left = 0, []
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0, []
+    for name in names:
+        if not name.startswith("unbluff-mut-"):
+            continue
+        path = os.path.join(root, name)
+        if not os.path.isdir(path):
+            continue
+        shutil.rmtree(path, onerror=_force_writable)
+        if os.path.exists(path):
+            left.append(path)
+        else:
+            removed += 1
+    return removed, left
+
+
 def missing_anchors(live_text: str, edits) -> list:
     """The `find` strings in `edits` that no longer appear in `live_text`.
 
@@ -246,7 +306,8 @@ def missing_anchors(live_text: str, edits) -> list:
 # would have been a poor trade for two saved lines.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mutation_entries_a import ENTRIES as _ENTRIES_A  # noqa: E402  (path set directly above)
+from gate_modes import is_selftest_argv  # noqa: E402  (path set directly above)
+from mutation_entries_a import ENTRIES as _ENTRIES_A  # noqa: E402
 from mutation_entries_b import ENTRIES as _ENTRIES_B  # noqa: E402
 
 MUTATIONS = _ENTRIES_A + _ENTRIES_B
@@ -440,7 +501,9 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify="") 
             return "SURVIVED - the test for finding %s is DECORATIVE" % finding
         return "CAUGHT (rc=%s)" % rc
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        # NOT ignore_errors=True. That swallowed every read-only git object make_git_repo creates
+        # and leaked the whole scratch tree, silently. See _force_writable().
+        shutil.rmtree(scratch, onerror=_force_writable)
 
 
 def duplicate_ids() -> list:
@@ -468,6 +531,14 @@ def main() -> int:
         print("HARNESS ERROR: duplicate mutation ids %r - the report cannot name them apart"
               % (dupes,))
         return 1
+    # Sweep what earlier runs leaked, and SAY what is left. A cleanup that cannot report its own
+    # failure is how 23 MB of orphaned .git trees accumulated behind a clean summary line.
+    _purged, _left = purge_scratch()
+    if _purged:
+        print("[mutation-check] removed %d orphaned scratch tree(s) from earlier runs" % _purged)
+    if _left:
+        print("[mutation-check] WARNING: %d scratch tree(s) could NOT be removed and are still "
+              "on disk: %s" % (len(_left), ", ".join(_left[:5])))
     survivors = []
     errors = []
     skipped = []

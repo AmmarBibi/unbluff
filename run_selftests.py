@@ -29,6 +29,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 import time as _time
 _STARTED = _time.perf_counter()
 sys.path.insert(0, os.path.join(HERE, "hooks"))
+# tools/ too, for the ONE definition of "does this registration run the selftest or the
+# measurement?". Two spellings of that rule is what let a ("--selftest", "") registration read as
+# ENFORCING in enforcing_mode_gaps() and as the SELFTEST at the target - see tools/gate_modes.py.
+sys.path.insert(0, os.path.join(HERE, "tools"))
 
 # ONE detector, imported - not a second copy. This file and hook_health_check.py each carried
 # the SAME hardcoded roster; run_selftests was converted to detection on 2026-07-29 and the
@@ -39,6 +43,7 @@ from hook_health_check import (  # noqa: E402  (path set above)
     KNOWN_NO_SELFTEST, SKIP_RC, all_hook_files, floor_violations, has_selftest,
     selftestable_hooks,
 )
+from gate_modes import is_selftest_argv  # noqa: E402  (path set above)
 
 # (label, path parts under the repo root, extra argv). A FLOOR: every entry MUST exist and run.
 AUX_GATES = (
@@ -142,6 +147,11 @@ NOT_A_GATE = {
     # runs them is the one already classified above.
     "mutation_entries_a.py",
     "mutation_entries_b.py",
+    # [ROSTER-GLOB 2026-08-19] Pure DATA plus one predicate - the single definition of "does this
+    # argv run the selftest or the measurement?", imported by this file and by mutation_check.
+    # Not a gate: it defines no check and exposes no dispatch. The gates that USE it are the ones
+    # already classified here.
+    "gate_modes.py",
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
     # [P14 B1] grades a cap-guard against tests/cap_spelling_corpus.py and prints the
@@ -256,7 +266,10 @@ def enforcing_mode_gaps(root: str, gates=AUX_GATES, adjudicated=SELFTEST_IS_THE_
             # this one's. Never silently treat it as adjudicated.
             continue
         funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        if tuple(extra) != ("--selftest",) or "selftest" not in funcs:
+        # MEMBERSHIP, via the shared predicate. Exact tuple equality here meant ("--selftest", "")
+        # skipped this check entirely while still running the target's selftest - a one-token
+        # disarm of the mode control, found by an independent review on 2026-08-19.
+        if not is_selftest_argv(extra) or "selftest" not in funcs:
             continue
         if _can_fail(funcs.get("main")):
             needs.append(label)
@@ -526,6 +539,20 @@ def selftest() -> int:
             fails.append("an explicit adjudication did not silence the gap: %r" % (gaps2,))
         if stale2 != ["ghost"]:
             fails.append("a stale adjudication was not reported: %r" % (stale2,))
+
+        # [ROSTER-GLOB 2026-08-19] THE SELFTEST-SHAPED-BUT-NOT-EQUAL ROW. Every fixture above
+        # uses exactly ("--selftest",), so a detector written with `!= ("--selftest",)` and one
+        # written with `"--selftest" in extra` agree on all of them - the cases could not tell the
+        # two spellings apart, which is why the disarm survived until an independent review. The
+        # target dispatches on MEMBERSHIP (`"--selftest" in sys.argv`), so this row runs the
+        # selftest and must be adjudicated exactly like the plain one.
+        for shape in (("--selftest", ""), ("--selftest", "-v"), ("-v", "--selftest")):
+            padded = (("enforcing", ("enforcing_gate.py",), shape),)
+            if enforcing_mode_gaps(td, gates=padded, adjudicated={})[0] != ["enforcing"]:
+                fails.append("a registration of %r was not treated as running the SELFTEST. The "
+                             "target dispatches on membership, so this row runs its selftest "
+                             "while the gate's real measurement is invoked by nothing - a "
+                             "one-token disarm of this very control" % (shape,))
 
         # THE MUTATION THIS EXISTS TO CATCH: flipping an ENFORCING row to --selftest must be
         # detected. This is the one-token edit that reproduced on a clean clone.

@@ -431,6 +431,27 @@ ENTRIES = [
     ("./run_selftests", "MODE-2", "the mode detector's can-fail test always says no, so every "
      "--selftest registration reads as adjudicated and no flip is ever reported",
      [("def _can_fail(fn) -> bool:", "def _can_fail(fn) -> bool:\n    return False")], False),
+    # [MODE-3 2026-08-19] The THIRD spelling of the same disarm, and the one MODE-1 and MODE-2
+    # could not see. Both of those fixtures use exactly ("--selftest",), so a detector written
+    # with `!= ("--selftest",)` and one written with `"--selftest" in extra` agree on every case
+    # they exercise. Every gate here dispatches on MEMBERSHIP, so ("--selftest", "") runs the
+    # SELFTEST while an equality-based detector reads the row as enforcing and reports no gap -
+    # one token, suite green, the gate's real measurement invoked by nothing. Found by an
+    # independent review of the enforcing-verify commit, which had reproduced the equality
+    # spelling in mutation_check.enforcing_argv - the twin, written while fixing the original.
+    ("tools/gate_modes", "MODE-3", "the selftest/measurement predicate goes back to exact tuple "
+     "equality, so a ('--selftest', '') registration reads as ENFORCING in both readers while "
+     "the target still runs its selftest",
+     [("    return SELFTEST_FLAG in tuple(extra or ())",
+       "    return tuple(extra or ()) == (SELFTEST_FLAG,)")], False, "./run_selftests"),
+    # [ROSTER-GLOB 2026-08-19] The guard that ties the mutation harness's copy roster to the unit
+    # roster the freshness gate globs. Without it, widening COPY_TREES armed an assertion whose
+    # inputs came from a tree that could never satisfy it, and the failure would have surfaced
+    # 25 minutes into a sweep as five unrelated HARNESS ERRORs.
+    ("tools/check_mutation_anchors", "ROSTER-1", "the roster-coverage check stops comparing, so "
+     "a unit glob no scratch tree can supply is never reported",
+     [('        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):',
+       "        if False:")], False),
     # [P14 D2] The no-regression gate is itself a gate, and finding M-M4 records that 4 of 6
     # aux gates were re-run by NO mutation - a check nothing mutation-tests is decorative by
     # default. These two pin the halves that carry the whole design.
