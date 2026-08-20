@@ -165,6 +165,19 @@ def load_with_siblings(path, tag, repo, sha, names, work):
         with open(os.path.join(sibdir, filename), "w", encoding="utf-8") as fh:
             fh.write(blob)
         materialised.append(filename[:-3])
+    # FAIL CLOSED if the predecessor's own siblings could not be produced. `_git` returns None on
+    # failure and the listing above degrades to "", so a git that cannot answer - no git, an
+    # unreachable sha, a damaged object store - would silently leave the predecessor importing the
+    # WORKING TREE's modules. That is the self-comparison this whole function exists to prevent,
+    # reappearing through the back door, and shared_siblings() is too shallow to catch it one hop
+    # down (task #19). A predecessor with no hooks/ at that commit is a different, legitimate case:
+    # `names` would be unsatisfiable there too, so the test is whether we produced ANY of the
+    # siblings the CURRENT version actually imports.
+    if names and not (set(names) & set(materialised)):
+        raise Broken(
+            "none of %s could be materialised at %s, so the predecessor would import the working "
+            "tree's copies and the A/B would silently become a self-comparison. Refusing to issue "
+            "a verdict." % (sorted(names), (sha or "")[:8]))
     saved = {n: sys.modules.pop(n, None) for n in materialised}
     sys.path.insert(0, sibdir)
     try:
