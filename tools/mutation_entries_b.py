@@ -463,6 +463,16 @@ ENTRIES = [
      "capability BOTH versions detect is filed SETTLED and can never be pruned",
      [('    if "cur_hits" in res:\n        return set(res["cur_hits"])',
        '    if False:\n        return set(res["cur_hits"])')], False),
+    # [SET-AGG 2026-08-20] The task #17 HIGH in cap_types' vocabulary. Restoring the two names to
+    # _AGGREGATORS is the exact shipped state, and before this session NOTHING went red on it:
+    # no corpus entry and no selftest case exercised a slice wrapped in set()/frozenset(), so a
+    # guard built to catch truncation-handed-to-the-caller was silent on one spelling of it.
+    ("cap_types", "SET-AGG", "set/frozenset go back to being clause-2 aggregators, so "
+     "`return set(rows[:MAX])` is CLEAN to the guard whose whole job is catching that",
+     [('_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool",\n'
+       '                "next", "int", "float"}',
+       '_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool", "set", "frozenset",\n'
+       '                "next", "int", "float"}')], False),
     ("tools/check_mutation_anchors", "ROSTER-1", "the roster-coverage check stops comparing, so "
      "a unit glob no scratch tree can supply is never reported",
      [('        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):',

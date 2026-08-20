@@ -589,6 +589,35 @@ _MODULE_SCOPE_ENTRIES = (
 )
 
 ENTRIES = ENTRIES + _MODULE_SCOPE_ENTRIES
+
+# [SET-AGG 2026-08-20] The set()/frozenset() wrapper family. `set` and `frozenset` were listed as
+# clause-2 AGGREGATORS in hooks/cap_types.py, which suppresses a slice consumed by them - but
+# unlike len/any/bool they return a COLLECTION, so the truncated one goes straight to the caller.
+# `return set(rows[:MAX])` was therefore SILENT while the identical `list(rows[:MAX])` was
+# flagged: a shipped false negative in the guard, with ZERO corpus entries and zero selftest
+# cases exercising the shape, so nothing anywhere went red. Found by the task #17 sweep.
+# The two negatives are the other half and are not decoration: they are what stops the fix from
+# becoming "flag anything wrapped in a call", which would make the guard fire on correct code.
+_SET_WRAPPER_ENTRIES = (
+    ('set_wrapped_slice',
+     'hooks/f.py',
+     True,
+     'MAX_ROWS = 10\ndef report(rows):\n    return set(rows[:MAX_ROWS])\n'),
+    ('frozenset_wrapped_slice',
+     'hooks/f.py',
+     True,
+     'MAX_ROWS = 10\ndef report(rows):\n    return frozenset(rows[:MAX_ROWS])\n'),
+    ('neg_len_reduced_slice',
+     'hooks/f.py',
+     False,
+     'MAX_ROWS = 10\ndef count(rows):\n    return len(rows[:MAX_ROWS])\n'),
+    ('neg_any_reduced_slice',
+     'hooks/f.py',
+     False,
+     'MAX_ROWS = 10\ndef probe(rows):\n    return any(rows[:MAX_ROWS])\n'),
+)
+
+ENTRIES = ENTRIES + _SET_WRAPPER_ENTRIES
 MUST_FLAG = tuple(e for e in ENTRIES if e[2])
 NEGATIVE_CONTROLS = tuple(e for e in ENTRIES if not e[2])
 

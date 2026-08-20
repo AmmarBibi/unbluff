@@ -136,13 +136,25 @@ def load_with_siblings(path, tag, repo, sha, names, work):
     """
     sibdir = tempfile.mkdtemp(prefix="prevsib_", dir=work)
     materialised = []
-    for name in names:
-        blob = _git(repo, "show", "%s:hooks/%s.py" % (sha, name))
+    # [TRANSITIVE 2026-08-20] EVERY hook module at `sha`, not just the unit's direct imports.
+    # The first version materialised only `names` - what the unit imports itself - and the leak
+    # simply moved one hop down: capped_report imports cap_shapes, cap_shapes imports cap_types,
+    # and cap_types was still resolved from the working tree. MEASURED: after two corpus
+    # positives were added that only the CURRENT cap_types can detect, the PREDECESSOR detected
+    # them too - 104 of 107 on both sides, where a genuine A/B gives 102 against 104. Half of an
+    # isolation is not an isolation, so the whole directory comes across at that commit.
+    listing = _git(repo, "ls-tree", "--name-only", "%s:hooks" % sha) or ""
+    wanted = {n if n.endswith(".py") else "%s.py" % n
+              for n in listing.split()} | {"%s.py" % n for n in names}
+    for filename in sorted(wanted):
+        if not filename.endswith(".py"):
+            continue
+        blob = _git(repo, "show", "%s:hooks/%s" % (sha, filename))
         if blob is None:
             continue
-        with open(os.path.join(sibdir, "%s.py" % name), "w", encoding="utf-8") as fh:
+        with open(os.path.join(sibdir, filename), "w", encoding="utf-8") as fh:
             fh.write(blob)
-        materialised.append(name)
+        materialised.append(filename[:-3])
     saved = {n: sys.modules.pop(n, None) for n in materialised}
     sys.path.insert(0, sibdir)
     try:
