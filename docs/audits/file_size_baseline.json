@@ -10,7 +10,6 @@
     "hooks/fast_test_on_stop.py": 832,
     "hooks/fast_test_on_stop_selftest.py": 1003,
     "hooks/pre_push_gate_selftest.py": 1109,
-    "install.py": 927,
-    "tools/no_regression.py": 805
+    "install.py": 927
   }
 }

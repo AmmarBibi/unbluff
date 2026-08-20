@@ -152,6 +152,11 @@ NOT_A_GATE = {
     # Not a gate: it defines no check and exposes no dispatch. The gates that USE it are the ones
     # already classified here.
     "gate_modes.py",
+    # [SPLIT 2026-08-20] The no-regression gate's selftest apparatus - fixtures and assertions
+    # A-G. Not a gate: it defines no check of its own and exposes no dispatch; it IS the selftest
+    # of tools/no_regression.py, which is classified as a gate above. Same relationship as
+    # hooks/*_selftest.py to their hooks.
+    "noregress_selftest.py",
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
     # [P14 B1] grades a cap-guard against tests/cap_spelling_corpus.py and prints the

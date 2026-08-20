@@ -448,6 +448,21 @@ ENTRIES = [
     # roster the freshness gate globs. Without it, widening COPY_TREES armed an assertion whose
     # inputs came from a tree that could never satisfy it, and the failure would have surfaced
     # 25 minutes into a sweep as five unrelated HARNESS ERRORs.
+    # [SELF-COMPARE / STALE-TAUTOLOGY 2026-08-20] The two HIGHs task #17 found in the
+    # no-regression gate. Both were CHECKS THAT COULD NOT FAIL, and neither was reachable by any
+    # existing assertion: the live gate reports the same "1 settled" whether the staleness rule
+    # is right or wrong, and the same "predecessor saw N, working tree sees N" whether the A/B is
+    # genuine or a self-comparison. MEASURED before the fix: crippling the real detector moved
+    # BOTH sides 102 -> 64 and the gate still exited 0. After: the predecessor holds at 102, the
+    # working tree drops to 64, and the gate FAILS - which is the whole point of the gate.
+    ("tools/no_regression", "NOREG-SELF", "the self-comparison guard reports nothing, so a "
+     "predecessor that executes the working tree's own delegate passes as a yardstick",
+     [("    shared = set(repo_sibling_modules(prev, repo)) & set(repo_sibling_modules(cur, repo))",
+       "    shared = set()")], False),
+    ("tools/no_regression", "NOREG-STALE", "waiver staleness goes back to `gained` alone, so a "
+     "capability BOTH versions detect is filed SETTLED and can never be pruned",
+     [('    if "cur_hits" in res:\n        return set(res["cur_hits"])',
+       '    if False:\n        return set(res["cur_hits"])')], False),
     ("tools/check_mutation_anchors", "ROSTER-1", "the roster-coverage check stops comparing, so "
      "a unit glob no scratch tree can supply is never reported",
      [('        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):',
