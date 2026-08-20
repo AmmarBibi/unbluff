@@ -346,8 +346,22 @@ ENTRIES = [
      [('    if tok.endswith(".py"):', "    if True:")], False),
     ("piped_gate_guard", "PG2", "pipefail / PIPESTATUS no longer protect the exit status, so "
      "a command that already captures it is blocked anyway",
-     [("    if any(p in command for p in PROTECTED):\n        return []",
+     # ANCHOR UPDATED 2026-08-20: the whole-command substring test became _is_protected(), which
+     # asks WHERE the word appears and in WHICH dialect. The old line was flagged as this entry's
+     # anchor in a comment beside it, and the comment did not stop the drift - check_mutation_
+     # anchors did, in under a second, exactly as designed. Prose is advisory; only a gate is a
+     # control.
+     [("    if _is_protected(command, dialect):\n        return []",
        "    if False:\n        return []")], False),
+    # [DISARM 2026-08-20] The other half, and the one PG2 cannot see: PG2 proves the protector is
+    # CONSULTED, not that it protects anything real. A protector accepted ANYWHERE in the command
+    # - in a comment, or after the pipeline where it does nothing - silenced a blocking guard.
+    ("piped_gate_guard", "PG-DISARM", "a protector counts wherever it appears, so `pipefail` in "
+     "a comment or written AFTER the pipeline disarms the guard",
+     [('    for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):\n'
+       '        if word in (head if where == "before" else command):',
+       '    for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):\n'
+       '        if word in command:')], False),
     ("piped_gate_guard", "PG3", "the LAST pipeline segment is examined too, so a gate NAME "
      "appearing as an argument to the final consumer reads as a discarded gate",
      [("    for i, segment in enumerate(segments[:-1]):",
