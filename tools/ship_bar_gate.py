@@ -195,6 +195,22 @@ def reconcile(findings, report_rows, declared=None) -> list:
     return problems
 
 
+def _record(result: str, **fields) -> None:
+    """ONE recording site for every exit path of main(), including the ones that cannot measure.
+
+    [C1-CLASS 2026-08-20] Two of main()'s four exits returned without writing a row, so
+    `gate_ledger.last_run("ship_bar")` kept serving the previous PASS for a gate that had just
+    failed to run - and the push gate reads that ledger. The same shape was already fixed once in
+    check_file_size.py; the task #17 sweep found it here and in score_false_alarms.py, which makes
+    it a CLASS. Routing every exit through one helper is what stops the next exit path being added
+    without one. The general control - proving the call is REACHED rather than merely present -
+    is task #4(d); this makes the calls exist on every path so that control has something true to
+    verify.
+    """
+    if gate_ledger is not None:
+        gate_ledger.record("ship_bar", result, **fields)
+
+
 def main() -> int:
     try:
         scope, findings = load_findings()
@@ -202,6 +218,13 @@ def main() -> int:
         declared = declared_count()
     except (OSError, ValueError) as exc:
         print("ship-bar: CANNOT RUN - %s" % exc)
+        # RECORD ON THIS PATH TOO. Returning here wrote no row, so gate_ledger.last_run("ship_bar")
+        # kept serving the previous PASS and any reader - including the push gate that consults
+        # this ledger - saw a stale green for a gate that could not run at all. Same shape as the
+        # defect already fixed in check_file_size; found in two more gates by the task #17 sweep,
+        # which makes it a class rather than an instance. "Could not measure" is its own verdict
+        # and must be distinguishable from "measured, and fine".
+        _record("CANNOT_RUN", reason=str(exc)[:200])
         return 1
 
     # [2026-08-16] The FLOOR now lives here, in main(), not only in selftest(). It was asserted
@@ -212,6 +235,7 @@ def main() -> int:
         print("ship-bar: CANNOT RUN - parsed %d finding(s) and %d report row(s). A stopping "
               "rule over an empty population is not a PASS, it is a gate that read nothing."
               % (len(findings), len(report_rows)))
+        _record("CANNOT_RUN", findings=len(findings), report_rows=len(report_rows))
         return 1
 
     problems = reconcile(findings, report_rows, declared=declared)
@@ -239,10 +263,9 @@ def main() -> int:
     # appear red in the ledger and last_run() kept serving a stale PASS after a failing run.
     open_rows = [r for r in findings if r.get("state") == "SCHEDULED"]
     failing = bool(problems or blocking)
-    if gate_ledger is not None:
-        gate_ledger.record("ship_bar", "FAIL" if failing else "PASS", findings=len(findings),
-                           report_rows=len(report_rows), problems=len(problems),
-                           blocking=len(blocking), scheduled=len(open_rows))
+    _record("FAIL" if failing else "PASS", findings=len(findings),
+            report_rows=len(report_rows), problems=len(problems),
+            blocking=len(blocking), scheduled=len(open_rows))
     if failing:
         print("ship-bar: FAIL - v1.0 cannot ship")
         return 1
