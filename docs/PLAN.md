@@ -6,10 +6,13 @@ something in it belongs in a GitHub issue instead.
 
 ## What unbluff is
 
-A set of Claude Code hooks that make silence and success look different. It is **in use**: 7 hook
-commands wired in `~/.claude/settings.json` plus a global `core.hooksPath`, running live from
-`C:\Users\ammar\Downloads\unbluff`. It is a public MIT repo, maintained partly as a career
-artifact.
+A set of Claude Code hooks that make silence and success look different - **and four SKILLS**
+(`meta-review`, `source-coverage`, `consistency-audit`, `completeness-audit`), which `install.py`
+copies into the user's `~/.claude/skills`. The skills are shipped surface, not internal tooling;
+this plan originally described the project as hooks-only and that omission hid a release blocker
+(gate 4 below). It is **in use**: 7 hook commands wired in `~/.claude/settings.json` plus a global
+`core.hooksPath`, running live from `C:\Users\ammar\Downloads\unbluff`. Public MIT repo,
+maintained partly as a career artifact.
 
 **Two numbering systems caused real confusion and one is now retired.** The artifact version is
 **v1.3.1** (tagged, unreleased; last GitHub *Release* is v1.2.1, 2026-07-22). The old "v1.0
@@ -20,14 +23,14 @@ criteria" was a four-part QUALITY BAR, not a version. That framing is dead - see
 Before v1.4.0, work is in scope **only if it makes the published artifact false, dangerous, or
 broken on a machine that is not the author's.** Everything else is a post-release issue.
 
-This exists because the backlog went from 6 items to 32 in one session while nothing shipped. Every
-one of the 32 is real. Most do not belong in front of a release.
+This exists because the backlog went from 6 items to 33 in one session while nothing shipped. Every
+one of the 33 is real. Most do not belong in front of a release.
 
 ## Phase 1 - ship v1.4.0
 
 Ordered. Each line is a gate, not a suggestion.
 
-1. **Merge `main` into `feat/enforcing-verify`.** They have diverged (1 commit vs 10). The only
+1. **Merge `main` into `feat/enforcing-verify`.** They have diverged (1 commit vs 11). The only
    overlapping file is `docs/audits/file_size_baseline.json`, and it conflicts in both directions -
    resolve to the UNION (`pre_push_gate_selftest.py` = 1131, `no_regression.py` removed), then
    re-run the file-size gate. Do this FIRST; divergence only grows.
@@ -38,22 +41,34 @@ Ordered. Each line is a gate, not a suggestion.
 3. **Fix what the repo itself refutes** (#28). Three README sentences are contradicted by the
    project's own tests; the installer cardinality is wrong ("4 entries" -> 5, "eighteen pieces").
    Ten minutes, and it is the salvageable core of the old criterion 1.
-4. **Make the release notes publishable** (#29). `[Unreleased]` is 19 KB of internal workflow ids
+4. **Fix the shipped skill that can audit a document it never read** (#16). ELEVATED from Phase 2
+   by the source-coverage pass: `consistency-audit`'s PyMuPDF branch returns unvalidated text, so a
+   scanned or image-only PDF yields an empty extraction and the skill reports CLEAN. That is the
+   artifact being FALSE on someone else's machine, which is this plan's own bar for Phase 1 - and
+   it was missed because the plan described unbluff as hooks-only.
+5. **Make the release notes publishable** (#29). `[Unreleased]` is 19 KB of internal workflow ids
    and agent telemetry. Also settle v1.3.1: retroactive Release, or delete the tag. (v1.3.0 does
    not exist - the earlier premise was wrong.)
-5. **Fix install/uninstall** (#30). `--uninstall` cannot undo `--install-global`; following the
+6. **Fix install/uninstall** (#30). `--uninstall` cannot undo `--install-global`; following the
    README leaves every `git push` on the machine broken.
-6. **Independent review of this session's code** (#20). 1,215 new lines of Python, most of it guard
+7. **Independent review of this session's code** (#20). 1,215 new lines of Python, most of it guard
    logic, none of it reviewed by anyone but its author.
-7. **Push the branch and get CI green** (#26). None of the 10 commits has ever run in CI, and
+8. **Push the branch and get CI green** (#26). None of the 11 commits has ever run in CI, and
    tagging currently triggers no CI at all.
-8. **Tag and release.**
+9. **Tag and release.**
 
 ## Phase 2 - post-release, as GitHub issues
 
-Everything else: #3, #4, #5, #7, #8, #13's pinning, #15-#19, #21, #22, #24, #27, #31, #32.
+Everything else: #3, #4, #5, #7, #8, #13's pinning, #15, #17, #18, #19, #21, #22, #24, #31, #32, #33.
 
-**Convert the task ledger to GitHub issues at release time.** A 32-item list in a session tool is
+**#10 is SUPERSEDED, not scheduled.** It said "correct the canonical order in
+`docs/NEXT_SESSION_PROMPT.md`". This file replaced that one. Doing #10 as written would restore a
+second competing order - the drift the meta-review skill exists to stop. Decide instead: delete
+that file, or reduce it to a pointer here.
+
+**#27 is a Phase 1 DECISION, not Phase 2 work** - see "Out of scope, decided" below.
+
+**Convert the task ledger to GitHub issues at release time.** A 33-item list in a session tool is
 invisible, dies with the session, and answers "what are we building?" to nobody. The same list as
 public issues is durable, is the honest answer to that question, and reads as a maintained project
 - which is the career-artifact goal the local list serves not at all.
