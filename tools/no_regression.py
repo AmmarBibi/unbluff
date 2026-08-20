@@ -57,6 +57,16 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 
+# [C7 2026-08-20] MODULE SCOPE, and it was MISSING. selftest() imports its split-out sibling
+# lazily (to avoid an import cycle), and the docstring there claimed this line already existed -
+# it did not. `python tools/no_regression.py --selftest` worked only because running a file as a
+# script puts its directory at sys.path[0]; `python -m tools.no_regression --selftest` raised
+# ModuleNotFoundError. Every caller in this repo invokes it as a script, so nothing was red - the
+# exact invocation-dependent shape the task #17 sweep hunts, introduced by the split that was
+# fixing two OTHER defects, with a docstring asserting the mitigation was present. Found by the
+# source-coverage pass asking whether a fix had created a new instance of the class it fixed.
+sys.path.insert(0, HERE)
+
 # Directories a unit may live in. Derived population, not a roster of unit NAMES.
 UNIT_ROOTS = ("hooks", "tools", "scripts", "skills")
 SKIP_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", ".tox", "node_modules"})
