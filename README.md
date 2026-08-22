@@ -164,7 +164,7 @@ python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK  hook-provenance: OK  hook-provenance-selftest: OK
 mutation-anchors: OK  corpus-scorer: OK
 -- gate modes: 16 row(s) examined, 5 adjudicated as selftest-is-the-gate
-all 38 selftests passed
+all 39 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -200,7 +200,7 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the eighteen pieces.
+It wires **5 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse / PreToolUse) that drive the shipped hooks.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 
