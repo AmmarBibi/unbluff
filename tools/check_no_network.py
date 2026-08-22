@@ -77,6 +77,15 @@ def population(root: str = REPO) -> tuple:
     return sorted(rels), "walk"
 
 
+def _is_spawn(node: ast.Call) -> bool:
+    """True if this Call actually launches a process. See the note in offenders_in()."""
+    f = node.func
+    name = getattr(f, "attr", "") or getattr(f, "id", "")
+    if name in ("run", "Popen", "call", "check_call", "check_output"):
+        return getattr(getattr(f, "value", None), "id", "") in ("subprocess", "sp", "")
+    return name in ("system", "popen", "execv", "execvp", "spawnv")
+
+
 def offenders_in(source: str, rel: str = "<memory>") -> list:
     """Network reachs in one file's SOURCE. Pure, so the selftest can plant known answers.
 
@@ -97,7 +106,13 @@ def offenders_in(source: str, rel: str = "<memory>") -> list:
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.module.split(".")[0] in NET_MODULES:
                 hits.append("%s:%d imports from %s" % (rel, node.lineno, node.module))
-        elif isinstance(node, ast.Call):
+        elif isinstance(node, ast.Call) and _is_spawn(node):
+            # ONLY inside an actual spawn. The first version inspected string constants in ANY
+            # Call, and immediately flagged THIS FILE: `NET_BINARIES = frozenset({...})` is a
+            # Call node, so every binary name in the vocabulary read as an invocation of it. A
+            # guard whose own definition trips it is the "fires on correct work" shape its
+            # docstring warns about - caught by the gate on its first run against a tracked tree,
+            # which is the only reason it did not ship that way.
             for arg in ast.walk(node):
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     first = arg.value.strip().split(" ")[0].split("/")[-1].split("\\")[-1]
@@ -171,6 +186,10 @@ def selftest() -> int:
         "a local name": "def urllib():\n    return 1\n",
         "ordinary subprocess": "import subprocess\nsubprocess.run(['git', 'status'])\n",
         "unrelated import": "import json, os\n",
+        # the regression this gate caught in ITSELF on its first tracked run: a vocabulary of
+        # binary names is a frozenset() Call, not an invocation of any of them.
+        "a frozenset of binary names": 'NAMES = frozenset({"curl", "wget", "ssh"})\n',
+        "a list of binary names": 'NAMES = ["curl", "nc"]\n',
     }
     for label, src in must_not.items():
         hit = offenders_in(src, "f.py")
