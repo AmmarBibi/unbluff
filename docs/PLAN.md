@@ -31,7 +31,7 @@ Materiality still decides ORDER, never WHETHER.
 
 ## Phase 1 - what must be true before v1.4.0
 
-1. **Merge `main` into `feat/enforcing-verify`.** Diverged 1 commit vs 12. Only overlapping file
+1. **Merge `main` into `feat/enforcing-verify`.** Diverged 1 commit vs 16 (2026-08-22). Only overlapping file
    is `docs/audits/file_size_baseline.json`; resolve to the UNION (`pre_push_gate_selftest.py` =
    1131, `no_regression.py` removed), re-run the file-size gate. Safe to do FIRST: the branch
    touches neither `fast_test_on_stop.py` nor `pre_push_gate.py`, so it cannot collide with gate 2.
@@ -44,20 +44,26 @@ Materiality still decides ORDER, never WHETHER.
    - `--install-global` pre-push: NO auto-detect. It fires in every repo on the machine with
      Claude Code closed, where nothing implies trust. Require an explicit `.claude/pre-push.cmd`.
    - ship a `SECURITY.md` stating the model and a private reporting route.
-3. **Prove the README subset** (#6, #28). ELEVATED - this replaces "drop criterion 1". ~30 README
-   rows, not all 243. Three front-page sentences are contradicted by the repo's own tests, and the
-   installer cardinality is wrong ("4 entries" -> 5, "eighteen pieces"). Shipping a README the
-   repository refutes is the one defect that would actually discredit a tool whose thesis is "do
-   not take claims on faith". Also rewrite `findings.json`'s `exclusion_basis`, which names
-   criterion 1 as the ONLY route back for 42 excluded findings (10 HIGH) - give them a real route.
-4. **Mechanise the network claim** (#32a). ELEVATED. The README's strongest trust badge - "no
-   network, no telemetry" - is enforced by nothing; a hook that opened a socket would pass every
-   gate. An AST scan over `hooks/` and `tools/` is a small file and retires a whole class of
-   unproven claim. On a public repo accepting PRs this is the cheapest high-value gate available.
+3. **Prove the README subset** (#6, #28). **PARTIAL.** ELEVATED - this replaces "drop criterion
+   1": ~30 README rows, not all 243. DONE (8390060): the stale transcript (38 -> 39) and the
+   installer cardinality ("4 entries" -> 5, with PreToolUse/piped_gate_guard finally named).
+   REMAINING: the three front-page sentences the repo's own tests CONTRADICT, and rewriting
+   `findings.json`'s `exclusion_basis`, which names criterion 1 as the ONLY route back for 42
+   excluded findings (10 HIGH) - give them a real route before the criterion goes away.
+4. **Mechanise the network claim** (#32a). **DONE 2026-08-22 (a80937c).** The README's strongest
+   trust badge - "no network, no telemetry" - was enforced by nothing: a hook that opened a
+   socket would have passed every gate. `tools/check_no_network.py` scans by AST (not grep - the
+   file names every networking module and would flag itself), population DERIVED, fails closed,
+   registered ENFORCING. 58 files / 0 reaches; pinned NONET-BLIND + NONET-FLOOR. It flagged
+   ITSELF on its first tracked run - `frozenset({...})` is a Call - which is the fires-on-correct-
+   work shape; fixed by restricting to real spawns, with two negative controls so it cannot
+   silently revert. NOTE #32's other items (demo GIFs, upgrade path, CONTRIBUTING, 103 absolute
+   home paths in docs) are NOT done and stay in Phase 2.
 5. **Fix the shipped skill that audits documents it never read** (#16). `consistency-audit`'s
    PyMuPDF branch returns unvalidated text, so a scanned PDF reports CLEAN.
-6. **Fix `check_file_size`'s live C1** (#31). ELEVATED - I reported this class fixed there and it
-   is not; two CANNOT-RUN exits still write no ledger row.
+6. **Fix `check_file_size`'s live C1** (#31). **DONE 2026-08-22 (1d90cff)** - every exit now routes
+   through one `_record` helper; verified BY INDUCTION (an unparseable baseline writes
+   `CANNOT_RUN`), not by reading the diff.
 7. **Make the release notes publishable** (#29). `[Unreleased]` is 19 KB of internal workflow ids
    and agent telemetry. Settle v1.3.1: retroactive Release (recommended) rather than deleting a
    public tag.
