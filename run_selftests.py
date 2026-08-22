@@ -91,6 +91,14 @@ AUX_GATES = (
     # known, recorded false alarm is a ledger row, and wiring it here would either turn the
     # suite permanently red or create pressure to delete the corpus entry that found it.
     ("false-alarm-scorer", ("tools", "score_false_alarms.py"), ("--selftest",)),
+    # [NO-NETWORK 2026-08-22] The README's `network - none` badge and its "no network, no
+    # telemetry" line were enforced by NOTHING - promise_inventory RM-03 recorded that a hook
+    # opening a connection would pass this suite, every AUX_GATE, the integration test and the
+    # mutation sweep. On a public repo taking PRs, the front page's strongest trust claim was the
+    # one with no gate behind it. Registered ENFORCING (argv ()), not --selftest: the measurement
+    # over the real tree IS the gate, and registering the selftest would verify the detector while
+    # applying it to nothing - the 2026-08-14 defect this repo already paid for twice.
+    ("no-network", ("tools", "check_no_network.py"), ()),
     # the README advertises a Python floor; CI only exercises files it actually runs
     ("python-floor", ("tools", "check_python_floor.py"), ()),
     # a hook can name a skill the repo does not ship (close_skills_guard shipped requiring

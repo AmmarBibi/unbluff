@@ -160,6 +160,24 @@ def verdict(sizes: dict, baseline: dict, limit: int = LIMIT):
     return new_offenders, grown, shrunk, still_over
 
 
+def _record(result: str, **fields) -> None:
+    """ONE recording site for every exit path of main(), including the ones that cannot measure.
+
+    [C1-CLASS 2026-08-22] This file was cited - by me, in commit ac84464 and in ship_bar_gate's
+    own docstring - as the place this class had ALREADY been fixed. It had not: `main()`'s record
+    call sat at line 216 while two CANNOT RUN exits returned at 174 and 183, so the two runs that
+    prove the gate could not measure wrote NO row, and `gate_ledger.last_run("file_size")` kept
+    serving the previous PASS. Worse than the original defect, because the false claim of a fix
+    is what stopped anyone looking. Found by an independent claim-verification pass, not by any
+    gate: the code passes every check in this repo.
+
+    Note the two exits are exactly the paths pinned by FS-CANNOTRUN and FS-FLOOR - so the harness
+    proved the gate FAILS correctly on them while nothing noticed it recorded nothing.
+    """
+    if gate_ledger is not None:
+        gate_ledger.record("file_size", result, **fields)
+
+
 def main() -> int:
     sizes, source = measure_with_source()
     baseline, status = read_baseline()
@@ -171,6 +189,7 @@ def main() -> int:
         print("file-size: CANNOT RUN - the baseline at %s exists but could not be read or "
               "parsed. Every recorded offender would be reported as NEW, so no per-file verdict "
               "is given at all." % BASELINE)
+        _record("CANNOT_RUN", reason="baseline unreadable")
         return 1
 
     # A FLOOR on the denominator, in main() rather than only in selftest(). Without it a walk
@@ -180,6 +199,7 @@ def main() -> int:
     if len(sizes) < 20:
         print("file-size: CANNOT RUN - only %d .py file(s) in the population (source: %s). A "
               "gate that examined almost nothing must not report OK." % (len(sizes), source))
+        _record("CANNOT_RUN", walked=len(sizes), source=source)
         return 1
 
     new_offenders, grown, shrunk, still_over = verdict(sizes, baseline)
@@ -212,10 +232,9 @@ def main() -> int:
     # PASS. Any ship bar built on that ledger reads a stale green. Found by review
     # wf_f63b9ccf-816 as two findings (#4, #15) against the two gates that shared the shape.
     failing = bool(new_offenders or grown)
-    if gate_ledger is not None:
-        gate_ledger.record("file_size", "FAIL" if failing else "PASS", walked=len(sizes),
-                           over_limit=len(still_over), new=len(new_offenders),
-                           grown=len(grown), shrunk=len(shrunk))
+    _record("FAIL" if failing else "PASS", walked=len(sizes),
+            over_limit=len(still_over), new=len(new_offenders),
+            grown=len(grown), shrunk=len(shrunk))
     if failing:
         print("file-size: FAIL")
         return 1

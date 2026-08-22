@@ -487,6 +487,16 @@ ENTRIES = [
        '                "next", "int", "float"}',
        '_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool", "set", "frozenset",\n'
        '                "next", "int", "float"}')], False),
+    # [NO-NETWORK 2026-08-22] The gate that finally mechanises the README's strongest claim. Two
+    # pins because the guard has two ways to become useless: stop DETECTING, or start flagging
+    # everything (a guard that fires on correct code is one its owner deletes).
+    ("tools/check_no_network", "NONET-BLIND", "the network-module roster empties, so an `import "
+     "socket` in a shipped hook passes the gate that exists to forbid it",
+     [("        elif isinstance(node, ast.ImportFrom):",
+       "        elif False:")], False),
+    ("tools/check_no_network", "NONET-FLOOR", "the population floor is dropped, so a scan that "
+     "collapsed to nothing reports OK over an empty tree",
+     [("    if examined < 20:", "    if False:")], False),
     ("tools/check_mutation_anchors", "ROSTER-1", "the roster-coverage check stops comparing, so "
      "a unit glob no scratch tree can supply is never reported",
      [('        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):',
@@ -632,7 +642,7 @@ ENTRIES = [
     # anchor check green, so the ship bar would read a STALE row rather than no row.
     ("tools/check_file_size", "SITES-1", "the file-size tier records under another gate's name, "
      "so its own last_run() serves the previous PASS forever",
-     [('gate_ledger.record("file_size", "FAIL" if failing else "PASS"',
+     [('gate_ledger.record("file_size", result, **fields)',
        'gate_ledger.record("not_file_size", "FAIL" if failing else "PASS"')],
      False, "./run_selftests"),
     # [BIJECTION 2026-08-16] reconcile() was one-directional and keyed on a non-unique field, so

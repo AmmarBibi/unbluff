@@ -46,6 +46,7 @@ GATE_TOKENS = (
     "check_review_freshness", "check_readme_fresh", "check_python_floor", "check_skill_deps",
     "score_corpus", "hook_divergence_report", "compare_delivery_gate", "pytest", "--selftest",
     "ship_bar_gate", "check_file_size", "regen_example_settings", "gate_ledger",
+    "check_no_network",
     "score_false_alarms",
 )
 
