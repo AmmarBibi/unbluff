@@ -397,10 +397,66 @@ def _selftest_docx_textbox() -> list:
     return fails
 
 
+def _selftest_pdf_no_text_layer() -> list:
+    """[PDF-1, #16] A pdf with no text layer must REFUSE, never audit zero characters.
+
+    The twin of DOCX-1 above, in the same file, and it survived that fix. `_pdf_to_text`'s
+    PyMuPDF branch returned its result unconditionally while the other two readers checked
+    `.strip()` first, so a SCAN - an image with no text layer - yielded "\\n\\n\\n", the audit
+    found no numbers in it, and the deliverable came back CLEAN. Again the better-equipped
+    machine got the worse answer: the blindness needed PyMuPDF to be INSTALLED.
+
+    Driven through injected readers rather than through whichever pdf library this box happens
+    to have, because a probe whose verdict depends on the machine is not a probe. Both terminal
+    messages are asserted, because telling a user with a scanned pdf to "install poppler" - the
+    old text - sends them to fix something that is not broken.
+    """
+    fails = []
+
+    def _empty(_path):
+        return "\n\n\n"          # exactly what PyMuPDF returns for an image-only page
+
+    def _absent(_path):
+        raise ImportError("not installed")
+
+    def _real(_path):
+        return "Overshoot was 2.31 percent."
+
+    try:
+        extract._pdf_to_text("x.pdf", readers=(("pymupdf", _empty),))
+        fails.append("PDF-1: an empty text layer was returned as document text - the audit "
+                     "would report CLEAN for a document it never read")
+    except extract.ExtractError as exc:
+        if "no extractable text layer" not in str(exc):
+            fails.append("PDF-1: wrong diagnosis for a scanned pdf: %r" % (str(exc)[:120],))
+        if "install" in str(exc).lower() and "OCR" not in str(exc):
+            fails.append("PDF-1: a scanned pdf was blamed on a missing extractor")
+
+    try:
+        extract._pdf_to_text("x.pdf", readers=(("pymupdf", _absent),))
+        fails.append("PDF-1: no reader available did not raise")
+    except extract.ExtractError as exc:
+        if "No PDF text extractor available" not in str(exc):
+            fails.append("PDF-1: an ABSENT reader must be reported as absent, not as a "
+                         "document with no text: %r" % (str(exc)[:120],))
+
+    # ...and the reader chain must still FALL THROUGH an empty result to a later reader that
+    # can actually read it. Refusing early would trade the silent-CLEAN bug for a silent-refuse.
+    try:
+        got = extract._pdf_to_text("x.pdf", readers=(("pymupdf", _empty), ("pdfminer", _real)))
+        if "2.31" not in got:
+            fails.append("PDF-1: a later reader that CAN read the file was not reached: %r"
+                         % (got[:80],))
+    except extract.ExtractError as exc:
+        fails.append("PDF-1: refused although a later reader could read it: %r" % (str(exc)[:120],))
+    return fails
+
+
 def selftest() -> int:
     import tempfile
     fails = []
     fails += _selftest_docx_textbox()
+    fails += _selftest_pdf_no_text_layer()
 
     # 1) number extraction + tagging
     nums = extract.find_numbers("Overshoot was 94.8% (see Figure 3) in 2021; settled in 8.65 s.")

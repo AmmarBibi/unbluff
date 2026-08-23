@@ -88,8 +88,17 @@ Materiality still decides ORDER, never WHETHER.
    work shape; fixed by restricting to real spawns, with two negative controls so it cannot
    silently revert. NOTE #32's other items (demo GIFs, upgrade path, CONTRIBUTING, 103 absolute
    home paths in docs) are NOT done and stay in Phase 2.
-5. **Fix the shipped skill that audits documents it never read** (#16). `consistency-audit`'s
-   PyMuPDF branch returns unvalidated text, so a scanned PDF reports CLEAN.
+5. **Fix the shipped skill that audits documents it never read** (#16). **DONE 2026-08-23.** The
+   PyMuPDF branch `return`ed unconditionally while the other two readers checked `.strip()`, so a
+   scan yielded `"\n\n\n"` and the audit reported CLEAN. Twin of DOCX-1 in the same file, and it
+   survived that fix - both have the shape where INSTALLING the better library makes the audit
+   read LESS. Second half, not in the original row: falling through raised "No PDF text extractor
+   available", which for a scan is false and sends the user to install what they already have.
+   The two cases are now distinguished (missing reader vs no text layer -> OCR). Pinned as PDF-1
+   through injected readers so the verdict does not depend on which pdf library the box has;
+   3/3 mutations killed, including one asserting the chain still falls through an empty reader
+   to a later one that can read the file - refusing early would trade silent-CLEAN for
+   silent-refuse. SKILL.md states the refusal.
 6. **Fix `check_file_size`'s live C1** (#31). **DONE 2026-08-22 (1d90cff)** - every exit now routes
    through one `_record` helper; verified BY INDUCTION (an unparseable baseline writes
    `CANNOT_RUN`), not by reading the diff.

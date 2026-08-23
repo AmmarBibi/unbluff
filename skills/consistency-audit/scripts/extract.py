@@ -142,36 +142,76 @@ def _docx_to_text_stdlib(path: str) -> str:
     return "\n".join(lines)
 
 
-def _pdf_to_text(path: str) -> str:
-    """pdf -> text via pdftotext, then PyMuPDF, then pdfminer; else guidance."""
-    # 1) poppler's pdftotext on PATH (fast, high quality, -layout keeps tables).
-    try:
-        proc = subprocess.run(
-            ["pdftotext", "-layout", path, "-"],
-            capture_output=True, timeout=120, stdin=subprocess.DEVNULL,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.decode("utf-8", errors="replace")
-    except (OSError, subprocess.SubprocessError):
-        pass
-    # 2) PyMuPDF (fitz).
-    try:
-        import fitz  # type: ignore
-        with fitz.open(path) as doc:
-            return "\n".join(page.get_text() for page in doc)
-    except Exception:
-        pass
-    # 3) pdfminer.six.
-    try:
-        from pdfminer.high_level import extract_text  # type: ignore
-        text = extract_text(path)
+def _read_pdftotext(path: str) -> str:
+    """poppler's pdftotext on PATH (fast, high quality, -layout keeps tables)."""
+    proc = subprocess.run(
+        ["pdftotext", "-layout", path, "-"],
+        capture_output=True, timeout=120, stdin=subprocess.DEVNULL,
+    )
+    if proc.returncode != 0:
+        raise ExtractError("pdftotext exited %d" % proc.returncode)
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def _read_pymupdf(path: str) -> str:
+    import fitz  # type: ignore
+    with fitz.open(path) as doc:
+        return "\n".join(page.get_text() for page in doc)
+
+
+def _read_pdfminer(path: str) -> str:
+    from pdfminer.high_level import extract_text  # type: ignore
+    return extract_text(path) or ""
+
+
+def pdf_readers():
+    """The reader chain, best first. A seam so the selftest can drive every branch on a box
+    where none of these libraries is installed - the answer must not depend on the machine."""
+    return (("pdftotext", _read_pdftotext),
+            ("pymupdf", _read_pymupdf),
+            ("pdfminer", _read_pdfminer))
+
+
+def _pdf_to_text(path: str, readers=None) -> str:
+    """pdf -> text, trying each reader in turn.
+
+    [#16] THE BUG THIS REPLACES. The PyMuPDF branch `return`ed its result unconditionally while
+    the other two checked `.strip()` first. A SCANNED pdf - an image with no text layer - makes
+    PyMuPDF return an empty string per page, so the function handed back "\\n\\n\\n", the audit
+    found no numbers in it, and reported the document CLEAN. A shipped skill certified a
+    deliverable consistent WITHOUT EVER READING IT, and the better-equipped machine (the one
+    with PyMuPDF installed) was the one that got the wrong answer - the same shape as the docx
+    defect DOCX-1 already covers, in the same file, unnoticed.
+
+    The second half is the diagnosis. Falling through used to raise "No PDF text extractor
+    available", which for a scanned pdf is FALSE and actively misleading: the extractors are
+    installed and working, and the user is told to install what they already have. The two cases
+    are now distinguished, because the remedies are completely different - install poppler, vs
+    OCR the document.
+    """
+    attempted = []
+    for name, fn in (readers if readers is not None else pdf_readers()):
+        try:
+            text = fn(path)
+        except (ImportError, ModuleNotFoundError):
+            continue                      # reader not installed - not an opinion about the file
+        except Exception:
+            attempted.append(name)        # it ran and failed; it DID look at the file
+            continue
+        attempted.append(name)
         if text and text.strip():
             return text
-    except Exception:
-        pass
+    if not attempted:
+        raise ExtractError(
+            "No PDF text extractor available. Install poppler (`pdftotext`) or "
+            "`pip install pymupdf` / `pdfminer.six`, or convert the PDF to text first."
+        )
     raise ExtractError(
-        "No PDF text extractor available. Install poppler (`pdftotext`) or "
-        "`pip install pymupdf` / `pdfminer.six`, or convert the PDF to text first."
+        "This PDF has no extractable text layer - %s ran and found none. It is almost "
+        "certainly a SCAN or an image-only export. OCR it first (e.g. `ocrmypdf in.pdf "
+        "out.pdf`) and audit the result. Refusing rather than auditing zero characters: an "
+        "empty read would report CLEAN, which is the one answer that must never be guessed."
+        % (", ".join(attempted),)
     )
 
 
