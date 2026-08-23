@@ -473,6 +473,11 @@ def selftest() -> int:
         # rarer, higher-stakes event getting the weaker message. Not exotic: the installer
         # embeds the interpreter it was run with, so any machine whose pytest lives in a
         # project venv takes this path for EVERY pytest project.
+        # [#25] The case this scenario describes - "the installer embeds the interpreter it was
+        # run with" - is BY DEFINITION an installed repo, so the fixture must opt in before
+        # probing. Without it the new opt-in refusal answers first and FTB-GATES is never
+        # reached: that reads as a regression while actually being an unfaithful fixture.
+        _m.install(r)
         _pp_pkg = os.path.join(r, "pytest_layout_probe")
         os.makedirs(_pp_pkg, exist_ok=True)
         with open(os.path.join(_pp_pkg, "test_probe2.py"), "w", encoding="utf-8") as f:
@@ -849,10 +854,18 @@ def selftest() -> int:
         # write leaves a gate that blocks with no diagnosis, or allows with no warning.
         msgdir = _repo(stack)
         if msgdir:
+            # [#25] There are now TWO no-command outcomes and BOTH must speak, so this asserts
+            # both rather than the one that used to exist. Widened, not relaxed: a gate that
+            # went silent on either path would still fail here.
             rc_m, err_m = _capture_gate(msgdir)
-            if rc_m != 0 or "no test command" not in err_m:
-                fails.append("no-command outcome message missing: rc=%r err=%r"
+            if rc_m != 0 or "never opted in" not in err_m:
+                fails.append("not-opted-in outcome message missing: rc=%r err=%r"
                              % (rc_m, err_m[:120]))
+            _m.install(msgdir)
+            rc_mi, err_mi = _capture_gate(msgdir)
+            if rc_mi != 0 or "no test command" not in err_mi:
+                fails.append("no-command outcome message missing once opted in: rc=%r err=%r"
+                             % (rc_mi, err_mi[:120]))
             os.makedirs(os.path.join(msgdir, ".claude"), exist_ok=True)
             with open(os.path.join(msgdir, "app.py"), "w", encoding="utf-8") as f:
                 f.write("x = 1\n")
@@ -887,6 +900,54 @@ def selftest() -> int:
             if rc_m != 1 or "BLOCKED" not in err_m or "--no-verify" not in err_m:
                 fails.append("a timed-out run must BLOCK and name the typed escape, not warn "
                              "and allow: rc=%r err=%r" % (rc_m, err_m[:160]))
+
+        # 15b. [#25] THE SECURITY PROPERTY ITSELF, which nothing asserted before. A bare root
+        # conftest.py is enough for detect() to return a pytest command, and pytest IMPORTS
+        # conftest.py before collecting anything - so under --install-global, `git push` in a
+        # merely-cloned repo would execute a stranger's code with no opt-in anywhere. Both
+        # halves are asserted: the refusal must hold, and it must LIFT once the repo opts in,
+        # or the fix bought safety by quietly deleting the feature.
+        ctdir = _repo(stack)
+        if ctdir:
+            with open(os.path.join(ctdir, "conftest.py"), "w", encoding="utf-8") as f:
+                f.write("import sys\n")
+            if _m.repo_opted_in(ctdir):
+                fails.append("#25: repo_opted_in() was true before anything was installed")
+            cmd_before, _ = _m.resolve_command(ctdir)
+            if cmd_before is not None:
+                fails.append("#25: a bare conftest.py in a repo that never opted in still "
+                             "resolved to %r - the global dispatcher would execute it"
+                             % (cmd_before,))
+            _m.install(ctdir)
+            if not _m.repo_opted_in(ctdir):
+                fails.append("#25: repo_opted_in() stayed false after --install, so a "
+                             "deliberately gated repo would never auto-detect again")
+            cmd_after, _ = _m.resolve_command(ctdir)
+            if cmd_after is None:
+                fails.append("#25: auto-detect did not come back after --install - the "
+                             "refusal is not scoped to un-opted-in repos, it is total")
+
+        # 15c. [#25] Opt-in is the CONTENT of the hook, never its existence. Found by a
+        # surviving mutation: replacing the content test with `return True` left every other
+        # assertion green, because that still sits inside `with open(...)` and so only fires
+        # where a pre-push file exists. But a husky or lefthook repo HAS one, and reading its
+        # mere presence as consent hands auto-detect to exactly the third-party repos the
+        # refusal exists to protect.
+        fordir = _repo(stack)
+        if fordir:
+            with open(os.path.join(fordir, "conftest.py"), "w", encoding="utf-8") as f:
+                f.write("import sys\n")
+            hd, _ = _m._hooks_dir_for(fordir)
+            if hd:
+                os.makedirs(hd, exist_ok=True)
+                with open(os.path.join(hd, "pre-push"), "w", encoding="utf-8",
+                          newline="\n") as f:
+                    f.write("#!/bin/sh\n# husky\nnpx --no-install husky-run pre-push\n")
+                if _m.repo_opted_in(fordir):
+                    fails.append("#25: a FOREIGN pre-push hook counted as opting in, so any "
+                                 "husky/lefthook repo gets auto-detect it never asked for")
+                if _m.resolve_command(fordir)[0] is not None:
+                    fails.append("#25: a foreign-hook repo resolved a command anyway")
 
         # 16. [finding 7] the GLOBAL_SHIM's pre-push branch - the ONE line that runs the gate
         # in every repo on the machine - was covered by nothing. Deleting it stayed green.

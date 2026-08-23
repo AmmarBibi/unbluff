@@ -38,15 +38,23 @@ Materiality still decides ORDER, never WHETHER.
    `tools/no_regression.py` out at 719, under the 800 limit). file-size gate rc 0, 5 offenders.
    Suite 38/39 - `hook-provenance` only, and see #39: that is a worktree artifact, rc 0 in the
    main checkout with a byte-identical sha.
-2. **Fix the execution model** (#25). DECIDED: auto-detect runs an untrusted repo's test entry
-   point with no opt-in - a bare root `conftest.py` is enough, because pytest imports it. The two
-   paths have different trust properties and get different answers:
-   - turn end: KEEP auto-detect, add a one-time per-repo stderr notice naming the exact command
-     before the first run. Trust is implied by opening Claude Code there; the missing piece is
-     that the user never sees what will run.
-   - `--install-global` pre-push: NO auto-detect. It fires in every repo on the machine with
-     Claude Code closed, where nothing implies trust. Require an explicit `.claude/pre-push.cmd`.
-   - ship a `SECURITY.md` stating the model and a private reporting route.
+2. **Fix the execution model** (#25). **DONE 2026-08-23.** All three parts shipped; suite 39/40
+   (`hook-provenance` only, see #39).
+   - turn end: auto-detect KEPT, `hooks/fast_test_disclosure.py` added. **The plan said "naming
+     the exact command" and that was wrong** - the exact commands are `npm test --silent` and
+     `"<py>" -m pytest -x -q`, and neither names the untrusted part. It discloses the
+     `scripts.test` BODY and the `conftest.py` files pytest imports. Keyed on the disclosed
+     CONTENT, not the project, so a repo that changes what runs is disclosed again.
+   - `--install-global` pre-push: auto-detect OFF unless `repo_opted_in()` - DERIVED from the
+     presence of a shim naming `pre_push_gate.py`, so `--install` IS the consent record and there
+     is no new state to drift. Declines loudly and ALLOWS the push.
+   - `SECURITY.md` shipped.
+   - Two defects found by probing rather than by review, both recorded because they generalise:
+     (a) the disclosure import was first written inside `try/except ImportError`, which
+     `install.py`'s `_import_closure` treats as OPTIONAL and drops from the install roster -
+     MEASURED 26 unguarded vs 25 guarded, i.e. it would have been dead in silence on every
+     installed machine; (b) a mutation SURVIVED because opt-in was tested only by presence, so a
+     husky/lefthook `pre-push` counted as consent - scenario 15c now covers it. 4/4 killed after.
 3. **Prove the README subset** (#6, #28). **PARTIAL.** ELEVATED - this replaces "drop criterion
    1": ~30 README rows, not all 243. DONE (8390060): the stale transcript (38 -> 39) and the
    installer cardinality ("4 entries" -> 5, with PreToolUse/piped_gate_guard finally named).
@@ -82,6 +90,13 @@ Materiality still decides ORDER, never WHETHER.
 ## Phase 2 - post-release, as GitHub issues
 
 #3, #4, #5, #7, #8, #13's pinning, #15, #17, #18, #19, #21, #22, #24, #33, #34, #35's residue.
+
+**#40 (new, 2026-08-23): `readme-fresh` checks the transcript's COUNT but never its ROSTER.**
+Found while fixing the count for gate 2: the pasted transcript had been missing `no-network: OK`
+since a80937c (gate 4) and nothing noticed, because the gate only compares "all N selftests
+passed" against the suite size. It also carried `gate modes: 16 row(s)` against a live 17, which
+no gate reads at all. A name can therefore be dropped from the evidence block silently. Belongs
+with gate 3 - it is the MECHANISM for "the README says only true things", not a separate idea.
 
 **#39 (new, 2026-08-23): `hook-provenance` fires on correct work inside a git worktree.** Derived
 at the gate-1 merge: rc 1 in `unbluff-enforcing`, rc 0 in the main checkout, `foreign=ad9b23e864e5

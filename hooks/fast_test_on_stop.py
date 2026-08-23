@@ -767,6 +767,25 @@ def main() -> int:
     if not cmd:
         return _notice_no_gate(cwd)
 
+    # [#25] An AUTO-DETECTED command is repository code, and the user never saw what it runs.
+    # Disclose the package.json body / the conftest.py files BEFORE the first run - the wrapper
+    # string discloses nothing. Sibling module: this file is a recorded size offender, and
+    # moving detect() there instead would break pinned mutation FTB-2.
+    #
+    # THE IMPORT IS DELIBERATELY UNGUARDED. Wrapping it in `except ImportError` was the first
+    # version and it was self-defeating: install.py's _import_closure treats an import inside
+    # try/except ImportError as OPTIONAL BY DEFINITION and drops it from the install roster, so
+    # the module would never have been copied, the import would have failed on every installed
+    # machine, the handler would have swallowed it, and this disclosure would have been dead in
+    # silence everywhere except the developer's own checkout. Required here means installed;
+    # a genuinely missing file is then reported loudly by missing_hook_files(). Only the CALL
+    # is guarded, because a disclosure that breaks the gate it describes is worse than none.
+    import fast_test_disclosure
+    try:
+        fast_test_disclosure.notice_once(cwd, cmd, fast_test_disclosure.resolve_with_source(cwd)[1])
+    except (OSError, ValueError):
+        pass
+
     sp = _state_path(cwd)
     try:
         with open(sp, encoding="utf-8") as fh:

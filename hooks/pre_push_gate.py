@@ -131,8 +131,40 @@ def resolve_always(root: str) -> tuple[str | None, int]:
     return cmd, timeout_s
 
 
+def repo_opted_in(root: str) -> bool:
+    """Did someone deliberately install this gate INTO THIS REPO, as opposed to reaching it
+    through the machine-wide `--install-global` dispatcher?
+
+    Derived, not configured: `install()` writes a shim naming pre_push_gate.py into the
+    directory git actually reads hooks from, so the shim's PRESENCE is the opt-in record. No
+    new state file, and nothing for the two paths to drift apart on.
+    """
+    hooks_dir, _ = _hooks_dir_for(root)
+    if not hooks_dir:
+        return False
+    try:
+        with open(os.path.join(hooks_dir, "pre-push"), encoding="utf-8", errors="replace") as fh:
+            return "pre_push_gate.py" in fh.read()
+    except OSError:
+        return False
+
+
 def resolve_command(root: str) -> tuple[str | None, int]:
-    """(command, timeout_s): a push-time override if the project has one, else fast_test_on_stop's own choice."""
+    """(command, timeout_s): a push-time override if the project has one, else - and only where
+    the repo opted in - fast_test_on_stop's own choice.
+
+    [#25] THE TWO PATHS HAVE DIFFERENT TRUST PROPERTIES AND GET DIFFERENT ANSWERS. At turn end,
+    auto-detect is fine: you opened Claude Code in this directory, which implies enough trust to
+    run its tests. Here it is not. `--install-global` points core.hooksPath at ~/.claude/githooks
+    and fires in EVERY repo on the machine - including one merely cloned to read, with Claude Code
+    never opened in it - and a bare root conftest.py is enough for detect() to return a pytest
+    command, because pytest imports conftest.py before collecting anything. Nothing in "this
+    directory exists on my disk" implies consent to execute its code.
+
+    So a repo reached only through the global dispatcher must say what to run, explicitly, in
+    `.claude/pre-push.cmd`. A repo where someone ran `--install` deliberately keeps auto-detect:
+    that install IS the consent.
+    """
     ov = os.path.join(root, ".claude", "pre-push.cmd")
     if os.path.exists(ov):
         # PUSH_OPTIONS, not the turn-end table: a push may legitimately take longer than a
@@ -140,6 +172,8 @@ def resolve_command(root: str) -> tuple[str | None, int]:
         cmd, timeout_s, _ = fast_test._read_override(ov, fast_test.PUSH_OPTIONS)
         if cmd:
             return cmd, timeout_s
+    if not repo_opted_in(root):
+        return None, fast_test.DEFAULT_TIMEOUT_S
     cmd, timeout_s, _ = fast_test.detect(root)
     return cmd, timeout_s
 
@@ -284,6 +318,22 @@ def gate(root: str) -> int:
     cmd, timeout_s = resolve_command(root)
     name = os.path.basename(root.rstrip("/\\")) or root
     if not cmd:
+        # [#25] A THIRD reason, and it must not borrow the other two's words. Here a test
+        # command may well be detectable - the gate is DECLINING to auto-run it, because this
+        # repo was reached through the machine-wide dispatcher and never opted in. Saying "has
+        # no test command" would be false, and would send the reader looking for a missing
+        # suite instead of writing the one file that turns the gate on.
+        if not repo_opted_in(root):
+            sys.stderr.write(
+                f"[pre-push] '{name}' is gated machine-wide but never opted in, so nothing was\n"
+                f"[pre-push] auto-run here. Pushing is ALLOWED; nothing was verified.\n"
+                f"[pre-push] To gate it, pick one - both are explicit by design:\n"
+                f"[pre-push]   echo \"<your test command>\" > .claude/pre-push.cmd\n"
+                f"[pre-push]   python \"{os.path.abspath(__file__)}\" --install \"{root}\"\n"
+                f"[pre-push] Auto-detect is deliberately off for repos reached only through\n"
+                f"[pre-push] --install-global: it fires in every repo on this machine, and a\n"
+                f"[pre-push] bare conftest.py would be enough to execute a stranger's code.\n")
+            return 0
         # [FTB-GATES] The two gates consume the SAME detect(), which declines for two very
         # different reasons - "there is no test gate here" and "this IS a pytest project but
         # pytest is not importable by the interpreter that would run it". The Stop gate said
