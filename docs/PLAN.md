@@ -102,9 +102,20 @@ Materiality still decides ORDER, never WHETHER.
 6. **Fix `check_file_size`'s live C1** (#31). **DONE 2026-08-22 (1d90cff)** - every exit now routes
    through one `_record` helper; verified BY INDUCTION (an unparseable baseline writes
    `CANNOT_RUN`), not by reading the diff.
-7. **Make the release notes publishable** (#29). `[Unreleased]` is 19 KB of internal workflow ids
-   and agent telemetry. Settle v1.3.1: retroactive Release (recommended) rather than deleting a
-   public tag.
+7. **Make the release notes publishable** (#29). **LOCAL HALF DONE 2026-08-23; the publish step
+   is the user's, see below.** The row's diagnosis was WRONG and it mattered: `[Unreleased]` was
+   called "19 KB of internal workflow ids and agent telemetry", but measured it held 19,241
+   chars with **1** `wf_` id, **0** hex SHAs, **0** absolute paths, **0** scratchpad or temp
+   refs. It was not telemetry - it was well-formed prose at maintainer depth, ~1,200 chars per
+   bullet against `[1.3.1]`'s 4,072 chars for a whole release. "Strip the telemetry" is a
+   20-minute delete; "compress maintainer prose to reader depth" is an editorial pass. Budgeting
+   the first for the second is how this row sat undone.
+   Done: the 19 KB moved VERBATIM to `docs/audits/changelog_v1_4_0_engineering_log.md` (it is the
+   best record of why each change exists; deleting it would cost more than the notes gain), and
+   a reader-facing `[1.4.0]` written at 5,285 chars against the 4,072 target.
+   **NOT DONE, and deliberately not:** publishing the retroactive v1.3.1 GitHub Release. That is
+   a public action and needs an explicit go-ahead. The notes for it already exist and are clean
+   (`[1.3.1] - 2026-08-08`, 4,072 chars, 0 workflow ids), so it is one command when authorised.
 8. **Fix install/uninstall** (#30). **DONE 2026-08-23, and fixed at the CLASS rather than the
    instance.** The row framed this as an uninstall gap, but the harm is broader than uninstall:
    both shims embed an ABSOLUTE path to the clone, so moving, renaming or deleting it - not only
