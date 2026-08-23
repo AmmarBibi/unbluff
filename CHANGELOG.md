@@ -61,7 +61,7 @@ test to see whether it could fail at all. Working notes, at maintainer depth, ar
   hand-maintained cardinality on that page to go stale; all three are now derived.
 - **"No network, no telemetry" is enforced rather than promised.** `tools/check_no_network.py`
   fails the build on any AST-visible socket, HTTP client, or spawn of a network tool, over a
-  derived file population. 58 files, 0 reaches. It flagged *itself* on its first run, which is
+  derived file population. 59 files, 0 reaches (2026-08-23). It flagged *itself* on its first run, which is
   the fires-on-correct-work shape, and was narrowed with two negative controls.
 - **The mutation harness can pin a fix that only SAYS something**, by asserting a marker in the
   output rather than an exit code, and can reach a gate's `main()` through its enforcing

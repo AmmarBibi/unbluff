@@ -3,6 +3,14 @@
 **Two pages, deliberately.** A briefing document that only grows stops being read, and the one
 load-bearing line gets skipped. If this needs a third page, something in it is a GitHub issue.
 
+> **THIS FILE IS CURRENTLY IN BREACH OF THAT RULE: 245 lines on 2026-08-23, up from 111 at the
+> start of that session.** Stated here rather than left for a reader to notice, because a cap
+> that is silently exceeded is not a cap. Six gates closed and six rows (#39-#44) were filed in
+> one day; the closing evidence went into the rows instead of into `docs/audits/`, which is what
+> did it. The remedy is already gate 11 - convert the ledger to GitHub issues - and until that
+> runs, the next session should PRUNE before adding. Phase 2 and the closed-gate bodies are the
+> first things that belong elsewhere.
+
 ## What unbluff is
 
 Claude Code hooks that make silence and success look different, **plus four skills**
@@ -83,7 +91,10 @@ Materiality still decides ORDER, never WHETHER.
    trust badge - "no network, no telemetry" - was enforced by nothing: a hook that opened a
    socket would have passed every gate. `tools/check_no_network.py` scans by AST (not grep - the
    file names every networking module and would flag itself), population DERIVED, fails closed,
-   registered ENFORCING. 58 files / 0 reaches; pinned NONET-BLIND + NONET-FLOOR. It flagged
+   registered ENFORCING. 59 files / 0 reaches (re-derived 2026-08-23; it read 58 until this
+   session added `hooks/fast_test_disclosure.py`, and the stale 58 sat in two documents until the
+   close audit caught it - a population count in prose is a mutable count, so it carries a date);
+   pinned NONET-BLIND + NONET-FLOOR. It flagged
    ITSELF on its first tracked run - `frozenset({...})` is a Call - which is the fires-on-correct-
    work shape; fixed by restricting to real spawns, with two negative controls so it cannot
    silently revert. NOTE #32's other items (demo GIFs, upgrade path, CONTRIBUTING, 103 absolute
@@ -102,8 +113,9 @@ Materiality still decides ORDER, never WHETHER.
 6. **Fix `check_file_size`'s live C1** (#31). **DONE 2026-08-22 (1d90cff)** - every exit now routes
    through one `_record` helper; verified BY INDUCTION (an unparseable baseline writes
    `CANNOT_RUN`), not by reading the diff.
-7. **Make the release notes publishable** (#29). **LOCAL HALF DONE 2026-08-23; the publish step
-   is the user's, see below.** The row's diagnosis was WRONG and it mattered: `[Unreleased]` was
+7. **Make the release notes publishable** (#29). **PARTIAL - local half done 2026-08-23, publish
+   step NOT done and it is the user's call, see below.** (Marker worded to survive a scan: the
+   earlier "LOCAL HALF DONE" read as DONE to anything grepping for the word.) The row's diagnosis was WRONG and it mattered: `[Unreleased]` was
    called "19 KB of internal workflow ids and agent telemetry", but measured it held 19,241
    chars with **1** `wf_` id, **0** hex SHAs, **0** absolute paths, **0** scratchpad or temp
    refs. It was not telemetry - it was well-formed prose at maintainer depth, ~1,200 chars per
@@ -142,6 +154,52 @@ Materiality still decides ORDER, never WHETHER.
 ## Phase 2 - post-release, as GitHub issues
 
 #3, #4, #5, #7, #8, #13's pinning, #15, #17, #18, #19, #21, #22, #24, #33, #34, #35's residue.
+
+**#6/#28 - criterion 1, the full claim inventory.** Added 2026-08-23 by the close completeness
+audit, which found it had NO HOME. Gate 3 asserts "criterion 1 survives as a post-release issue"
+and that assertion was load-bearing: the whole argument for re-cutting gate 3 was that the 42
+excluded findings (10 HIGH) keep their route back BECAUSE the criterion survives. It was never
+added to this roster, so for three hours it survived in prose only - which is the same orphaning
+as the plan I rejected, arrived at by a different route. Denominator to carry forward: 243 claims
+= README 152 (70 proven / 82 unproven) + `skills/*/SKILL.md` 91 (15 / 76). A1's open question -
+whether an imperative instruction to an agent is a behavioural assertion, worth exactly the 76
+unproven SKILL.md rows - is part of it and is still undecided.
+
+**#40 is CLOSED (2026-08-23), not open.** Listed below as a finding for the record; the gate was
+built in the same commit that found it. Left in place rather than deleted because the entry
+explains why `check_readme_fresh` now checks a roster and not only a count.
+
+**#44 (CLOSED 2026-08-23 in the same commit that found it): a mutation run wrote itself into the
+gate ledger as a real failure.** Found by the close meta-review's CHECK 4, which is instructed to
+READ the ledger rather than reconstruct it - and the ledger was lying. After probing the gate-8
+shim fix, the newest `integration` row read FAIL 33/34 from a MUTATED tree, eight minutes after
+the real tree passed 34/34. Anything reading the ledger to decide whether the gates passed - the
+release process, a future session, this very skill - would have concluded integration fails at
+HEAD. `gate_ledger.record()` now honours `UNBLUFF_LEDGER_OFF`; probes set it, nothing else does,
+and the selftest asserts BOTH that it suppresses and that it is not sticky (a probe forgetting to
+unset it would silently stop recording every real gate, which is the worse failure). Mutation-
+probed: neutering the guard turns the selftest red. The polluted row was corrected by re-running
+integration clean - 34/34 at 2026-08-23T15:09:18Z.
+
+**#43 (new, 2026-08-23): two of `SECURITY.md`'s three trust claims are enforced by nothing.**
+Found by the close source-coverage pass, which read the DESIGN rather than the code. "No network"
+is gated by `check_no_network`; "no writes outside the repo and the state dir" and "no credential
+access" are gated by nothing at all - grep across `tools/`, `hooks/`, `tests/` finds no check for
+either. I wrote both into a security document in the same session, one file away from the gate
+that exists precisely because the README's "no network" badge was once enforced by nothing. That
+is standing check 1 firing for the SECOND time today on my own work. `SECURITY.md` now labels
+them ASSERTED-NOT-ENFORCED rather than listing them beside the enforced one, which is the
+honest interim; the gates themselves are this row. A no-writes gate is the easier of the two (AST
+walk for `open(..., 'w')`, `os.remove`, `shutil` outside two roots, same shape as
+`check_no_network`); credential access needs a roster of what counts (netrc, keyring, GIT_ASKPASS,
+secret-shaped env reads) and negative controls before it is worth anything.
+
+**#42 (new, 2026-08-23): `PLAN.md` and `CHANGELOG.md` cardinalities are gated by nothing.** The
+close consistency audit caught "58 files" for the no-network population in BOTH, against a live
+59 - broken the same day by this session's own new file, and copied into the new release notes by
+re-using the plan's wording instead of re-deriving. Three README cardinalities are now derived and
+gated (`readme-fresh`); the same numbers in the plan and the changelog have no control at all, so
+this one was found by an audit rather than by a gate. Same REMEMBER-vs-ENFORCE shape as #40.
 
 **#41 (new, 2026-08-23): the size ratchet is now steering where code goes, and that is a signal.**
 Three files hit the cap in one session. `fast_test_on_stop.py` (851) and

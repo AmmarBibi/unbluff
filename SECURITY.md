@@ -66,11 +66,26 @@ When the gate declines for this reason it says so and **allows the push**. It ne
 
 ## What unbluff does not do
 
-- **No network.** No telemetry, no update check, no analytics. Mechanically enforced, not
-  promised: `tools/check_no_network.py` fails the build on any AST-visible socket, HTTP client
-  or subprocess spawn of a network tool, across a derived file population.
+Split by whether a machine checks it, because "we don't do X" is worth very little when the only
+thing stopping X is that nobody has done it yet. This project's own README once carried "no
+network" as an unenforced badge, and a hook that opened a socket would have passed every gate.
+
+**Enforced - a gate goes red if it stops being true:**
+
+- **No network.** No telemetry, no update check, no analytics. `tools/check_no_network.py` fails
+  the build on any AST-visible socket, HTTP client, or subprocess spawn of a network tool, over a
+  DERIVED file population (59 files as of 2026-08-23, 0 reaches). It flagged itself on its first
+  run and was narrowed with two negative controls, so it cannot silently revert to vacuous.
+
+**Asserted but NOT yet enforced - true as far as the author knows, checked by nobody:**
+
 - **No writes outside** the repository being checked and `~/.claude/hooks/state/`.
 - **No credential access.** Nothing reads your keychain, environment secrets, or git credentials.
+
+Those two are labelled rather than quietly listed alongside the first, because an unenforced claim
+sitting next to an enforced one borrows its credibility. Both are scheduled as **#43**; until the
+gates exist, treat them as the author's word and not as a guarantee. If you find a counterexample,
+that is exactly what the reporting channel above is for.
 
 ## Bypass
 

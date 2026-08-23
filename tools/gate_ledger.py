@@ -168,7 +168,17 @@ def record(gate: str, result: str, **fields) -> None:
     touched, written to a sibling temp file, and moved into place with os.replace(), which is
     atomic on both NTFS and POSIX. There is no longer a window in which the ledger exists as a
     truncated file.
+
+    [#44] A MUTATION RUN IS NOT A GATE RUN. A probe that reverts a fix to prove the test can
+    fail runs the gate deliberately RED, and those rows used to land here looking exactly like
+    real failures. MEASURED 2026-08-23: after probing the shim fix, the newest `integration` row
+    read FAIL 33/34 from a MUTATED tree while the real tree had passed 34/34 eight minutes
+    earlier. Not cosmetic - meta-review CHECK 4 is explicitly instructed to READ THIS FILE rather
+    than reconstruct it, so the ledger was telling the release process the opposite of the truth.
+    `UNBLUFF_LEDGER_OFF` suppresses the write; probes set it and nothing else does.
     """
+    if os.environ.get("UNBLUFF_LEDGER_OFF"):
+        return
     lock_path = LEDGER + ".lock"
     fd = None
     try:
@@ -230,8 +240,34 @@ def tiers(path: str = LEDGER) -> dict:
 
 
 def selftest() -> int:
+    global LEDGER
     import tempfile
     fails = []
+
+    # [#44] UNBLUFF_LEDGER_OFF must actually suppress the write, and must NOT be sticky - a
+    # probe that forgets to unset it would silently stop recording every real gate afterwards,
+    # which is a worse failure than the one it fixes. Both directions asserted.
+    _real_ledger = LEDGER
+    with tempfile.TemporaryDirectory() as _d:
+        LEDGER = os.path.join(_d, "gate_runs.json")
+        _old = os.environ.get("UNBLUFF_LEDGER_OFF")
+        try:
+            os.environ["UNBLUFF_LEDGER_OFF"] = "1"
+            record("probe_gate", "FAIL", passed=0, total=1)
+            if os.path.exists(LEDGER):
+                fails.append("UNBLUFF_LEDGER_OFF did not suppress the write - a mutation run "
+                             "would still poison the ledger meta-review CHECK 4 reads")
+            os.environ.pop("UNBLUFF_LEDGER_OFF")
+            record("probe_gate", "PASS", passed=1, total=1)
+            rows, _st = read(LEDGER)
+            if len(rows) != 1 or rows[0].get("result") != "PASS":
+                fails.append("recording did not resume once the flag was cleared: %r" % (rows,))
+        finally:
+            if _old is None:
+                os.environ.pop("UNBLUFF_LEDGER_OFF", None)
+            else:
+                os.environ["UNBLUFF_LEDGER_OFF"] = _old
+            LEDGER = _real_ledger
 
     # The retention rule, asserted directly. A frequent gate must NOT evict a rare one.
     hist = ([{"gate": "run_selftests", "utc": "t%d" % i} for i in range(500)]
@@ -267,7 +303,7 @@ def selftest() -> int:
     # one no assertion executed. prune/last_run/tiers were all pinned; the writer was not, so
     # reverting it to its documented pre-fix bug (the hardcoded gate name that recorded 1 tier
     # of 5) was invisible to the registered gate. Found by review wf_f63b9ccf-816.
-    global LEDGER
+    # (`global LEDGER` is declared once at the top of this function - #44's block needs it too.)
     saved = LEDGER
     try:
         with tempfile.TemporaryDirectory(prefix="unbluff-gl-rec-") as td:
