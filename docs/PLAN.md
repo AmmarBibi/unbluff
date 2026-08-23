@@ -105,8 +105,22 @@ Materiality still decides ORDER, never WHETHER.
 7. **Make the release notes publishable** (#29). `[Unreleased]` is 19 KB of internal workflow ids
    and agent telemetry. Settle v1.3.1: retroactive Release (recommended) rather than deleting a
    public tag.
-8. **Fix install/uninstall** (#30). `--uninstall` cannot undo `--install-global`; following the
-   README leaves every `git push` on the machine broken.
+8. **Fix install/uninstall** (#30). **DONE 2026-08-23, and fixed at the CLASS rather than the
+   instance.** The row framed this as an uninstall gap, but the harm is broader than uninstall:
+   both shims embed an ABSOLUTE path to the clone, so moving, renaming or deleting it - not only
+   uninstalling - made the shim run a missing script, return nonzero, and BLOCK EVERY `git push`
+   ON THE MACHINE under `--install-global`, in repos with nothing to do with unbluff. The
+   README's "keep the clone somewhere permanent" was the only thing standing between a user and
+   that, which is prose where a control was needed.
+   Both shims now fail **loud but open**: a missing gate prints `NOTHING WAS VERIFIED` on every
+   push and allows it. Not silent - a quiet allow is indistinguishable from a clean run, the
+   thing this project exists to prevent. `--install-global --remove` now also deletes the
+   dispatchers it wrote (leaving them is how a stale path returns), and the README documents
+   that `install.py --uninstall` does NOT undo it, because `install.py` never set it.
+   Pinned as J1/J2 in `tests/test_integration.py`, executed with a real `sh` rather than by
+   reading the template; 3/3 mutations killed and the reverted shim reproduces the reported
+   harm exactly (rc=2, push blocked). Test placed there rather than in
+   `pre_push_gate_selftest.py` because that file is a recorded size offender - see #41.
 9. **Independent adversarial review of this session's code** (#20). ELEVATED from "a gate" to a
    real pass: 1,215 lines of new Python, most of it guard logic, reviewed by nobody but its author.
 10. **One clean full sweep at the release HEAD** (#37) and **CI green via a PR** (#26). No clean
@@ -117,6 +131,16 @@ Materiality still decides ORDER, never WHETHER.
 ## Phase 2 - post-release, as GitHub issues
 
 #3, #4, #5, #7, #8, #13's pinning, #15, #17, #18, #19, #21, #22, #24, #33, #34, #35's residue.
+
+**#41 (new, 2026-08-23): the size ratchet is now steering where code goes, and that is a signal.**
+Three files hit the cap in one session. `fast_test_on_stop.py` (851) and
+`pre_push_gate_selftest.py` (1192) were re-recorded with reasons - the SECOND and THIRD
+re-records against a baseline whose own note says the next growth should be preceded by a split.
+`pre_push_gate.py` is at 792 of 800, eight lines of headroom. Gate 8's test went into
+`tests/test_integration.py` partly because its natural home was full, which is the ratchet
+choosing architecture. Two clean splits are available and both have precedent in this repo:
+`install.py`'s `selftest()` is 299 of its 927 lines, and `pre_push_gate_selftest.py` is the
+largest file here. Do them before the next feature, not after.
 
 **#40 (new, 2026-08-23): `readme-fresh` checks the transcript's COUNT but never its ROSTER.**
 Found while fixing the count for gate 2: the pasted transcript had been missing `no-network: OK`

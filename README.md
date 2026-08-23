@@ -209,6 +209,14 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
+**If you also ran `--install-global`, that is a separate thing and `install.py` never set it.** It lives in git's own `core.hooksPath`, not in `settings.json`, so undo it separately:
+
+```bash
+python hooks/pre_push_gate.py --install-global --remove
+```
+
+Forgetting is no longer dangerous. The shims fail **loud but open**: if the clone has moved or gone, every push prints `NOTHING WAS VERIFIED` on stderr and is *allowed*. It used to run a missing script and block every `git push` on the machine - in every repo, with no usable diagnosis. A verification tool has no business bricking `git push` because you moved a folder; it also has no business going quiet about it.
+
 It wires **5 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse / PreToolUse) that drive the shipped hooks.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.

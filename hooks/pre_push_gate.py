@@ -50,10 +50,26 @@ import fast_test_on_stop as fast_test  # noqa: E402  (path set above; it owns de
 # shim installed from this repo documented a file it did not run - and a grep for the stale path
 # matched a correctly-installed shim, which is how a 2026-08-05 divergence check reported the
 # opposite of the truth. Pinned by _selftest_shim_self_reference.
+# [#30] BOTH shims embed an ABSOLUTE path to a clone that can be moved, renamed or deleted -
+# and the README explicitly tells you to keep the clone somewhere permanent, which is advice,
+# not a control. When the path went stale the shim ran a missing script, `sh` returned nonzero,
+# and EVERY `git push` on the machine was blocked with no usable diagnosis. Under
+# --install-global that is every repo, forever, including ones that have nothing to do with
+# unbluff. Uninstalling could not fix it either, because install.py never set core.hooksPath.
+#
+# So the shims now fail LOUD BUT OPEN. Not silent: "nothing was verified" that looks like a
+# clean run is the exact failure this project exists to prevent, so it says so on every push
+# until it is fixed. Not blocking: a verification tool has no business bricking `git push` on a
+# machine whose owner may have simply moved a folder.
 SHIM = """#!/bin/sh
 # Universal pre-push gate - managed by {script}
 # Bypass once with: git push --no-verify
-exec "{py}" "{script}" "$@"
+if [ -f "{script}" ]; then
+    exec "{py}" "{script}" "$@"
+fi
+echo "[pre-push] unbluff gate MISSING at {script}" >&2
+echo "[pre-push] NOTHING WAS VERIFIED. Push allowed. Re-install unbluff, or delete $0" >&2
+exit 0
 """
 
 
@@ -617,7 +633,13 @@ GLOBAL_SHIM = """#!/bin/sh
 hook=${{0##*/}}
 hook=${{hook##*\\\\}}
 if [ "$hook" = "pre-push" ]; then
-    "{py}" "{script}" < /dev/null || exit $?
+    if [ -f "{script}" ]; then
+        "{py}" "{script}" < /dev/null || exit $?
+    else
+        echo "[pre-push] unbluff gate MISSING at {script}" >&2
+        echo "[pre-push] NOTHING WAS VERIFIED. Push allowed. Re-install unbluff, or run:" >&2
+        echo "[pre-push]   git config --global --unset core.hooksPath" >&2
+    fi
 fi
 gitdir="$GIT_DIR"
 if [ -z "$gitdir" ] || [ ! -d "$gitdir/hooks" ]; then
@@ -650,7 +672,22 @@ def install_global(remove: bool = False) -> int:
     """Gate EVERY repo, present and future, via git's core.hooksPath."""
     if remove:
         _git_config(["--unset", "core.hooksPath"])
-        print("unset global core.hooksPath (per-repo .git/hooks are in charge again)")
+        # [#30] Also delete the dispatchers. Leaving them behind is how the stale-path failure
+        # comes BACK: re-running --install-global later, or any tool that reads that directory,
+        # finds shims pointing at wherever the clone used to be. Only files this renderer wrote.
+        gone = 0
+        for name in git_client_hook_names():
+            dest = os.path.join(GLOBAL_HOOKS_DIR, name)
+            try:
+                with open(dest, encoding="utf-8", errors="replace") as fh:
+                    ours = "pre_push_gate.py" in fh.read()
+                if ours:
+                    os.remove(dest)
+                    gone += 1
+            except OSError:
+                continue
+        print("unset global core.hooksPath (per-repo .git/hooks are in charge again)\n"
+              "  removed %d dispatcher(s) from %s" % (gone, GLOBAL_HOOKS_DIR))
         return 0
     rc, existing = _git_config(["core.hooksPath"])
     if rc == 0 and existing and os.path.abspath(existing) != os.path.abspath(GLOBAL_HOOKS_DIR):

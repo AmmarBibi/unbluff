@@ -277,6 +277,37 @@ def main():
                  if os.path.exists(os.path.join(home, ".claude", "skills", n))]
         record("G5 every installed skill removed", not _left, f"left behind: {_left}")
 
+        # J. [#30] A STALE SHIM MUST NOT BRICK `git push`. Both shims embed an absolute path to
+        # the clone. Move or delete it - which the README's own "keep the clone somewhere
+        # permanent" note concedes is likely, and which is advice, not a control - and the shim
+        # used to run a missing script, return nonzero, and block EVERY push on the machine
+        # under --install-global. Driven with a real `sh` rather than by reading the template,
+        # because the template is not the thing that runs.
+        shpath = shutil.which("sh") or shutil.which("bash")
+        if not shpath:
+            # A skip is not a pass. Recorded as a failure so the row cannot read green on an
+            # image where this was never exercised.
+            record("J0 stale-shim scenarios ran", False, "no sh on PATH - NOT verified")
+        else:
+            sys.path.insert(0, os.path.join(REPO, "hooks"))
+            import pre_push_gate as _ppg
+            gone = os.path.join(home, "deleted-clone", "pre_push_gate.py").replace("\\", "/")
+            _py = sys.executable.replace("\\", "/")
+            for label, body in (("J1 per-repo", _ppg.SHIM.format(py=_py, script=gone)),
+                                ("J2 global", _ppg.GLOBAL_SHIM.format(py=_py, script=gone))):
+                hookfile = os.path.join(home, "pre-push")
+                with open(hookfile, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(body)
+                os.chmod(hookfile, 0o755)
+                p = subprocess.run([shpath, hookfile], capture_output=True,
+                                   stdin=subprocess.DEVNULL, timeout=60)
+                err = p.stderr.decode("utf-8", "replace")
+                record(f"{label} stale shim ALLOWS the push", p.returncode == 0,
+                       f"rc={p.returncode} - a missing gate must never block every push")
+                record(f"{label} stale shim SAYS nothing was verified",
+                       "NOTHING WAS VERIFIED" in err,
+                       "a silent allow is indistinguishable from a clean run: %r" % err[:140])
+
         for d in (proj, repo2, clean, nmproj):
             shutil.rmtree(d, ignore_errors=True)
     finally:
