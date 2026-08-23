@@ -55,12 +55,30 @@ Materiality still decides ORDER, never WHETHER.
      MEASURED 26 unguarded vs 25 guarded, i.e. it would have been dead in silence on every
      installed machine; (b) a mutation SURVIVED because opt-in was tested only by presence, so a
      husky/lefthook `pre-push` counted as consent - scenario 15c now covers it. 4/4 killed after.
-3. **Prove the README subset** (#6, #28). **PARTIAL.** ELEVATED - this replaces "drop criterion
-   1": ~30 README rows, not all 243. DONE (8390060): the stale transcript (38 -> 39) and the
-   installer cardinality ("4 entries" -> 5, with PreToolUse/piped_gate_guard finally named).
-   REMAINING: the three front-page sentences the repo's own tests CONTRADICT, and rewriting
-   `findings.json`'s `exclusion_basis`, which names criterion 1 as the ONLY route back for 42
-   excluded findings (10 HIGH) - give them a real route before the criterion goes away.
+3. **Prove the README subset** (#6, #28). **DONE 2026-08-23, and RE-CUT.** The "~30 README rows"
+   framing is retired: it was unexecutable (nothing anywhere enumerated the ~30, nor the "three
+   front-page sentences" - grep across this file and all of `docs/audits` found only the
+   assertion that they exist) and it silently dropped the 91 `SKILL.md` claims, which are shipped
+   surface. Population DERIVED from the inventory's own section headings and it reconciles:
+   README 152 / 70 proven / 82 unproven + SKILL.md 91 / 15 / 76 = the recorded 243 / 85 / 158,
+   and SKILL.md's unproven 76 is exactly A1's "~76 rows".
+   **The re-cut: unproven is not false, and only FALSE is a release blocker.** The gate is the
+   set of claims the repo's own tests CONTRADICT. Derived, and all fixed here:
+   - "enables all eighteen pieces" - the README's own What's-inside list held 17 and the code
+     ships 20. Three numbers, no two agreeing. `piped_gate_guard` and `timing_claim_guard` FIRE
+     on a user's machine while being undocumented.
+   - "It reuses `fast_test_on_stop`'s command detection" for the push gate - made false by
+     gate 2 four hours earlier. Standing check 1 caught a defect introduced by the fix for the
+     same class, which is the whole reason that check exists.
+   - the pasted transcript: 39 vs 40, `gate modes: 16` vs 17, and `no-network: OK` missing since
+     a80937c.
+   **MECHANISM, not the third instance** (#40 closed with it): `check_readme_fresh` now derives
+   the piece COUNT and the piece ROSTER from `install.py` + `skills/` and fails on either. It
+   was shown failing on the real README first, naming all three missing pieces.
+   **`findings.json` needs no rewrite, and that is the point of the re-cut.** Its
+   `exclusion_basis` names criterion 1 as the only route back for 42 findings (10 HIGH). The
+   rewrite was only ever needed because the old plan DELETED criterion 1. Criterion 1 survives as
+   a post-release issue carrying the full 243/152/91 denominator, so the route stays open.
 4. **Mechanise the network claim** (#32a). **DONE 2026-08-22 (a80937c).** The README's strongest
    trust badge - "no network, no telemetry" - was enforced by nothing: a hook that opened a
    socket would have passed every gate. `tools/check_no_network.py` scans by AST (not grep - the

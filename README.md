@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all eighteen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all 20 pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -102,7 +102,14 @@ Numbers that are derived, rounded beyond tolerance, or definitional are fine to 
 is a mechanical check, not a judge.
 ```
 
-It shares one **PostToolUse dispatcher** (`post_tooluse_dispatcher`) with `plan_defer_guard`, the same one-process design as `stop_dispatcher`: two PostToolUse hooks run in a single spawn per edit rather than two, and the shared fire-ledger records which fired.
+### post_tooluse_dispatcher · PostToolUse
+Runs the after-an-edit hooks in a single process, the same one-process design as `stop_dispatcher`: `numbers_match_on_write` and `plan_defer_guard` share one spawn per edit rather than taking one each, a broken sub-hook cannot take down the others, and the shared fire-ledger records which fired.
+
+### piped_gate_guard · PreToolUse
+Blocks a shell command that destroys a gate's exit status before you can read it. `pytest … | tail` returns **`tail`'s** status, not the suite's, so a failing run reports success - this repo shipped "5419 passed" twice over a suite that said `1 failed`. It catches the `sh` form (piping into `head`/`tail`/`grep`) and the PowerShell form (`Select-Object -First`, which tears the gate down before it finishes). Narrow by measurement, not by taste: it fires on 4 of 15 real commands in one session's history, and it caught its own author four times.
+
+### timing_claim_guard · PostToolUse
+Flags a duration written up as MEASURED with no control marker - "the run took 12s" with nothing saying what else was on the box. Wall-clock read off a loaded machine is not a measurement, and this repo has attributed a 3.9x-load timeout to the code under test. It fires on 18 of 109 duration lines across these docs, which is the shape a guard should have: often enough to matter, rare enough not to be switched off.
 
 ### consistency-audit · skill
 The reasoning half that pairs with `numbers-match`, the way `source-coverage` pairs with `plan_defer_guard`. The hook can mechanically flag "this number appears in no source file"; it cannot decide whether an unmatched number is drift, a legitimate derivation, or a definition - nor can it check figures, cross-references, and whether a *claim* is actually supported and consistent across sections. This skill does. It runs a bundled, format-agnostic extractor (docx/pdf/tex/md) that surfaces six drift classes - numbers with no source match, figures embedded but never referenced, cross-references with no matching caption, claims whose supporting number is absent, unfilled bracketed placeholders (`[TABLE]`/`[TODO]`/...), and tables the prose promises but never renders - then you adjudicate each against the data. You invoke it on purpose - `/consistency-audit`, or on cues like "do the numbers still match the data? / is anything stale or fabricated?".
@@ -125,7 +132,9 @@ Reports any hook wired from more than one directory. A hook registered twice run
 ![duplicate_registration_check reporting a hook wired from two directories](docs/duplicate-registration.png)
 
 ### pre_push_gate · git pre-push
-Never push source your tests have not seen. `fast_test_on_stop` debounces, so a passing run followed by another half hour of edits can end the turn silently and reach the remote unverified - silence and success look identical from outside. This makes them different at the one moment it matters. Installed as a real git hook (`--install-global` points `core.hooksPath` at your hooks dir so every repo is covered), so **git** enforces it, not a model that might forget. It reuses `fast_test_on_stop`'s command detection and state file, so the two gates agree on what has actually been verified.
+Never push source your tests have not seen. `fast_test_on_stop` debounces, so a passing run followed by another half hour of edits can end the turn silently and reach the remote unverified - silence and success look identical from outside. This makes them different at the one moment it matters. Installed as a real git hook (`--install-global` points `core.hooksPath` at your hooks dir so every repo is covered), so **git** enforces it, not a model that might forget. It shares `fast_test_on_stop`'s state file, so the two gates agree on what has actually been verified.
+
+It does **not** share the turn-end auto-detect, and that asymmetry is deliberate - see [SECURITY.md](SECURITY.md). `--install-global` fires in every repo on the disk, including ones you cloned to read, so a repo reached that way must name its command explicitly in `.claude/pre-push.cmd`. A repo where you ran `--install <repo>` keeps auto-detect: that install is the opt-in. When the gate declines for this reason it says so and allows the push - it never blocks on "you did not configure me".
 
 ![pre_push_gate blocking a push because tests fail](docs/pre-push-gate.png)
 
