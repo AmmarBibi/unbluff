@@ -31,10 +31,13 @@ Materiality still decides ORDER, never WHETHER.
 
 ## Phase 1 - what must be true before v1.4.0
 
-1. **Merge `main` into `feat/enforcing-verify`.** Diverged 1 commit vs 16 (2026-08-22). Only overlapping file
-   is `docs/audits/file_size_baseline.json`; resolve to the UNION (`pre_push_gate_selftest.py` =
-   1131, `no_regression.py` removed), re-run the file-size gate. Safe to do FIRST: the branch
-   touches neither `fast_test_on_stop.py` nor `pre_push_gate.py`, so it cannot collide with gate 2.
+1. **Merge `main` into `feat/enforcing-verify`.** **DONE 2026-08-23.** Diverged 1 vs 17 at the
+   merge. Exactly one conflicting file as predicted; resolved by RE-MEASURING the merged tree
+   rather than by picking a side, which independently reproduced the planned union
+   (`pre_push_gate_selftest.py` 1131 - main grew it, the branch's 1109 was stale;
+   `tools/no_regression.py` out at 719, under the 800 limit). file-size gate rc 0, 5 offenders.
+   Suite 38/39 - `hook-provenance` only, and see #39: that is a worktree artifact, rc 0 in the
+   main checkout with a byte-identical sha.
 2. **Fix the execution model** (#25). DECIDED: auto-detect runs an untrusted repo's test entry
    point with no opt-in - a bare root `conftest.py` is enough, because pytest imports it. The two
    paths have different trust properties and get different answers:
@@ -79,6 +82,12 @@ Materiality still decides ORDER, never WHETHER.
 ## Phase 2 - post-release, as GitHub issues
 
 #3, #4, #5, #7, #8, #13's pinning, #15, #17, #18, #19, #21, #22, #24, #33, #34, #35's residue.
+
+**#39 (new, 2026-08-23): `hook-provenance` fires on correct work inside a git worktree.** Derived
+at the gate-1 merge: rc 1 in `unbluff-enforcing`, rc 0 in the main checkout, `foreign=ad9b23e864e5
+repo=ad9b23e864e5`, AST delta 0 - byte-identical, flagged only because the wired path is the main
+checkout's. Not a release blocker (CI runs in a plain checkout), but it is standing check 6's own
+failure shape in a shipped gate, so it does not get to stay unnamed.
 
 **#10 is SUPERSEDED** - it would restore a second competing order. Delete
 `NEXT_SESSION_PROMPT.md` or reduce it to a pointer here.

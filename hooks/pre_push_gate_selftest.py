@@ -569,6 +569,28 @@ def selftest() -> int:
         if gate(r) != 0 or last_pass(r, 'python -c "pass"') != before:
             fails.append("clean tree should short-circuit without re-running tests")
 
+        # 5a. THE ALWAYS-RUN CHECK, asserted from INSIDE the fast-path state case 5 just
+        # established. That is the whole point: a check whose input is not the source (a gate-run
+        # ledger, a staleness comparison, an external artifact) changes while every source byte
+        # stays put, and `git commit` touches no mtime at all - so chaining such a check into
+        # .claude/pre-push.cmd makes it green by construction on exactly the push it was written to
+        # stop. Measured in ghg-copilot 2026-08-18 on that incident path.
+        _always = os.path.join(r, ".claude", "pre-push-always.cmd")
+        with open(_always, "w", encoding="utf-8") as f:
+            f.write('python -c "raise SystemExit(3)"\n')
+        if gate(r) == 0:
+            fails.append("an always-run check exiting non-zero did NOT block the push - the cached "
+                         "test pass swallowed it, which is the defect this file exists to prevent")
+        with open(_always, "w", encoding="utf-8") as f:
+            f.write('python -c "pass"\n')
+        if gate(r) != 0:
+            fails.append("a passing always-run check must not block - a gate that cannot be "
+                         "satisfied is a gate that gets deleted")
+        os.remove(_always)
+        if gate(r) != 0:
+            fails.append("removing .claude/pre-push-always.cmd must restore the unguarded path; a "
+                         "project that never declared one must be unaffected")
+
         # 6. touching source re-arms the gate
         time.sleep(0.01)
         os.utime(os.path.join(r, "app.py"), None)
