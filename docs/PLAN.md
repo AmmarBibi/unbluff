@@ -10,7 +10,12 @@ The old plan's premise was its own second paragraph: *"Public MIT repo, maintain
 career artifact - which means an unpublished month delivers none of its point."* Every gate
 descended from that. With no release, most of them serve nobody.
 
-Measured on the v1.4.0 branch (`b6cc6cc...HEAD`, 2026-08-24T20:32:53Z), lines changed by area:
+Measured on the v1.4.0 branch, `b6cc6cc...3354c0b`, taken 2026-08-24T20:32:53Z and re-verified
+21:17:11Z. Pinned to that commit for two reasons, both learned the hard way today: `HEAD` is a
+moving ref and this table was first written citing it - which made it false the moment the next
+commit landed - and `3354c0b` is the last commit BEFORE this re-cut, so the measurement does not
+fold its own response into the thing being measured. At `58ad05c` the same range reads
+docs 2,264 / total 6,945; only the `docs/` row moves, and the headline is 12.8% instead of 13.0%.
 
 | area | lines | share |
 |---|---|---|
@@ -62,9 +67,17 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 4. **Pin the #46 control's own wiring** (gate 9's H3, half-built). `scrub_environ()` at the top
    of `main()` is guarded by nothing - moving it into an uncalled helper leaves all 41 gates
    green. `unrecorded_tiers` is the mechanism to copy.
-5. **`piped_gate_guard` is disarmed by the word `pipefail` before the first pipe** (gate 9's
-   M10, verified by execution). This one is a **live PreToolUse hook**, so it is the highest-value
-   residue row: a DENY guard that silently allows.
+5. **Decide whether to wire `piped_gate_guard` at all - and only then fix its `pipefail` disarm.**
+   The re-cut originally listed this as "the highest-value residue row, a live PreToolUse hook".
+   **That was false and the source-coverage pass caught it**: it is wired NOWHERE in
+   `settings.json` (verified 21:20:34Z), so its defect currently costs nothing and fixing it
+   first would have been this plan's own standing check 4 violated on line 70 of the plan that
+   restates it.
+   The decision is real, though, and the evidence is from this session rather than theory: I read
+   `$?` after piping a gate into `head`/`tail` **twice today** and misread a FAIL as a pass both
+   times. If it gets wired, gate 9's M10 becomes live immediately - `# remember set -o pipefail`
+   on any earlier line silently turns the DENY into an allow - so wire and fix together, never
+   wire alone.
 6. **`fast_test_disclosure` records its marker before printing** (L3), so an unwritable state dir
    silences the #25 notice permanently. Small, and it is a hook that runs every turn.
 
@@ -80,8 +93,21 @@ recoverable from the archived plan.
   maintenance obligation is dropped.
 - **Gate 9's M1, M5, M6, M9, M11 and L1, L2.** Defects in `check_no_network`'s exemption hatch,
   `no_regression`'s decoding, the ledger's accounting and CHANGELOG cardinalities. All real, all
-  in instruments rather than in hooks, none of them changing a session. Full statements survive
-  in [gate 9 review](audits/gate9_review_2026-08-24.md).
+  in instruments rather than in hooks, none of them changing a session *today*. Full statements
+  survive in [gate 9 review](audits/gate9_review_2026-08-24.md).
+  **Two of them are DORMANT, not harmless, so their triggers are recorded rather than left to be
+  rediscovered** - this session's completeness audit asked whether anything still live had been
+  retired by accident, and these are the two that came closest:
+  - **M1 fires the first time `ALLOWED` in `check_no_network.py` gets an entry.** It is empty
+    today, which is the only reason the gate is not permanently red. Add an exemption and the
+    gate starts insisting that exemption is no longer needed. Fails closed, so it will annoy
+    rather than deceive.
+  - **M5 fires the first time a non-ASCII byte lands in a REGISTERED `no_regression` unit.**
+    Checked 2026-08-24T21:18:49Z: `hooks/capped_report.py` has 0 such bytes, so the gate is
+    sound right now - but `numbers_match_on_write.py` (8), `pre_push_gate.py` (4) and
+    `fast_test_disclosure.py` (3) already do. The day one of those is registered, or a single
+    typographic character reaches `capped_report.py`, `no-regression: OK` starts comparing a
+    file against itself and means nothing. That one is worth un-retiring if it ever trips.
 - **#42, #43, #6/#28 (the 243-claim inventory).** Claim-proofs and cardinality gates for
   documents nobody but me reads.
 - **The `pre_push_gate_selftest.py` split (#41's remaining half).** 1192 lines and the largest
@@ -92,6 +118,21 @@ recoverable from the archived plan.
 
 **Undecided, deliberately:** whether the repo stays public. It is currently public and is also
 the career artifact the old premise was built on. Parked by choice on 2026-08-24, not forgotten.
+
+## Known-stale by design: the ledger's `mutation_sweep` row
+
+`docs/audits/gate_runs.json` reads **`mutation_sweep 2026-08-20T17:28:15Z FAIL`** and will keep
+reading that. The full sweep now runs in CI on two platforms - it passed 17/17 at `91f015e`,
+223 of 225 executed with 0 survivors - but **a CI runner cannot write this local ledger**, so the
+newest local row predates the fix that made the sweep green and says FAIL.
+
+That matters because the close meta-review's CHECK 4 is specifically instructed to READ this
+ledger rather than reconstruct it, which is the right instruction and is exactly why a
+permanently-stale row is dangerous: it is #44's defect ("anything reading the ledger to decide
+whether the gates passed would conclude the gate fails at HEAD") reintroduced structurally rather
+than by a polluting write. **Recorded here rather than papered over by a 30-minute local re-run
+whose only purpose would be to make a row look right.** If CHECK 4 is ever automated, it must
+read CI for this tier. Every other tier is current as of 2026-08-24T21:23Z.
 
 ## Standing checks on every change
 
@@ -109,9 +150,12 @@ real defect that nothing else did.
    true when written. No mutable count in a title or heading; counts live in the body, dated,
    **next to the commit they were taken at** - a denominator naming `HEAD` is one that will be
    quietly false.
-4. **Is this surface actually LIVE?** A session went into `piped_gate_guard`, which is wired but
-   had never fired. The 13%-of-the-branch measurement above is this check applied to a whole
-   release.
+4. **Is this surface actually LIVE?** A session went into `piped_gate_guard`, which is **NOT
+   wired on this machine** and has never fired. Verified again 2026-08-24T21:20:34Z: zero
+   occurrences in `settings.json`. This wording was corrupted to "wired but had never fired"
+   during the re-cut and caught by the same session's source-coverage pass - the check's whole
+   value is the word NOT, and I deleted it while copying the check that exists to catch exactly
+   this. The 13%-of-the-branch measurement above is this same check applied to a whole release.
 5. **Never edit while a gate is in flight.** Broken three times in one day, three sweeps
    discarded.
 6. **A probe that has not been shown to FAIL is not a probe.** Four probes were invalid on first

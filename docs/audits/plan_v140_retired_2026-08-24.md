@@ -1,3 +1,22 @@
+<!-- RETIRED - NOT THE PLAN. See docs/PLAN.md. -->
+
+> # RETIRED 2026-08-24 - THIS IS NOT THE PLAN
+>
+> **The canonical order is [`docs/PLAN.md`](../PLAN.md). Nothing else, including this file.**
+>
+> This is the v1.4.0 release-era plan, kept verbatim as the record of how that work reasoned. It
+> was retired when the project's scope changed from "public artifact I ship" to "tool I use", and
+> its twelve gates descend from a premise - *"an unpublished month delivers none of its point"* -
+> that no longer holds. Gates 3, 4, 7, 10 and 11 below exist only to make the repo defensible to
+> a stranger and are **deliberately dead**; do not resurrect them from here.
+>
+> *Why this banner exists:* the file was archived by copying `PLAN.md` verbatim, so it kept the
+> heading `# unbluff - the plan` and opened with "Two pages, deliberately" - a 284-line document
+> that read as live to anyone who opened it directly. The close meta-review's CHECK 6 caught it
+> the same session. It is the THIRD instance of `#10` (a second document asserting a competing
+> canonical order) found in one day, and the first two were fixed hours earlier - this one was
+> created by the very commit that re-cut the plan.
+
 # unbluff - the plan
 
 **Two pages, deliberately.** A briefing document that only grows stops being read, and the one
