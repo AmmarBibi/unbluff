@@ -1,9 +1,15 @@
 # Gate 9 - independent adversarial review, 2026-08-24
 
-**Scope.** `feat/enforcing-verify` at `580ea57` against `b6cc6cc`. Denominator re-derived at
-19:39Z and the inherited one was wrong: `git diff --numstat b6cc6cc...HEAD -- '*.py'` gives
-**2,799 Python lines added / 320 deleted across 47 files**, not the "1,215 lines" gate 9's row
-had carried unverified for two sessions.
+**Scope.** `feat/enforcing-verify` at `580ea57` against `b6cc6cc`. Denominator re-derived
+2026-08-24T17:39:50Z and the inherited one was wrong:
+`git diff --numstat b6cc6cc...580ea57 -- '*.py'` gives **2,799 Python lines added / 320 deleted
+across 47 files**, not the "1,215 lines" gate 9's row had carried unverified for two sessions.
+
+Pinned to the COMMIT, not to `HEAD`, and this session's own consistency audit is why: the first
+draft of this line said `b6cc6cc...HEAD` and stamped it `19:39Z`. The time was wrong by two
+hours, and by the time anyone read it `HEAD` had moved - the same range against HEAD already
+gives **3,593 / 631** (19:47:47Z). A denominator that names a moving ref is a denominator that
+will be quietly false, which is standing check 3 firing on the row that re-derives a denominator.
 
 **Shape.** 8 lenses (guard-correctness, disarm, coverage-gap, fail-open, portability,
 probe-validity, docs-vs-code, unreviewed-remainder), each finding adversarially refuted per

@@ -275,7 +275,11 @@ Every hook in this suite:
 - **Is mechanical.** Regex, counting, and file-existence checks only - no LLM calls, no network, no telemetry.
 - **Is stdlib-only.** No dependencies. Python 3.8+.
 - **Fires at most once per session** (where relevant) and is conservative - it would rather stay silent than nag.
-- **Self-tests.** Run `python hooks/<name>.py --selftest`; fixtures never touch real state.
+- **Self-tests.** Run `python run_selftests.py`, which isolates every fixture from your
+  repository and verifies afterwards that none of them touched it. A single hook's
+  `python hooks/<name>.py --selftest` also works and is safe from an ordinary shell, but it
+  bypasses that isolation - so do not run one from inside a git hook, where `GIT_DIR` redirects
+  a fixture's `git -C <tmpdir>` onto the real repository.
 
 ```bash
 # verify the whole suite (this is exactly what CI runs)

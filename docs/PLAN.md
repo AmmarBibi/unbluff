@@ -60,7 +60,8 @@ Materiality still decides ORDER, never WHETHER.
 8. **Fix install/uninstall** (#30) **DONE** `31ec83e`. Fixed at the CLASS: both shims now fail loud-but-open when the clone has moved, instead of blocking every push on the machine. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-8).
 9. **Independent adversarial review** (#20). **DONE 2026-08-24.** The inherited "1,215 lines"
    was never derived and is wrong: `git diff --numstat b6cc6cc...HEAD -- '*.py'` gives
-   **2,799 added / 320 deleted across 47 files** (19:39Z). 8 lenses, 49 agents, 5.9M tokens,
+   **2,799 added / 320 deleted across 47 files** at the REVIEWED commit `580ea57`, derived
+   2026-08-24T17:39:50Z. 8 lenses, 49 agents, 5.9M tokens,
    32 min; 34 findings survived adversarial refutation, 6 were refuted. It independently
    predicted the CI failures from the code alone, and **three of the defects it found were in
    the #46 fix written the day before**. Verdict was BLOCK-the-tag on three counts; all three
@@ -75,6 +76,14 @@ Materiality still decides ORDER, never WHETHER.
     Local at `68c8a63`: 40/41 bare, 41/41 `--code-only` rc 0, integration 34/34,
     mutation-anchors 227/225. `hook-provenance` is the known MACHINE_STATE positive and
     resolves when this branch reaches `main`.
+    **`mutation_sweep` is still `2026-08-20T17:28:15Z FAIL` in the ledger** - read from it, not
+    reconstructed, by the close meta-review's CHECK 4. Gate 0 unblocked it but only FILTERED
+    sweeps were run locally (`install` 13/13 CAUGHT, `check_review_freshness` 5/5 CAUGHT), and a
+    filtered run proves nothing about the other 212 entries - the harness says so itself. The
+    full sweep is the two `mutation harness` jobs in this CI run, on ubuntu AND windows, which is
+    the cheaper path the plan already identified. **Until they land, no full sweep exists at the
+    release HEAD and #37 is NOT discharged.** `false_alarm_scorer` also predates this session
+    (2026-08-20).
 11. **Tag v1.4.0**, then convert the ledger to GitHub issues.
 
 ## Phase 2 - post-release, as GitHub issues
@@ -136,6 +145,14 @@ re-records against a baseline whose own note says the next growth should be prec
 choosing architecture. Two clean splits are available and both have precedent in this repo:
 `install.py`'s `selftest()` is 299 of its 927 lines, and `pre_push_gate_selftest.py` is the
 largest file here. Do them before the next feature, not after.
+**HALF DONE 2026-08-24.** `install.py` 1006 -> **682** by moving `selftest()` to
+`install_selftest.py`; it is under the limit outright and has LEFT the baseline rather than being
+re-recorded a fourth time. `pre_push_gate_selftest.py` did not grow - the day's CI-blocker fix was
+written to land at exactly 1192 - and it remains the largest file and the top split candidate.
+Its seam was NOT attempted under release pressure and the reason is recorded rather than implied:
+`_SH_SITES` is mutable module state shared between `_sh_site()` and `selftest()`, so moving one
+without the other is the rebinding trap the sibling split's own docstring warns about, inside the
+file that carries #46. Offender count is now **4**, down from 5.
 
 **#40 (new, 2026-08-23): `readme-fresh` checks the transcript's COUNT but never its ROSTER.**
 Found while fixing the count for gate 2: the pasted transcript had been missing `no-network: OK`
@@ -201,6 +218,27 @@ statements, reproductions and severities in [gate 9 review](audits/gate9_review_
 * **L1** `check_repo_integrity` re-baselines onto the `FINGERPRINT-UNAVAILABLE` sentinel.
 * **L2** `fingerprint()` says "total snapshot"; nothing observes the working tree.
 * **L3** `fast_test_disclosure` records its marker before printing, so a bad `STATE_DIR` silences #25.
+* **H3-remainder** (found by this session's own completeness audit, which is the only reason it
+  has a row): gate 9's H3 was only HALF fixed. `git-isolation` is a registered gate and its
+  roster is now runtime-enforced, but the **AST assertion that `scrub_environ()` precedes the
+  first `subprocess.run([sys.executable, ...])` in `main()`, and that each such spawn is followed
+  by `check_repo_integrity(`, is NOT built.** So the #46 control's WIRING is still pinned by
+  nothing: moving that block into an uncalled helper leaves all 41 gates green. `unrecorded_tiers`
+  is the mechanism to copy - it already pins `gate_ledger.record(` call sites textually for #40.
+* **install_selftest.py has never been reviewed by anything.** 358 lines split out of install.py
+  today; no adversarial lens has read it, and gate 9 predates it. It is now inside `UNIT_GLOBS`,
+  so `check_review_freshness` will demand it - which is the gate working, not a nuisance.
+* **The per-hook `--selftest` form is not isolated, and the README promised it was.** Found by
+  this session's source-coverage pass reading the DESIGN. `README.md` told users to run
+  `python hooks/<name>.py --selftest` and asserted "fixtures never touch real state" - but the
+  #46 fix lives at the `run_selftests` CHOKE POINT, so the one invocation form the README names
+  is the one it does not cover. The claim is now qualified and points at the isolated form;
+  **making it TRUE is the open item** - the scrub belongs in the shared `--selftest` dispatch,
+  not in 23 separate files, and that dispatch does not exist yet. Same shape as the "no network"
+  badge before `check_no_network`: a public trust claim enforced by nothing.
+* **`59 files / 0 reaches` is stale in three files against a live 60** (`SECURITY.md:77`,
+  `CHANGELOG.md:64`, `PLAN.md:59`). Noticed by gate 9 and deliberately not filed there; folded
+  into **#42**, since "cardinalities outside README are gated by nothing" is exactly its row.
 
 **Next review's scope, from gate 9's own coverage gap.** `tools/no_regression.py`'s ~400-line
 rewrite is the largest unreviewed surface; ~120 mutation entry bodies were never read; and
