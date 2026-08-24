@@ -39,34 +39,42 @@ Materiality still decides ORDER, never WHETHER.
 
 ## Phase 1 - what must be true before v1.4.0
 0. **CRITICAL - a selftest fixture escaped onto the real repository, and PUBLISHED to GitHub**
-   (#46, found 2026-08-24). **DONE 2026-08-24.** A git hook exports `GIT_DIR`, `GIT_DIR` overrides
-   `git -C <tmpdir>`, and every temp-repo fixture in this suite therefore operated on the real
-   repo when the suite ran where it ships. Diagnosis CORRECTED on re-execution: the named file
-   was not the culprit. `meta_audit_on_stop.py` set `core.bare`, wrote a fixture identity,
-   committed `f.txt` and ran `git push -u origin HEAD:refs/heads/main` - which served a one-file
-   tree as this project's PUBLIC default branch for 11h11m, with no CI run because the fixture
-   tree carried no workflows. Restored by force-push (a fast-forward had been made, so nothing
-   was destroyed). Five confirmed offending files, not one. Fixed at the CHOKE POINT -
-   `run_selftests` scrubs the seven redirect vars before spawning any gate, and fingerprints this
-   repo after every gate so an escapee is NAMED. Three probes: corruption reproduced, prevented,
-   and caught with prevention removed. See [gate 0 evidence](audits/gate0_evidence_2026-08-24.md).
-   **Residue:** four `git config` repairs to the main clone are still unapplied (blocked by a
-   tool-permission classifier), and `core.hooksPath` stays dangling until they are - see s6 there.
+   (#46, found 2026-08-24). **DONE 2026-08-24.** `GIT_DIR` overrides `git -C <tmpdir>`, so every
+   temp-repo fixture operated on the real repo when the suite ran where it ships. The ledger's
+   diagnosis was CORRECTED on re-execution - the named file was not the culprit, and the damage
+   was not local: `meta_audit_on_stop.py` pushed a one-file tree over this project's PUBLIC
+   default branch, where it sat for 11h11m with no CI because the fixture tree carried no
+   workflows. Restored by force-push; the corrupted push had been a fast-forward, so nothing
+   public was destroyed. Seven artifacts, five offending files. Fixed at the CHOKE POINT, with
+   three probes - reproduced, prevented, and caught with prevention removed.
+   See [gate 0 evidence](audits/gate0_evidence_2026-08-24.md).
+   **Residue:** four `git config` repairs to the main clone are unapplied - blocked by a
+   tool-permission classifier, so `core.hooksPath` stays dangling. See s6 there.
 1. **Merge `main` into `feat/enforcing-verify`.** **DONE** `d89e3dc`. Baseline conflict resolved by RE-MEASURING the merged tree, which independently reproduced the planned union. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-1).
 2. **Fix the execution model** (#25) **DONE** `13a8845`. Disclosure of the untrusted surface (not the wrapper), no auto-detect for repos that never opted in, `SECURITY.md` shipped. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-2).
 3. **Prove the README subset** (#6, #28) **DONE** `1aed8cc`, and RE-CUT: the gate is claims the tests CONTRADICT, not an unenumerated ~30. Piece count AND roster now derived and gated. Criterion 1 survives as #6/#28, so `findings.json` needed no rewrite. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-3).
 4. **Mechanise the network claim** (#32a) **DONE 2026-08-22** `a80937c`. `tools/check_no_network.py`, population derived, fails closed. 59 files / 0 reaches (2026-08-23). See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-4).
 5. **Fix the shipped skill that audits documents it never read** (#16) **DONE** `2200229`. A scanned PDF is refused with an OCR instruction instead of reported CLEAN; pinned as PDF-1. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-5).
 6. **Fix `check_file_size`'s live C1** (#31) **DONE 2026-08-22** `1d90cff`. Every exit routes through one `_record` helper, verified by induction. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-6).
-7. **Make the release notes publishable** (#29) **PARTIAL** `a9b5cc6`. Reader-facing `[1.4.0]` written, 19 KB of working notes moved verbatim to `docs/audits/changelog_v1_4_0_engineering_log.md`. **The retroactive v1.3.1 GitHub Release is NOT published - that is the user's call.** See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-7).
+7. **Make the release notes publishable** (#29) **DONE** `a9b5cc6` + release 2026-08-24. Reader-facing `[1.4.0]` written, 19 KB of working notes moved verbatim to `docs/audits/changelog_v1_4_0_engineering_log.md`. **DONE 2026-08-24**: the retroactive v1.3.1 Release is PUBLISHED (4,064 chars from CHANGELOG's [1.3.1], 0 workflow ids, checked before publishing). See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-7).
 8. **Fix install/uninstall** (#30) **DONE** `31ec83e`. Fixed at the CLASS: both shims now fail loud-but-open when the clone has moved, instead of blocking every push on the machine. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-8).
-9. **Independent adversarial review of this session's code** (#20). ELEVATED from "a gate" to a
-   real pass: 1,215 lines of new Python, most of it guard logic, reviewed by nobody but its author.
-   **#46 is the strongest argument yet for this gate**: it sat in the most-edited file on the
-   branch, and no amount of self-review found it - running the code where it ships did.
-10. **One clean full sweep at the release HEAD** (#37) and **CI green via a PR** (#26). No clean
-    sweep exists for the current HEAD - the last one is six commits back - and no commit on this
-    branch has ever run in CI. A PR is the only trigger: pushing the branch runs nothing.
+9. **Independent adversarial review** (#20). **DONE 2026-08-24.** The inherited "1,215 lines"
+   was never derived and is wrong: `git diff --numstat b6cc6cc...HEAD -- '*.py'` gives
+   **2,799 added / 320 deleted across 47 files** (19:39Z). 8 lenses, 49 agents, 5.9M tokens,
+   32 min; 34 findings survived adversarial refutation, 6 were refuted. It independently
+   predicted the CI failures from the code alone, and **three of the defects it found were in
+   the #46 fix written the day before**. Verdict was BLOCK-the-tag on three counts; all three
+   are now cleared. Surviving MEDIUM/LOW rows are scheduled in Phase 2 below - none dropped.
+   Tree guard: fingerprint byte-identical before and after 49 read-only agents.
+10. **One clean full sweep at the release HEAD** (#37) and **CI green via a PR** (#26).
+    **IN PROGRESS** - [PR #3](https://github.com/AmmarBibi/unbluff/pull/3), opened 2026-08-24.
+    CI had never run on this branch; the first round was **15 of 17 red** and found a
+    user-facing CRITICAL (install.py refusing to install for anyone without PyMuPDF and
+    pdfminer) that 41 local gates all passed over. Round 2: 13 red, every cause introduced by
+    the fix commit before it. Round 3 running at `68c8a63`. **Count jobs BY CONCLUSION.**
+    Local at `68c8a63`: 40/41 bare, 41/41 `--code-only` rc 0, integration 34/34,
+    mutation-anchors 227/225. `hook-provenance` is the known MACHINE_STATE positive and
+    resolves when this branch reaches `main`.
 11. **Tag v1.4.0**, then convert the ledger to GitHub issues.
 
 ## Phase 2 - post-release, as GitHub issues
@@ -176,6 +184,28 @@ existed. Fix: assert in `run_selftests --selftest` that the turn-end command doe
 **Convert the ledger to GitHub issues at release.** A 37-item list in a session tool is invisible,
 dies with the session, and answers "what are we building?" to nobody. Public issues are durable,
 honest, and read as a maintained project - which the local list serves not at all.
+
+**Gate 9 residue - the 10 surviving findings NOT fixed, all scheduled, none dropped.** Full
+statements, reproductions and severities in [gate 9 review](audits/gate9_review_2026-08-24.md).
+
+* **M1** `check_no_network`'s `ALLOWED` hatch is unusable - `verdict()` derives `stale` from the
+  list `scan()` already filtered, so the first real exemption pins the gate red. Fails closed.
+* **M3** the `--code-only` disarm probe re-implements the routing instead of exercising it;
+  `selftest()` never calls `main()`. The edit that survives is adding a CODE gate to `MACHINE_STATE`.
+* **M5** `no_regression` decodes predecessor source with the locale codec, so one non-ASCII byte
+  in a registered unit makes `no-regression: OK` vacuous. Fixed twice before per-site, never at the class.
+* **M6** an excluded MACHINE-STATE failure still records `PASS, failed=[]` in the durable ledger.
+* **M9** `UNBLUFF_LEDGER_OFF` suppresses every ledger write silently - #44's fix, one degree short.
+* **M10** `piped_gate_guard` is disarmed by the word `pipefail` anywhere before the first pipe.
+* **M11** `CHANGELOG.md:75`'s "1415 -> 377 lines" was wrong when written (645). Belongs with #42.
+* **L1** `check_repo_integrity` re-baselines onto the `FINGERPRINT-UNAVAILABLE` sentinel.
+* **L2** `fingerprint()` says "total snapshot"; nothing observes the working tree.
+* **L3** `fast_test_disclosure` records its marker before printing, so a bad `STATE_DIR` silences #25.
+
+**Next review's scope, from gate 9's own coverage gap.** `tools/no_regression.py`'s ~400-line
+rewrite is the largest unreviewed surface; ~120 mutation entry bodies were never read; and
+`docs/audits/gate_evidence_2026-08-23.md` - **the file every gate 1-8 DONE row cites as its
+proof** - was opened by no lens at all. That last one is where the next spend goes.
 
 ## Standing checks on every change
 
