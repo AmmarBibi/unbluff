@@ -38,26 +38,20 @@ into Phase 1 under the real bar, and they are marked ELEVATED below.
 Materiality still decides ORDER, never WHETHER.
 
 ## Phase 1 - what must be true before v1.4.0
-0. **CRITICAL - `pre_push_gate_selftest.py` COMMITS TO THE REAL REPOSITORY when the suite runs
-   from inside a git hook** (#46, found 2026-08-24). Numbered 0 because it precedes everything:
-   until it is fixed, **every push from a worktree corrupts the repo**, so gates 9, 10 and 11
-   cannot safely run. OBSERVED, not theorised - the first real `git push` of this branch left
-   six fixture commits (`seed`, `local only`, `ahead of upstream`, `on a branch that was never
-   pushed`, `seed`, `fixture`) in the reflog, moved `feat/enforcing-verify` off my work onto a
-   FIXTURE commit `8f63aec`, created a stray branch `feature`, and replaced the index with a
-   935-byte fixture index. Repaired non-destructively (`branch -f` + `symbolic-ref` +
-   `read-tree`); nothing was lost, and `--hard` was never needed.
-   MECHANISM PROVEN BY PROBE, not inferred: a git hook exports `GIT_DIR`, and `GIT_DIR` OVERRIDES
-   `git -C <tmpdir>`. Probe output - with `GIT_DIR` set, `git -C <tmpdir> rev-parse
-   --absolute-git-dir` returned `.../unbluff/.git/worktrees/unbluff-enforcing`. Every temp-repo
-   fixture in that 1131-line selftest therefore operates on the real repository, and `grep`
-   confirms it passes `dict(os.environ)` through with no scrubbing at any of its ~6 git call
-   sites. PRESCRIBED FIX (a hypothesis until re-executed): strip `GIT_DIR`, `GIT_INDEX_FILE`,
-   `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY` and `GIT_COMMON_DIR` from the env of every git
-   subprocess in a temp fixture, and add a gate that FAILS if any selftest leaves the repo's HEAD,
-   index or branch refs changed - the tree-guard shape, which this repo does not currently have.
-   Note the irony for the write-up: the defect was invisible in six direct suite runs and only
-   appeared once the suite ran where it actually ships - inside the hook.
+0. **CRITICAL - a selftest fixture escaped onto the real repository, and PUBLISHED to GitHub**
+   (#46, found 2026-08-24). **DONE 2026-08-24.** A git hook exports `GIT_DIR`, `GIT_DIR` overrides
+   `git -C <tmpdir>`, and every temp-repo fixture in this suite therefore operated on the real
+   repo when the suite ran where it ships. Diagnosis CORRECTED on re-execution: the named file
+   was not the culprit. `meta_audit_on_stop.py` set `core.bare`, wrote a fixture identity,
+   committed `f.txt` and ran `git push -u origin HEAD:refs/heads/main` - which served a one-file
+   tree as this project's PUBLIC default branch for 11h11m, with no CI run because the fixture
+   tree carried no workflows. Restored by force-push (a fast-forward had been made, so nothing
+   was destroyed). Five confirmed offending files, not one. Fixed at the CHOKE POINT -
+   `run_selftests` scrubs the seven redirect vars before spawning any gate, and fingerprints this
+   repo after every gate so an escapee is NAMED. Three probes: corruption reproduced, prevented,
+   and caught with prevention removed. See [gate 0 evidence](audits/gate0_evidence_2026-08-24.md).
+   **Residue:** four `git config` repairs to the main clone are still unapplied (blocked by a
+   tool-permission classifier), and `core.hooksPath` stays dangling until they are - see s6 there.
 1. **Merge `main` into `feat/enforcing-verify`.** **DONE** `d89e3dc`. Baseline conflict resolved by RE-MEASURING the merged tree, which independently reproduced the planned union. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-1).
 2. **Fix the execution model** (#25) **DONE** `13a8845`. Disclosure of the untrusted surface (not the wrapper), no auto-detect for repos that never opted in, `SECURITY.md` shipped. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-2).
 3. **Prove the README subset** (#6, #28) **DONE** `1aed8cc`, and RE-CUT: the gate is claims the tests CONTRADICT, not an unenumerated ~30. Piece count AND roster now derived and gated. Criterion 1 survives as #6/#28, so `findings.json` needed no rewrite. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-3).

@@ -44,6 +44,12 @@ from hook_health_check import (  # noqa: E402  (path set above)
     selftestable_hooks,
 )
 from gate_modes import is_selftest_argv  # noqa: E402  (path set above)
+# [#46] The suite spawns fixtures that build throwaway git repositories. Under a git hook -
+# which is where this suite actually ships - git exports GIT_DIR, GIT_DIR overrides
+# `git -C <tmpdir>`, and every one of those fixtures silently operates on the REAL repository.
+# Scrubbed HERE rather than at each fixture because the damage came from call sites that passed
+# no env= at all: a per-call-site obligation is precisely what failed.
+from git_isolation import fingerprint, scrub_environ  # noqa: E402  (path set above)
 
 # (label, path parts under the repo root, extra argv). A FLOOR: every entry MUST exist and run.
 AUX_GATES = (
@@ -130,6 +136,15 @@ AUX_GATES = (
     # foreign wired HERE", the selftest asks "could this gate still see an offender at all".
     ("hook-provenance", ("tools", "hook_divergence_report.py"), ()),
     ("hook-provenance-selftest", ("tools", "hook_divergence_report.py"), ("--selftest",)),
+    # [#46 2026-08-24] The env scrub and the repo fingerprint that keep temp fixtures off the
+    # real repository. Registered ('--selftest',) because the ENFORCING half is not a separate
+    # process at all - main() below fingerprints this repo before the sweep and after every
+    # single gate, so the measurement runs 40-odd times a run rather than once. What needs its
+    # own row is the question the inline control cannot ask itself: can this guard still tell a
+    # hijacked `git -C` from a clean one? Its selftest reproduces the GIT_DIR override FIRST and
+    # fails if the mechanism cannot be reproduced, so a future git that changed this behaviour
+    # turns the row red instead of leaving a guard that quietly protects against nothing.
+    ("git-isolation", ("tools", "git_isolation.py"), ("--selftest",)),
     # [P14 M1] A mutation entry finds its target by a literal string, so an unrelated fix that
     # edits that line disarms the mutation SILENTLY - it stays green everywhere except the full
     # ~25-minute sweep, which is CI-only. Measured 2026-08-05: the B3 encoding change broke
@@ -368,6 +383,49 @@ def main():
     code_only = "--code-only" in sys.argv
     hooks_dir = os.path.join(HERE, "hooks")
 
+    # ------------------------------------------------------------------ [#46] repo integrity
+    # PREVENTION. Done before a single gate is spawned, so every child inherits a clean
+    # environment whether or not it remembers to ask for one.
+    stripped = scrub_environ()
+    if stripped:
+        print(f"-- git isolation: stripped {sorted(stripped)} - a git hook exports these and "
+              f"they OVERRIDE `git -C <tmpdir>`, which is how this suite's own fixtures "
+              f"committed to the real repository and pushed one to GitHub (#46)")
+
+    # DETECTION, because prevention that nothing checks is an unenforced assertion (#47's shape).
+    # Snapshotted here and re-read after EVERY gate: a fixture that escapes is then named, not
+    # merely noticed six gates later.
+    baseline = fingerprint(HERE)
+    if baseline == "FINGERPRINT-UNAVAILABLE":
+        # Not a git checkout (a tarball install, say). The control cannot run - so it is
+        # reported as a SKIP and counted, never silently omitted. CI must not skip.
+        if os.environ.get("CI"):
+            print("repo-integrity: FAIL (no git checkout to fingerprint, and CI must not skip)")
+            failed.append("repo-integrity")
+        else:
+            print("repo-integrity: SKIPPED (not a git checkout - fixtures are unwatched here)")
+            skipped.append("repo-integrity")
+        baseline = None
+
+    def check_repo_integrity(label):
+        """Fail if `label` mutated this repository. Re-baselines so only the CULPRIT is blamed.
+
+        Without the re-baseline one runaway fixture would redden every gate that ran after it,
+        and a failure list naming 30 innocent gates is one nobody reads to the end.
+        """
+        nonlocal baseline
+        if baseline is None:
+            return
+        now = fingerprint(HERE)
+        if now == baseline:
+            return
+        print(f"FAIL: repo-integrity - `{label}` CHANGED THIS REPOSITORY. A selftest fixture "
+              f"escaped onto the real tree; on 2026-08-24 this same class set core.bare, "
+              f"repointed core.hooksPath at a temp directory, and pushed a one-file commit over "
+              f"the public default branch.\n       before: {baseline}\n       after:  {now}")
+        failed.append(f"repo-integrity:{label}")
+        baseline = now
+
     # The floor turns "a hook with no selftest" into a RED build rather than a silent skip.
     # KNOWN_NO_SELFTEST is empty, so ADDING an untested hook is what breaks the gate.
     violations = floor_violations(hooks_dir)
@@ -384,6 +442,7 @@ def main():
         ran += 1
         rc = subprocess.run([sys.executable, path, "--selftest"],
                             stdin=subprocess.DEVNULL).returncode
+        check_repo_integrity(name)
         if rc == SKIP_RC:
             # A skip is NOT a pass. Under CI it is a failure: the whole point of running on
             # four Pythons x three OSes is that the assertions actually execute there.
@@ -413,6 +472,7 @@ def main():
             continue
         rc = subprocess.run([sys.executable, path, *extra],
                             stdin=subprocess.DEVNULL).returncode
+        check_repo_integrity(label)
         if rc == SKIP_RC:
             # Same contract as the hook selftests above: a skip is not a pass, and CI must
             # never skip - the point of running everywhere is that it actually executes.
