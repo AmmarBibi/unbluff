@@ -47,21 +47,18 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
 ## Open - and this list is deliberately short
 
-0. **Make `close_skills_guard` enforce RECENCY, not just presence.** Highest value here, because
-   it is the one failure that has recurred across sessions and the only reason it was caught
-   today is that you asked. The guard is WIRED (PostToolUse) and it checks "were all four audit
-   skills invoked since the last genuine user message" - which passed today while being wrong:
-   the skills ran at 15:54, then four more commits landed including a code fix to a guard, the
-   whole plan re-cut, and the merge to `main`. The close ritual certified a state that no longer
-   existed, and re-running it on that tail found four defects, all mine.
-   `hooks/close_skills_guard.py:333` deliberately tolerates tool activity after the skills, which
-   is right for a `tool_result` and wrong for a `Write`. **Rule to add: fire if any file was
-   WRITTEN after the last required-skill invocation** (excluding the close artifact itself, which
-   is by definition written last). Everything needed is already in the transcript scan; this is a
-   comparison of two indices it already computes.
-   This is the REMEMBER-vs-ENFORCE conversion in its purest form - the instruction "run the four
-   skills at close" is prose in a session prompt, and prose is advisory. Do not fix it by
-   promising to run them later.
+0. **`close_skills_guard` enforces RECENCY, not just presence.** **DONE 2026-08-24.** The
+   guard asked "were all four skills invoked since the last user message", which is satisfiable
+   by an audit of a state that no longer exists - MEASURED on this hook's own session: skills at
+   15:54, then a guard fix, a full plan re-cut and a merge to `main`, guard PASSED, and
+   re-auditing that tail found four defects all authored after the ritual. It now also fires if
+   any file was WRITTEN after the last required-skill invocation, excluding the close artifact
+   itself. Reads and tool_results do not count (a guard that reddens its own verification pass
+   gets disabled); re-running the four re-closes the window; a missing skill still takes
+   precedence. Six cases probed against the real shape BEFORE the fix, five pinned in the
+   selftest, and mutation-probed with a matched control - neutering the rule turns it red
+   naming the right case. This is the REMEMBER-vs-ENFORCE conversion: the instruction was prose
+   in a session prompt, and prose is advisory.
 1. **Land the branch.** `feat/enforcing-verify` -> `main` via
    [PR #3](https://github.com/AmmarBibi/unbluff/pull/3). This is the whole point of the branch
    for a solo user: `main` currently still has (a) a moved or renamed clone **bricking every

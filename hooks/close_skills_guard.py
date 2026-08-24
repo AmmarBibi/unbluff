@@ -129,6 +129,88 @@ def missing_close_skills(transcript_path: str) -> list[str]:
     return [s for s in REQUIRED_SKILLS if s not in invoked]
 
 
+# Tools that CHANGE the repository. A tool_result, a Read, a Bash query or a Skill call leaves the
+# audited state exactly as the audits found it; these do not.
+WRITE_TOOLS = frozenset({"write", "edit", "multiedit", "notebookedit"})
+
+
+def _files_written(entry) -> list:
+    """file_path of every repo-changing tool_use in this entry."""
+    msg = entry.get("message") if isinstance(entry, dict) else None
+    if not isinstance(msg, dict):
+        msg = entry
+    content = msg.get("content") if isinstance(msg, dict) else None
+    out = []
+    if isinstance(content, list):
+        for block in content:
+            if (isinstance(block, dict) and block.get("type") == "tool_use"
+                    and str(block.get("name", "")).strip().lower() in WRITE_TOOLS):
+                inp = block.get("input")
+                fp = inp.get("file_path") if isinstance(inp, dict) else None
+                if isinstance(fp, str) and fp.strip():
+                    out.append(fp.strip())
+    return out
+
+
+def writes_after_close_skills(transcript_path: str) -> list:
+    """Files written AFTER the last required-skill invocation, in the current closing stretch.
+
+    [RECENCY 2026-08-24] The guard asked PRESENCE - "were all four skills invoked since the last
+    genuine user message" - and that is satisfiable by an audit of a state that no longer exists.
+    MEASURED, on this hook's own session: the four skills ran at 15:54, then four more commits
+    landed - a code fix to a guard, a full re-cut of the plan, and a merge to `main` - and the
+    guard still passed. Re-running the audits over that tail found FOUR defects, all authored
+    after the ritual: a hook wired NOWHERE promoted to the plan's top item while calling itself
+    live, the word "NOT" deleted from the standing check whose entire value is that word, an
+    archived plan with no retirement banner, and a mutation run called green by grepping past its
+    own FAIL line. The close certified a dead state, and the only reason anyone noticed is that
+    the user asked.
+
+    Presence is the wrong question; RECENCY is the question. Excludes the close artifact itself,
+    which is by definition written last, and tolerates a repeated write of it. Everything here
+    comes from the same scan `missing_close_skills` already walks - this is a comparison of two
+    indices, not a second traversal of a different thing.
+    """
+    entries = list(_iter_entries(transcript_path))
+    if not entries:
+        return []                                    # no transcript -> cannot judge -> silent
+    last_user = -1
+    for i, e in enumerate(entries):
+        if _is_genuine_user(e):
+            last_user = i
+    window = entries[last_user + 1:]
+
+    last_skill = -1
+    for i, e in enumerate(window):
+        if _skills_invoked(e) & set(REQUIRED_SKILLS):
+            last_skill = i
+    if last_skill < 0:
+        return []          # no skills ran at all - that is missing_close_skills' finding, not this one
+
+    stale = []
+    for e in window[last_skill + 1:]:
+        for fp in _files_written(e):
+            if not _target_file({"file_path": fp}):
+                stale.append(fp)
+    # De-duplicated but ORDER-PRESERVED: the first file written after the audits is the one that
+    # tells you where the close actually ended.
+    seen, ordered = set(), []
+    for fp in stale:
+        if fp not in seen:
+            seen.add(fp)
+            ordered.append(fp)
+    return ordered
+
+
+def build_stale_message(stale: list) -> str:
+    shown = ", ".join(stale[:4]) + (" (+%d more)" % (len(stale) - 4) if len(stale) > 4 else "")
+    return (
+        f"[{HOOK_NAME}] All four close-audit skills ran, but {len(stale)} file(s) were WRITTEN "
+        f"AFTER the last one: {shown}. The audits therefore certified a state that no longer "
+        f"exists - which is exactly how a close ritual passes while being wrong. Re-invoke the "
+        f"four skills over the work authored SINCE they ran, then finish the close.\n")
+
+
 def build_message(missing: list[str]) -> str:
     return (
         f"[{HOOK_NAME}] You are writing NEXT_SESSION_PROMPT.md (the session-close signal) but these "
@@ -142,10 +224,15 @@ def run(payload: dict) -> tuple[int, str]:
     """Core decision, testable in isolation: (exit_code, stderr_text)."""
     if not _target_file(payload.get("tool_input") or {}):
         return 0, ""                                 # not the close-signal file
-    missing = missing_close_skills(payload.get("transcript_path") or "")
-    if not missing:
-        return 0, ""
-    return 2, build_message(missing)
+    transcript = payload.get("transcript_path") or ""
+    missing = missing_close_skills(transcript)
+    if missing:
+        return 2, build_message(missing)
+    # PRESENCE satisfied. Now RECENCY - the audits must not predate the work they certify.
+    stale = writes_after_close_skills(transcript)
+    if stale:
+        return 2, build_stale_message(stale)
+    return 0, ""
 
 
 def main() -> int:
@@ -331,6 +418,51 @@ def selftest() -> int:
         code, _ = run({"tool_input": {"file_path": "NEXT_SESSION_PROMPT.md"}, "transcript_path": tr})
         if code != 0:
             fails.append("tool_result after skills wrongly reset the window (should PASS)")
+
+        # ---------------------------------------------------------------- [RECENCY 2026-08-24]
+        # PRESENCE was satisfiable by an audit of a state that no longer existed. MEASURED on
+        # this hook's own session: four skills at 15:54, then a guard fix, a full plan re-cut and
+        # a merge to main - guard PASSED, and re-auditing that tail found four defects, all
+        # authored after the ritual. Each case below was observed on the real shape first.
+        def _wrote(path):
+            return {"message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": path}}]}}
+
+        def _rec(entries, label):
+            p = _mk(entries, tmp)
+            return run({"tool_input": {"file_path": "NEXT_SESSION_PROMPT.md"},
+                        "transcript_path": p})[0], label
+
+        code, _l = _rec([_user("wrap up"), *all4, _wrote("docs/PLAN.md")], "stale")
+        if code != 2:
+            fails.append("RECENCY: a file written AFTER the four skills must FIRE - the audits "
+                         "certified a state that no longer exists (got %r)" % code)
+
+        code, _l = _rec([_user("wrap up"), *all4, _wrote("docs/NEXT_SESSION_PROMPT.md")], "self")
+        if code != 0:
+            fails.append("RECENCY: writing the close artifact itself must NOT fire - it is by "
+                         "definition written last (got %r)" % code)
+
+        code, _l = _rec([_user("wrap up"), *all4, _wrote("docs/PLAN.md"), *all4], "reclosed")
+        if code != 0:
+            fails.append("RECENCY: re-running all four AFTER the write must re-close the window, "
+                         "or the only way to satisfy this guard is to never edit again (got %r)"
+                         % code)
+
+        # A Read is not a state change. Without this, the guard fires on its own verification
+        # pass and gets disabled within a day - which is strictly worse than no guard.
+        code, _l = _rec([_user("wrap up"), *all4,
+                         {"message": {"role": "assistant", "content": [
+                             {"type": "tool_use", "name": "Read",
+                              "input": {"file_path": "docs/PLAN.md"}}]}}], "read")
+        if code != 0:
+            fails.append("RECENCY: a Read after the skills must NOT fire (got %r)" % code)
+
+        # PRESENCE keeps precedence: a missing skill is the louder finding and its message names
+        # which ones, so recency must not mask it.
+        code, _l = _rec([_user("wrap up"), *all4[:2], _wrote("docs/PLAN.md")], "both")
+        if code != 2:
+            fails.append("RECENCY must not mask a missing skill (got %r)" % code)
 
         # ------------------------------------------------------------ v1.3.1 regressions
         def _verdict(entries, label):
