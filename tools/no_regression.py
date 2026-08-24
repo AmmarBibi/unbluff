@@ -52,9 +52,20 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+
+# [C7 2026-08-20] MODULE SCOPE, and it was MISSING. selftest() imports its split-out sibling
+# lazily (to avoid an import cycle), and the docstring there claimed this line already existed -
+# it did not. `python tools/no_regression.py --selftest` worked only because running a file as a
+# script puts its directory at sys.path[0]; `python -m tools.no_regression --selftest` raised
+# ModuleNotFoundError. Every caller in this repo invokes it as a script, so nothing was red - the
+# exact invocation-dependent shape the task #17 sweep hunts, introduced by the split that was
+# fixing two OTHER defects, with a docstring asserting the mitigation was present. Found by the
+# source-coverage pass asking whether a fix had created a new instance of the class it fixed.
+sys.path.insert(0, HERE)
 
 # Directories a unit may live in. Derived population, not a roster of unit NAMES.
 UNIT_ROOTS = ("hooks", "tools", "scripts", "skills")
@@ -77,6 +88,110 @@ class Broken(Exception):
 # --------------------------------------------------------------------------------------
 # loading two versions of one module into one process
 # --------------------------------------------------------------------------------------
+
+def repo_sibling_modules(mod, repo) -> dict:
+    """{name: module} for the repo-local modules `mod` pulled into its own globals.
+
+    A loaded version's DELEGATES, in other words. Used by shared_siblings() below to notice that
+    the two sides of an A/B are executing the same code.
+    """
+    out = {}
+    for value in vars(mod).values():
+        if not isinstance(value, types.ModuleType):
+            continue
+        path = getattr(value, "__file__", "") or ""
+        if path and os.path.abspath(path).startswith(os.path.abspath(repo) + os.sep):
+            out[value.__name__] = value
+    return out
+
+
+def shared_siblings(prev, cur, repo) -> list:
+    """Repo-local modules that BOTH versions resolved to the same object. Pure, so it is testable.
+
+    [SELF-COMPARE 2026-08-19] The confound this exists to refuse. `load_version` imports each
+    version under a unique module name, which isolates the two FILES - but not their imports. A
+    unit that delegates (`return cap_shapes.slicing_offenders(...)`) has its real detector in a
+    sibling, and `import cap_shapes` resolves through the ordinary module cache to the WORKING
+    TREE copy for both sides. The predecessor then executes the code it is supposed to be a
+    yardstick FOR, `lost` is empty by construction, and the gate reports OK for any regression.
+
+    MEASURED on this repo, 2026-08-20: crippling `cap_shapes.slicing_offenders` so it keeps ~60%
+    of what it saw moved BOTH sides together - "predecessor f77eefd4 saw 64 of 105, working tree
+    sees 64" against 102/102 before - and `no-regression: OK`, exit 0. The tell is that the
+    PREDECESSOR's score changed in response to a working-tree edit; a yardstick that moves when
+    the thing it measures moves is not a yardstick. The gate went vacuous at fec8db9, a
+    COMMENT-ONLY commit that rolled a delegate into history, and nothing noticed for weeks.
+    """
+    shared = set(repo_sibling_modules(prev, repo)) & set(repo_sibling_modules(cur, repo))
+    p, c = repo_sibling_modules(prev, repo), repo_sibling_modules(cur, repo)
+    return sorted(name for name in shared if p[name] is c[name])
+
+
+def load_with_siblings(path, tag, repo, sha, names, work):
+    """Load `path`, resolving its repo-local imports to THEIR state at `sha`.
+
+    [SELF-COMPARE 2026-08-19] Isolating the two FILES is not isolating the two VERSIONS. A unit
+    that delegates keeps its detector in a sibling, and the predecessor's `import cap_shapes`
+    resolves through the ordinary module cache to the working tree - so the yardstick is made of
+    the very code it is meant to measure.
+
+    The fix is a SEARCH PATH rather than seeded `sys.modules` entries, and that choice is
+    load-bearing: the sibling has siblings of its own (`cap_shapes` imports `cap_types`), and a
+    path entry resolves the whole transitive closure at `sha` without this function having to
+    know the dependency order. Seeding module objects one at a time would resolve the first hop
+    correctly and silently take the second from the working tree.
+
+    A sibling absent at `sha` is left alone rather than faked: the predecessor genuinely did not
+    have it, and inventing one would be a different program from the one that shipped.
+    """
+    sibdir = tempfile.mkdtemp(prefix="prevsib_", dir=work)
+    materialised = []
+    # [TRANSITIVE 2026-08-20] EVERY hook module at `sha`, not just the unit's direct imports.
+    # The first version materialised only `names` - what the unit imports itself - and the leak
+    # simply moved one hop down: capped_report imports cap_shapes, cap_shapes imports cap_types,
+    # and cap_types was still resolved from the working tree. MEASURED: after two corpus
+    # positives were added that only the CURRENT cap_types can detect, the PREDECESSOR detected
+    # them too - 104 of 107 on both sides, where a genuine A/B gives 102 against 104. Half of an
+    # isolation is not an isolation, so the whole directory comes across at that commit.
+    listing = _git(repo, "ls-tree", "--name-only", "%s:hooks" % sha) or ""
+    wanted = {n if n.endswith(".py") else "%s.py" % n
+              for n in listing.split()} | {"%s.py" % n for n in names}
+    for filename in sorted(wanted):
+        if not filename.endswith(".py"):
+            continue
+        blob = _git(repo, "show", "%s:hooks/%s" % (sha, filename))
+        if blob is None:
+            continue
+        with open(os.path.join(sibdir, filename), "w", encoding="utf-8") as fh:
+            fh.write(blob)
+        materialised.append(filename[:-3])
+    # FAIL CLOSED if the predecessor's own siblings could not be produced. `_git` returns None on
+    # failure and the listing above degrades to "", so a git that cannot answer - no git, an
+    # unreachable sha, a damaged object store - would silently leave the predecessor importing the
+    # WORKING TREE's modules. That is the self-comparison this whole function exists to prevent,
+    # reappearing through the back door, and shared_siblings() is too shallow to catch it one hop
+    # down (task #19). A predecessor with no hooks/ at that commit is a different, legitimate case:
+    # `names` would be unsatisfiable there too, so the test is whether we produced ANY of the
+    # siblings the CURRENT version actually imports.
+    if names and not (set(names) & set(materialised)):
+        raise Broken(
+            "none of %s could be materialised at %s, so the predecessor would import the working "
+            "tree's copies and the A/B would silently become a self-comparison. Refusing to issue "
+            "a verdict." % (sorted(names), (sha or "")[:8]))
+    saved = {n: sys.modules.pop(n, None) for n in materialised}
+    sys.path.insert(0, sibdir)
+    try:
+        return load_version(path, tag)
+    finally:
+        # Leave the interpreter exactly as found: the predecessor's copies must not be visible to
+        # anything that imports after this point, least of all to the working-tree version.
+        if sibdir in sys.path:
+            sys.path.remove(sibdir)
+        for name in materialised:
+            sys.modules.pop(name, None)
+            if saved[name] is not None:
+                sys.modules[name] = saved[name]
+
 
 def load_version(path, tag):
     """Import `path` under a unique module name so two versions can coexist."""
@@ -329,7 +444,20 @@ def compare(repo, rel, corpus_rel, family, renamed_from=None):
         with open(prev_path, "w", encoding="utf-8") as fh:
             fh.write(blob)
         cur = load_version(os.path.join(repo, rel.replace("/", os.sep)), "cur")
-        prev = load_version(prev_path, "prev")
+        # cur FIRST, because its repo-local imports are what the predecessor must be given its
+        # own copies of. Then load prev against the sibling state at ITS commit.
+        prev = load_with_siblings(prev_path, "prev", repo, sha,
+                                  sorted(repo_sibling_modules(cur, repo)), work)
+
+        # REFUSE a confounded A/B rather than issuing a verdict from one. See shared_siblings().
+        shared = shared_siblings(prev, cur, repo)
+        if shared:
+            raise Broken(
+                "both versions of %s resolve %s to the SAME working-tree module object, so the "
+                "predecessor executes the code it is supposed to be a yardstick for. `lost` "
+                "would be empty for any regression and the verdict would be a self-comparison. "
+                "Register the unit where the detector actually lives, or give the predecessor "
+                "its own copy of the sibling." % (rel, ", ".join(shared)))
 
         # ONE planted tree per entry, read by BOTH versions: halves filesystem cost and
         # removes the confound of the two sides reading different bytes.
@@ -371,6 +499,12 @@ def compare(repo, rel, corpus_rel, family, renamed_from=None):
             "prev_detected": len(prev_hits), "cur_detected": len(cur_hits),
             "lost": sorted(prev_hits - cur_hits),
             "gained": sorted(cur_hits - prev_hits),
+            # The FULL sets, not just the deltas. _detected_now() promised "everything the
+            # predecessor saw minus what was lost, plus anything gained" and could only return
+            # `gained`, because the deltas were all compare() handed back - so a capability BOTH
+            # versions detect was invisible to it and every such waiver filed as SETTLED.
+            "prev_hits": sorted(prev_hits),
+            "cur_hits": sorted(cur_hits),
             "new_false_positives": new_fps,
             "total_loss": cur_score == 0,
         }
@@ -427,7 +561,21 @@ def classify_waivers(waivers, results, units, corpora, repo=REPO):
 
 def _detected_now(res):
     """Capabilities the working tree sees: everything the predecessor saw minus what was
-    lost, plus anything gained."""
+    lost, plus anything gained.
+
+    [STALE-TAUTOLOGY 2026-08-19] That sentence was correct and the code did not implement it: it
+    returned `gained` alone, which is "detected now AND NOT detected before". A capability BOTH
+    versions detect - the ordinary case for a waiver whose defect has been fixed - appeared in
+    neither `lost` nor `gained`, so it fell through to SETTLED and could never be reported STALE.
+    The waiver ledger could therefore never tell the caller to prune anything, which is the one
+    job it has; `docs/V131_REVIEW_PLAN.md:1792` promises "the waiver goes STALE and BLOCKING the
+    moment the corpus stops contradicting itself", and that trigger was dead.
+
+    `cur_hits` is the direct answer and is now returned by compare(). The `gained` fallback keeps
+    an older result dict readable rather than silently reporting nothing for it.
+    """
+    if "cur_hits" in res:
+        return set(res["cur_hits"])
     return set(res.get("gained", []))
 
 
@@ -543,249 +691,15 @@ def run(repo=REPO, verbose=True):
 
 # --------------------------------------------------------------------------------------
 # selftest
-# --------------------------------------------------------------------------------------
-
-def _scratch_repo():
-    """A tiny git repo with a detector that is committed, then narrowed in the worktree."""
-    base = tempfile.mkdtemp(prefix="nrself_")
-    for d in ("hooks", "tests", "tools"):
-        os.makedirs(os.path.join(base, d))
-    det_v1 = (
-        "import ast, glob, os\n\n\n"
-        "def slicing_offenders(d):\n"
-        "    out = []\n"
-        "    for p in sorted(glob.glob(os.path.join(d, '*.py'))):\n"
-        "        try:\n"
-        "            t = ast.parse(open(p, encoding='utf-8').read())\n"
-        "        except Exception:\n"
-        "            continue\n"
-        "        for n in ast.walk(t):\n"
-        "            if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice):\n"
-        "                u = n.slice.upper\n"
-        "                if isinstance(u, ast.Name) and u.id.startswith('MAX_'):\n"
-        "                    out.append(p)\n"
-        "    return sorted(set(out))\n\n\n"
-        "def selftest():\n    return 0\n\n\n"
-        "if __name__ == '__main__':\n"
-        "    import sys\n"
-        "    raise SystemExit(selftest() if '--selftest' in sys.argv else 0)\n")
-    # v2 narrows: only MAX_B is a cap now, so MAX_A regresses.
-    det_v2 = det_v1.replace("u.id.startswith('MAX_')", "u.id == 'MAX_B'")
-    corpus = (
-        "ENTRIES = (\n"
-        "    ('a', 'hooks/a.py', True, 'MAX_A = 3\\ndef r(xs):\\n    return xs[:MAX_A]\\n'),\n"
-        "    ('b', 'hooks/b.py', True, 'MAX_B = 3\\ndef r(xs):\\n    return xs[:MAX_B]\\n'),\n"
-        "    ('n', 'hooks/n.py', False, 'def r(xs):\\n    return list(xs)\\n'),\n"
-        ")\n")
-    with open(os.path.join(base, "hooks", "det.py"), "w", encoding="utf-8") as fh:
-        fh.write(det_v1)
-    with open(os.path.join(base, "tests", "corpus.py"), "w", encoding="utf-8") as fh:
-        fh.write(corpus)
-    for cmd in (("init",), ("config", "user.email", "t@t"), ("config", "user.name", "t"),
-                ("add", "-A"), ("commit", "-m", "v1")):
-        subprocess.run(("git", "-C", base) + cmd, capture_output=True, text=True)
-    return base, det_v2
-
-
-def _shallow_fixture():
-    """A repo whose unit REALLY regressed one commit ago, plus a --depth 1 clone of it.
-
-    Two commits: v1 detects capabilities a+b, v2 detects only b. A waiver excuses 'a'. In the
-    FULL clone the waiver is ACTIVE and the gate passes. In the SHALLOW clone the differing
-    predecessor blob is one commit out of reach - it EXISTS, it is simply not fetched.
-    """
-    base = tempfile.mkdtemp(prefix="nrshal_")
-    for d in ("hooks", "tests", "tools"):
-        os.makedirs(os.path.join(base, d))
-    det_v1 = (
-        "import ast, glob, os\n\n\n"
-        "def slicing_offenders(d):\n"
-        "    out = []\n"
-        "    for p in sorted(glob.glob(os.path.join(d, '*.py'))):\n"
-        "        try:\n"
-        "            t = ast.parse(open(p, encoding='utf-8').read())\n"
-        "        except Exception:\n"
-        "            continue\n"
-        "        for n in ast.walk(t):\n"
-        "            if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice):\n"
-        "                u = n.slice.upper\n"
-        "                if isinstance(u, ast.Name) and u.id.startswith('MAX_'):\n"
-        "                    out.append(p)\n"
-        "    return sorted(set(out))\n\n\n"
-        "def selftest():\n    return 0\n\n\n"
-        "if __name__ == '__main__':\n"
-        "    import sys\n"
-        "    raise SystemExit(selftest() if '--selftest' in sys.argv else 0)\n")
-    det_v2 = det_v1.replace("u.id.startswith('MAX_')", "u.id == 'MAX_B'")
-    files = {
-        os.path.join("hooks", "det.py"): det_v1,
-        os.path.join("tests", "corpus.py"):
-            "ENTRIES = (\n"
-            "    ('a', 'hooks/a.py', True, 'MAX_A = 3\\ndef r(xs):\\n    return xs[:MAX_A]\\n'),\n"
-            "    ('b', 'hooks/b.py', True, 'MAX_B = 3\\ndef r(xs):\\n    return xs[:MAX_B]\\n'),\n"
-            "    ('n', 'hooks/n.py', False, 'def r(xs):\\n    return list(xs)\\n'),\n"
-            ")\n",
-        os.path.join("tests", "noregress_registry.py"):
-            "REGISTRY = {'hooks/det.py': {'corpus': 'tests/corpus.py',\n"
-            "                            'probe': 'cap_detector'}}\n",
-        os.path.join("tests", "noregress_waivers.py"):
-            "WAIVERS = ({'unit': 'hooks/det.py', 'capability': 'a',\n"
-            "            'narrowed_on': '2026-08-06',\n"
-            "            'reason': 'detecting MAX_A was wrong - fixture'},)\n",
-    }
-    for rel, text in files.items():
-        with open(os.path.join(base, rel), "w", encoding="utf-8") as fh:
-            fh.write(text)
-    for cmd in (("init",), ("config", "user.email", "t@t"), ("config", "user.name", "t"),
-                ("add", "-A"), ("commit", "-m", "v1")):
-        subprocess.run(("git", "-C", base) + cmd, capture_output=True, text=True)
-    with open(os.path.join(base, "hooks", "det.py"), "w", encoding="utf-8") as fh:
-        fh.write(det_v2)
-    for cmd in (("add", "-A"), ("commit", "-m", "v2")):
-        subprocess.run(("git", "-C", base) + cmd, capture_output=True, text=True)
-
-    holder = tempfile.mkdtemp(prefix="nrclone_")
-    shallow = os.path.join(holder, "r")
-    subprocess.run(("git", "clone", "--depth", "1",
-                    "file://" + base.replace(os.sep, "/"), shallow),
-                   capture_output=True, text=True)
-    return base, holder, shallow
-
-
-def _selftest_shallow_history():
-    """[CI-SHALLOW] 'I could not look' is not 'there is nothing to look at'.
-
-    actions/checkout@v4 fetches ONE commit. On 2026-08-06 that made every one of 11 CI jobs
-    red on a commit that was green locally: the differing predecessor was unreachable, the
-    detector half of this module correctly said SKIPPED, and the waiver auditor read the same
-    condition as "this unit has no predecessor" and blocked. A gate whose verdict depends on
-    the DEPTH OF THE CHECKOUT is not measuring the code.
-
-    The fix must not go the other way either: a shallow run that quietly returns 0 would be a
-    gate that cannot fail. So the third state is REPORTED, and the CI checkout fetches history
-    so the comparison is actually performed there.
-    """
-    fails = []
-    base, holder, shallow = _shallow_fixture()
-    try:
-        if not os.path.isfile(os.path.join(shallow, "hooks", "det.py")):
-            return ["F: the shallow clone fixture did not materialise - nothing was tested"]
-        depth = subprocess.run(("git", "-C", shallow, "rev-list", "--count", "HEAD"),
-                               capture_output=True, text=True).stdout.strip()
-        if depth != "1":
-            return ["F: the fixture clone is %s commits deep, so it does not reproduce "
-                    "actions/checkout@v4 and proves nothing" % depth]
-
-        # control: with full history the waiver is ACTIVE and the gate passes. If this fails
-        # the fixture is wrong, not the code under test.
-        if run(base, verbose=False) != 0:
-            fails.append("F-control: the FULL-history repo must pass with the waiver active; "
-                         "the fixture is broken, so the shallow half proves nothing")
-
-        # the finding itself
-        if run(shallow, verbose=False) != 0:
-            fails.append("F: a --depth 1 checkout BLOCKS on an UNUSED waiver - the predecessor "
-                         "is unreachable, not absent, and the gate must not convert an "
-                         "unanswered question into a blocking verdict")
-
-        # ...and it must not have passed by pretending it verified something
-        units = derive_units(shallow)
-        res = compare(shallow, "hooks/det.py", "tests/corpus.py", "cap_detector")
-        waivers = _load_side(shallow, "tests/noregress_waivers.py").WAIVERS
-        classified = classify_waivers(waivers, [res], units, {"hooks/det.py": {"a", "b", "n"}},
-                                      shallow)
-        if len(classified) < 4:
-            fails.append("F: classify_waivers still returns %d lists - there is no place to "
-                         "report a waiver whose state could not be determined"
-                         % len(classified))
-        else:
-            unknown = classified[3]
-            if not unknown:
-                fails.append("F: the shallow run reported NO unknown waiver - silence and "
-                             "'verified' look identical, which is the failure this gate exists "
-                             "to stop")
-            elif not any("SHALLOW" in u for u in unknown):
-                fails.append("F: the unknown state does not name shallow history as the "
-                             "reason, so a reader cannot tell it from a real absence: %r"
-                             % unknown)
-        _b, _s, reason = predecessor(shallow, "hooks/det.py")
-        if reason and "SHALLOW" not in reason:
-            fails.append("F: predecessor() reported %r on a shallow clone - it must say the "
-                         "history is truncated, not that no blob differs" % reason)
-    finally:
-        shutil.rmtree(base, ignore_errors=True)
-        shutil.rmtree(holder, ignore_errors=True)
-    return fails
-
-
 def selftest():
-    fails = []
+    """Delegates to tools/noregress_selftest.py - see that module for why the split exists.
 
-    # A - the unit population is DERIVED, and finds a selftest-bearing module
-    base, det_v2 = _scratch_repo()
-    try:
-        units = derive_units(base)
-        if "hooks/det.py" not in units:
-            fails.append("A: derive_units did not find hooks/det.py -> %s" % units)
-
-        # B - predecessor walks PAST an identical blob rather than comparing a file to itself
-        blob, sha, reason = predecessor(base, "hooks/det.py")
-        if blob is not None or reason != "no committed blob differs from the working tree":
-            fails.append("B: an unchanged file must yield NO predecessor, got sha=%s reason=%r"
-                         % (sha, reason))
-
-        # C - a real narrowing in the WORKING TREE is caught against the committed blob
-        with open(os.path.join(base, "hooks", "det.py"), "w", encoding="utf-8") as fh:
-            fh.write(det_v2)
-        res = compare(base, "hooks/det.py", "tests/corpus.py", "cap_detector")
-        if res.get("skipped"):
-            fails.append("C: comparison skipped unexpectedly: %s" % res["skipped"])
-        elif res["lost"] != ["a"]:
-            fails.append("C: expected capability 'a' lost, got lost=%s prev=%s cur=%s"
-                         % (res["lost"], res.get("prev_detected"), res.get("cur_detected")))
-
-        # D - a predecessor that detects nothing is BROKEN, never a clean verdict
-        with open(os.path.join(base, "tests", "empty_corpus.py"), "w", encoding="utf-8") as fh:
-            fh.write("ENTRIES = (('z', 'hooks/z.py', True, 'x = 1\\n'),)\n")
-        # Assert on the REASON, not just the exception type. The first version of this
-        # caught any Broken and mutation D2b proved it decorative: with the prev_score
-        # guard disabled, compare() still raises Broken from the soundness check further
-        # down, so `except Broken: pass` passed while the guard it tested was gone.
-        try:
-            compare(base, "hooks/det.py", "tests/empty_corpus.py", "cap_detector")
-            fails.append("D: a predecessor scoring 0 must raise Broken, not return a verdict")
-        except Broken as exc:
-            if "yardstick is unusable" not in str(exc):
-                fails.append("D: a predecessor scoring 0 raised the WRONG Broken - expected "
-                             "the unusable-yardstick reason, got %r" % str(exc)[:120])
-
-        # E - a total loss is reported as such, not as a small regression
-        with open(os.path.join(base, "hooks", "det.py"), "w", encoding="utf-8") as fh:
-            fh.write(det_v1_blind())
-        res = compare(base, "hooks/det.py", "tests/corpus.py", "cap_detector")
-        if not res.get("total_loss"):
-            fails.append("E: a version detecting nothing must be flagged total_loss, got %s"
-                         % res)
-    finally:
-        shutil.rmtree(base, ignore_errors=True)
-
-    fails += _selftest_shallow_history()
-
-    print("-- no-regression selftest: 6 assertions (A derive, B identical-blob walk, "
-          "C narrowing caught, D unusable yardstick, E total loss, F shallow history)")
-    for f in fails:
-        print("SELFTEST FAIL:", f)
-    print("SELFTEST OK" if not fails else "SELFTEST FAILED")
-    return 0 if not fails else 1
-
-
-def det_v1_blind():
-    return ("import ast, glob, os\n\n\n"
-            "def slicing_offenders(d):\n    return []\n\n\n"
-            "def selftest():\n    return 0\n\n\n"
-            "if __name__ == '__main__':\n"
-            "    import sys\n"
-            "    raise SystemExit(selftest() if '--selftest' in sys.argv else 0)\n")
+    The import is deliberately INSIDE the function: noregress_selftest imports this module, so a
+    module-scope import here would be a cycle. It is not the invocation-dependent kind this repo
+    hunts - the sibling directory is put on sys.path explicitly at module scope, above.
+    """
+    from noregress_selftest import selftest as _selftest
+    return _selftest()
 
 
 def main(argv=None):

@@ -78,6 +78,17 @@ ENTRIES = [
        '    return False\n'
        '    names = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}')],
      False, "install"),
+    # [ROOT-GLOB 2026-08-24] OPT-1's sibling, and the SECOND instance of that same class. OPT-1
+    # pins the try/except idiom; this pins the lazy one. `import fitz` (extract.py:157) and
+    # `from pdfminer.high_level import ...` (:163) sit at the top of their own functions with the
+    # caller's reader loop handling failure, so they fell through to find_spec - TRUE on the
+    # author's box, FALSE on every runner. install.py then demanded scripts/fitz.py and
+    # scripts/pdfminer.py, files that exist nowhere, and sys.exit'd: 15 of 17 CI jobs red, and
+    # any USER without both libraries unable to install unbluff at all.
+    ("install", "OPT-2", "a LAZY import is treated as REQUIRED again - the fitz/pdfminer defect "
+     "that made install.py refuse to run for anyone without PyMuPDF",
+     [("        if lazy_optional:", "        if False:")],
+     False, "install"),
     ("install", "EG-1", "a missing SKILL.md stops being reported, so install ships "
      "close_skills_guard demanding a skill the user never received",
      [('        if not os.path.exists(md):\n'
@@ -346,8 +357,22 @@ ENTRIES = [
      [('    if tok.endswith(".py"):', "    if True:")], False),
     ("piped_gate_guard", "PG2", "pipefail / PIPESTATUS no longer protect the exit status, so "
      "a command that already captures it is blocked anyway",
-     [("    if any(p in command for p in PROTECTED):\n        return []",
+     # ANCHOR UPDATED 2026-08-20: the whole-command substring test became _is_protected(), which
+     # asks WHERE the word appears and in WHICH dialect. The old line was flagged as this entry's
+     # anchor in a comment beside it, and the comment did not stop the drift - check_mutation_
+     # anchors did, in under a second, exactly as designed. Prose is advisory; only a gate is a
+     # control.
+     [("    if _is_protected(command, dialect):\n        return []",
        "    if False:\n        return []")], False),
+    # [DISARM 2026-08-20] The other half, and the one PG2 cannot see: PG2 proves the protector is
+    # CONSULTED, not that it protects anything real. A protector accepted ANYWHERE in the command
+    # - in a comment, or after the pipeline where it does nothing - silenced a blocking guard.
+    ("piped_gate_guard", "PG-DISARM", "a protector counts wherever it appears, so `pipefail` in "
+     "a comment or written AFTER the pipeline disarms the guard",
+     [('    for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):\n'
+       '        if word in (head if where == "before" else command):',
+       '    for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):\n'
+       '        if word in command:')], False),
     ("piped_gate_guard", "PG3", "the LAST pipeline segment is examined too, so a gate NAME "
      "appearing as an argument to the final consumer reads as a discarded gate",
      [("    for i, segment in enumerate(segments[:-1]):",
@@ -431,6 +456,62 @@ ENTRIES = [
     ("./run_selftests", "MODE-2", "the mode detector's can-fail test always says no, so every "
      "--selftest registration reads as adjudicated and no flip is ever reported",
      [("def _can_fail(fn) -> bool:", "def _can_fail(fn) -> bool:\n    return False")], False),
+    # [MODE-3 2026-08-19] The THIRD spelling of the same disarm, and the one MODE-1 and MODE-2
+    # could not see. Both of those fixtures use exactly ("--selftest",), so a detector written
+    # with `!= ("--selftest",)` and one written with `"--selftest" in extra` agree on every case
+    # they exercise. Every gate here dispatches on MEMBERSHIP, so ("--selftest", "") runs the
+    # SELFTEST while an equality-based detector reads the row as enforcing and reports no gap -
+    # one token, suite green, the gate's real measurement invoked by nothing. Found by an
+    # independent review of the enforcing-verify commit, which had reproduced the equality
+    # spelling in mutation_check.enforcing_argv - the twin, written while fixing the original.
+    ("tools/gate_modes", "MODE-3", "the selftest/measurement predicate goes back to exact tuple "
+     "equality, so a ('--selftest', '') registration reads as ENFORCING in both readers while "
+     "the target still runs its selftest",
+     [("    return SELFTEST_FLAG in tuple(extra or ())",
+       "    return tuple(extra or ()) == (SELFTEST_FLAG,)")], False, "./run_selftests"),
+    # [ROSTER-GLOB 2026-08-19] The guard that ties the mutation harness's copy roster to the unit
+    # roster the freshness gate globs. Without it, widening COPY_TREES armed an assertion whose
+    # inputs came from a tree that could never satisfy it, and the failure would have surfaced
+    # 25 minutes into a sweep as five unrelated HARNESS ERRORs.
+    # [SELF-COMPARE / STALE-TAUTOLOGY 2026-08-20] The two HIGHs task #17 found in the
+    # no-regression gate. Both were CHECKS THAT COULD NOT FAIL, and neither was reachable by any
+    # existing assertion: the live gate reports the same "1 settled" whether the staleness rule
+    # is right or wrong, and the same "predecessor saw N, working tree sees N" whether the A/B is
+    # genuine or a self-comparison. MEASURED before the fix: crippling the real detector moved
+    # BOTH sides 102 -> 64 and the gate still exited 0. After: the predecessor holds at 102, the
+    # working tree drops to 64, and the gate FAILS - which is the whole point of the gate.
+    ("tools/no_regression", "NOREG-SELF", "the self-comparison guard reports nothing, so a "
+     "predecessor that executes the working tree's own delegate passes as a yardstick",
+     [("    shared = set(repo_sibling_modules(prev, repo)) & set(repo_sibling_modules(cur, repo))",
+       "    shared = set()")], False),
+    ("tools/no_regression", "NOREG-STALE", "waiver staleness goes back to `gained` alone, so a "
+     "capability BOTH versions detect is filed SETTLED and can never be pruned",
+     [('    if "cur_hits" in res:\n        return set(res["cur_hits"])',
+       '    if False:\n        return set(res["cur_hits"])')], False),
+    # [SET-AGG 2026-08-20] The task #17 HIGH in cap_types' vocabulary. Restoring the two names to
+    # _AGGREGATORS is the exact shipped state, and before this session NOTHING went red on it:
+    # no corpus entry and no selftest case exercised a slice wrapped in set()/frozenset(), so a
+    # guard built to catch truncation-handed-to-the-caller was silent on one spelling of it.
+    ("cap_types", "SET-AGG", "set/frozenset go back to being clause-2 aggregators, so "
+     "`return set(rows[:MAX])` is CLEAN to the guard whose whole job is catching that",
+     [('_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool",\n'
+       '                "next", "int", "float"}',
+       '_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool", "set", "frozenset",\n'
+       '                "next", "int", "float"}')], False),
+    # [NO-NETWORK 2026-08-22] The gate that finally mechanises the README's strongest claim. Two
+    # pins because the guard has two ways to become useless: stop DETECTING, or start flagging
+    # everything (a guard that fires on correct code is one its owner deletes).
+    ("tools/check_no_network", "NONET-BLIND", "the network-module roster empties, so an `import "
+     "socket` in a shipped hook passes the gate that exists to forbid it",
+     [("        elif isinstance(node, ast.ImportFrom):",
+       "        elif False:")], False),
+    ("tools/check_no_network", "NONET-FLOOR", "the population floor is dropped, so a scan that "
+     "collapsed to nothing reports OK over an empty tree",
+     [("    if examined < 20:", "    if False:")], False),
+    ("tools/check_mutation_anchors", "ROSTER-1", "the roster-coverage check stops comparing, so "
+     "a unit glob no scratch tree can supply is never reported",
+     [('        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):',
+       "        if False:")], False),
     # [P14 D2] The no-regression gate is itself a gate, and finding M-M4 records that 4 of 6
     # aux gates were re-run by NO mutation - a check nothing mutation-tests is decorative by
     # default. These two pin the halves that carry the whole design.
@@ -572,7 +653,7 @@ ENTRIES = [
     # anchor check green, so the ship bar would read a STALE row rather than no row.
     ("tools/check_file_size", "SITES-1", "the file-size tier records under another gate's name, "
      "so its own last_run() serves the previous PASS forever",
-     [('gate_ledger.record("file_size", "FAIL" if failing else "PASS"',
+     [('gate_ledger.record("file_size", result, **fields)',
        'gate_ledger.record("not_file_size", "FAIL" if failing else "PASS"')],
      False, "./run_selftests"),
     # [BIJECTION 2026-08-16] reconcile() was one-directional and keyed on a non-unique field, so
@@ -614,4 +695,48 @@ ENTRIES = [
      "the load factor at its cap and silently disables the budget check - SB-2's defect reached "
      "from the constant instead of from the cap",
      [("_CALIB_IO_REF_S = 0.0148", "_CALIB_IO_REF_S = 0.0037")], False),
+
+    # ---------------------------------------------------------------------------------------
+    # [ENFORCING 2026-08-18] The first entries verified through a gate's REGISTERED invocation
+    # rather than its --selftest. Everything above this line reaches only code the selftest
+    # calls, which is why the 2026-08-16 meta-review could list six behaviours as fixed-but-
+    # UNPINNED for one shared reason: nothing in any `main()` was reachable. Two of the six are
+    # FLOORS whose entire purpose is to stop a gate that read NOTHING from printing OK, so they
+    # were the exact shape this repo exists to catch, sitting unpinned inside the pinning tool.
+    #
+    # Read `{"mode": "enforcing"}` as "run it the way it is REGISTERED" - the argv is derived
+    # from AUX_GATES, never written here, so an entry cannot assert a mode the repo does not
+    # actually wire. See verify_spec() and enforcing_argv() in mutation_check.py.
+    ("tools/ship_bar_gate", "SHIPBAR-FLOOR", "the stopping rule passes over an EMPTY population "
+     "- both readers return nothing and the gate reports PASS, which is a gate that read "
+     "nothing, not a repo with nothing blocking it",
+     # THREE edits, and the third is the one that makes this pin mean anything. With only the
+     # two readers silenced the mutation is still CAUGHT - but by SHIPBAR-DECL's guard ("the
+     # heading declares 24 and 0 rows parsed"), not by the floor. MEASURED 2026-08-19: delete
+     # the floor and the gate STILL exits 1, so the entry could not fail and was certifying a
+     # guard it never reached. Silencing declared_count removes the absorbing guard, and only
+     # then does the floor decide the verdict: rc 1 with it, "ship-bar: PASS" over a ZERO-row
+     # population without it. A pin absorbed by a neighbour is decoration wearing a pin's name.
+     [("    return rows", "    return []"),
+      ("    return scope, rows", "    return scope, []"),
+      ("    return int(m.group(1)) if m else None", "    return None")], False,
+     {"mode": "enforcing"}),
+    ("tools/check_file_size", "FS-FLOOR", "the population collapses to zero and the ratchet "
+     "still reports OK - the 'examined almost nothing' floor is what stops it",
+     [('            return [r for r in rels if os.path.isfile(os.path.join(root, r))], "git"',
+       '            return [], "git"')], False, {"mode": "enforcing"}),
+    # The two below are pinned by a MARKER, not by an exit code, and neither could be pinned
+    # any other way. FS-GIT-DERIVE changes WHICH derivation ran and nothing else - same files,
+    # same verdict, rc 0 either way. FS-CANNOTRUN exits 1 with the guard present AND with it
+    # deleted, so an rc-only pin would report CAUGHT for both and prove nothing.
+    ("tools/check_file_size", "FS-GIT-DERIVE", "the population stops asking version control and "
+     "silently falls back to the walk - the fallback that put thousands of vendored files in "
+     "the population whenever a virtualenv was not spelled .venv",
+     [("        if out.returncode == 0 and out.stdout.strip():", "        if False:")], False,
+     {"mode": "enforcing", "marker": "(source: git)"}),
+    ("tools/check_file_size", "FS-CANNOTRUN", "an unreadable baseline stops halting the gate, so "
+     "'I could not look' is reported as a per-file verdict over every recorded offender",
+     [('BASELINE = os.path.join(REPO, "docs", "audits", "file_size_baseline.json")',
+       'BASELINE = os.path.join(REPO, "README.md")')], False,
+     {"mode": "enforcing", "marker": ".py file(s) in population"}),
 ]

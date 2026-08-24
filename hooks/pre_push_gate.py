@@ -50,10 +50,26 @@ import fast_test_on_stop as fast_test  # noqa: E402  (path set above; it owns de
 # shim installed from this repo documented a file it did not run - and a grep for the stale path
 # matched a correctly-installed shim, which is how a 2026-08-05 divergence check reported the
 # opposite of the truth. Pinned by _selftest_shim_self_reference.
+# [#30] BOTH shims embed an ABSOLUTE path to a clone that can be moved, renamed or deleted -
+# and the README explicitly tells you to keep the clone somewhere permanent, which is advice,
+# not a control. When the path went stale the shim ran a missing script, `sh` returned nonzero,
+# and EVERY `git push` on the machine was blocked with no usable diagnosis. Under
+# --install-global that is every repo, forever, including ones that have nothing to do with
+# unbluff. Uninstalling could not fix it either, because install.py never set core.hooksPath.
+#
+# So the shims now fail LOUD BUT OPEN. Not silent: "nothing was verified" that looks like a
+# clean run is the exact failure this project exists to prevent, so it says so on every push
+# until it is fixed. Not blocking: a verification tool has no business bricking `git push` on a
+# machine whose owner may have simply moved a folder.
 SHIM = """#!/bin/sh
 # Universal pre-push gate - managed by {script}
 # Bypass once with: git push --no-verify
-exec "{py}" "{script}" "$@"
+if [ -f "{script}" ]; then
+    exec "{py}" "{script}" "$@"
+fi
+echo "[pre-push] unbluff gate MISSING at {script}" >&2
+echo "[pre-push] NOTHING WAS VERIFIED. Push allowed. Re-install unbluff, or delete $0" >&2
+exit 0
 """
 
 
@@ -131,8 +147,40 @@ def resolve_always(root: str) -> tuple[str | None, int]:
     return cmd, timeout_s
 
 
+def repo_opted_in(root: str) -> bool:
+    """Did someone deliberately install this gate INTO THIS REPO, as opposed to reaching it
+    through the machine-wide `--install-global` dispatcher?
+
+    Derived, not configured: `install()` writes a shim naming pre_push_gate.py into the
+    directory git actually reads hooks from, so the shim's PRESENCE is the opt-in record. No
+    new state file, and nothing for the two paths to drift apart on.
+    """
+    hooks_dir, _ = _hooks_dir_for(root)
+    if not hooks_dir:
+        return False
+    try:
+        with open(os.path.join(hooks_dir, "pre-push"), encoding="utf-8", errors="replace") as fh:
+            return "pre_push_gate.py" in fh.read()
+    except OSError:
+        return False
+
+
 def resolve_command(root: str) -> tuple[str | None, int]:
-    """(command, timeout_s): a push-time override if the project has one, else fast_test_on_stop's own choice."""
+    """(command, timeout_s): a push-time override if the project has one, else - and only where
+    the repo opted in - fast_test_on_stop's own choice.
+
+    [#25] THE TWO PATHS HAVE DIFFERENT TRUST PROPERTIES AND GET DIFFERENT ANSWERS. At turn end,
+    auto-detect is fine: you opened Claude Code in this directory, which implies enough trust to
+    run its tests. Here it is not. `--install-global` points core.hooksPath at ~/.claude/githooks
+    and fires in EVERY repo on the machine - including one merely cloned to read, with Claude Code
+    never opened in it - and a bare root conftest.py is enough for detect() to return a pytest
+    command, because pytest imports conftest.py before collecting anything. Nothing in "this
+    directory exists on my disk" implies consent to execute its code.
+
+    So a repo reached only through the global dispatcher must say what to run, explicitly, in
+    `.claude/pre-push.cmd`. A repo where someone ran `--install` deliberately keeps auto-detect:
+    that install IS the consent.
+    """
     ov = os.path.join(root, ".claude", "pre-push.cmd")
     if os.path.exists(ov):
         # PUSH_OPTIONS, not the turn-end table: a push may legitimately take longer than a
@@ -140,6 +188,8 @@ def resolve_command(root: str) -> tuple[str | None, int]:
         cmd, timeout_s, _ = fast_test._read_override(ov, fast_test.PUSH_OPTIONS)
         if cmd:
             return cmd, timeout_s
+    if not repo_opted_in(root):
+        return None, fast_test.DEFAULT_TIMEOUT_S
     cmd, timeout_s, _ = fast_test.detect(root)
     return cmd, timeout_s
 
@@ -284,6 +334,22 @@ def gate(root: str) -> int:
     cmd, timeout_s = resolve_command(root)
     name = os.path.basename(root.rstrip("/\\")) or root
     if not cmd:
+        # [#25] A THIRD reason, and it must not borrow the other two's words. Here a test
+        # command may well be detectable - the gate is DECLINING to auto-run it, because this
+        # repo was reached through the machine-wide dispatcher and never opted in. Saying "has
+        # no test command" would be false, and would send the reader looking for a missing
+        # suite instead of writing the one file that turns the gate on.
+        if not repo_opted_in(root):
+            sys.stderr.write(
+                f"[pre-push] '{name}' is gated machine-wide but never opted in, so nothing was\n"
+                f"[pre-push] auto-run here. Pushing is ALLOWED; nothing was verified.\n"
+                f"[pre-push] To gate it, pick one - both are explicit by design:\n"
+                f"[pre-push]   echo \"<your test command>\" > .claude/pre-push.cmd\n"
+                f"[pre-push]   python \"{os.path.abspath(__file__)}\" --install \"{root}\"\n"
+                f"[pre-push] Auto-detect is deliberately off for repos reached only through\n"
+                f"[pre-push] --install-global: it fires in every repo on this machine, and a\n"
+                f"[pre-push] bare conftest.py would be enough to execute a stranger's code.\n")
+            return 0
         # [FTB-GATES] The two gates consume the SAME detect(), which declines for two very
         # different reasons - "there is no test gate here" and "this IS a pytest project but
         # pytest is not importable by the interpreter that would run it". The Stop gate said
@@ -567,7 +633,13 @@ GLOBAL_SHIM = """#!/bin/sh
 hook=${{0##*/}}
 hook=${{hook##*\\\\}}
 if [ "$hook" = "pre-push" ]; then
-    "{py}" "{script}" < /dev/null || exit $?
+    if [ -f "{script}" ]; then
+        "{py}" "{script}" < /dev/null || exit $?
+    else
+        echo "[pre-push] unbluff gate MISSING at {script}" >&2
+        echo "[pre-push] NOTHING WAS VERIFIED. Push allowed. Re-install unbluff, or run:" >&2
+        echo "[pre-push]   git config --global --unset core.hooksPath" >&2
+    fi
 fi
 gitdir="$GIT_DIR"
 if [ -z "$gitdir" ] || [ ! -d "$gitdir/hooks" ]; then
@@ -600,7 +672,22 @@ def install_global(remove: bool = False) -> int:
     """Gate EVERY repo, present and future, via git's core.hooksPath."""
     if remove:
         _git_config(["--unset", "core.hooksPath"])
-        print("unset global core.hooksPath (per-repo .git/hooks are in charge again)")
+        # [#30] Also delete the dispatchers. Leaving them behind is how the stale-path failure
+        # comes BACK: re-running --install-global later, or any tool that reads that directory,
+        # finds shims pointing at wherever the clone used to be. Only files this renderer wrote.
+        gone = 0
+        for name in git_client_hook_names():
+            dest = os.path.join(GLOBAL_HOOKS_DIR, name)
+            try:
+                with open(dest, encoding="utf-8", errors="replace") as fh:
+                    ours = "pre_push_gate.py" in fh.read()
+                if ours:
+                    os.remove(dest)
+                    gone += 1
+            except OSError:
+                continue
+        print("unset global core.hooksPath (per-repo .git/hooks are in charge again)\n"
+              "  removed %d dispatcher(s) from %s" % (gone, GLOBAL_HOOKS_DIR))
         return 0
     rc, existing = _git_config(["core.hooksPath"])
     if rc == 0 and existing and os.path.abspath(existing) != os.path.abspath(GLOBAL_HOOKS_DIR):

@@ -54,6 +54,9 @@ It normalises the deliverable to text (docx/pdf need `python-docx`/`pdftotext`/P
 pdfminer if the format is binary - it prints exact guidance if none is available),
 indexes every numeric value in the sources, and prints candidates grouped [A]-[F].
 If extraction fails, produce a text/markdown export of the deliverable and re-run.
+A **scanned pdf** - an image with no text layer - is REFUSED with an OCR instruction rather
+than audited: reading zero characters would report CLEAN, and a clean verdict on a document
+nothing ever read is the one answer this skill must never give.
 
 ### STEP 2 - Adjudicate the mechanical flags (this is the point)
 The script proposes; **you decide**. For each candidate, do not just repeat it:

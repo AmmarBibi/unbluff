@@ -42,10 +42,21 @@ _SCALAR_CALLS = {"read", "hexdigest", "decode", "encode", "strip", "lstrip", "rs
 # bool, a number or a branch. Shortening it hides nothing, because nothing was going to be
 # reported. Found by the live sweep: meta_audit_on_stop scans `splitlines()[:5]` inside
 # any(), and numbers_match_on_write tests `prefix[-24:]` inside an if.
-_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool", "set", "frozenset",
+# [SET-AGG 2026-08-20] `set` and `frozenset` were in this set and did not belong. The clause's
+# own rule is the test: a value consumed by an aggregator "never reaches the user as a list - it
+# becomes a bool, a number or a branch". `len`, `any`, `bool`, `sum` do that. `set(...)` and
+# `frozenset(...)` return a COLLECTION, and the truncated one goes straight on to the caller - so
+# `return set(rows[:MAX_N])` is precisely the defect this guard exists to catch, and listing them
+# here suppressed it. `set` was ALSO in _COLLECTION_CALLS below, i.e. the file classified it both
+# ways at once and the suppressing half won.
+# MEASURED before the fix, against planted fixtures: `list(rows[:MAX])` FLAGGED and a bare slice
+# FLAGGED, while `set(rows[:MAX])` and `frozenset(rows[:MAX])` were SILENT. Zero corpus entries
+# and zero selftest cases exercised the shape, so nothing was red - a shipped false negative in
+# the guard, invisible to every gate. Found by the task #17 sweep of never-examined files.
+_AGGREGATORS = {"any", "all", "sum", "min", "max", "len", "bool",
                 "next", "int", "float"}
-_COLLECTION_CALLS = {"list", "sorted", "set", "dict", "tuple", "split", "splitlines",
-                     "readlines", "items", "keys", "values", "glob"}
+_COLLECTION_CALLS = {"list", "sorted", "set", "frozenset", "dict", "tuple", "split",
+                     "splitlines", "readlines", "items", "keys", "values", "glob"}
 _COLLECTION_ANNOTATIONS = {"list", "List", "tuple", "Tuple", "set", "Set", "dict", "Dict",
                            "Sequence", "Iterable", "MutableSequence"}
 
@@ -494,6 +505,25 @@ def selftest() -> int:
     subs = [n for n in ast.walk(node) if isinstance(n, ast.Subscript)]
     if id(subs[0]) in _aggregated_nodes(node):
         fails.append("a plain returned slice was mistaken for an aggregate")
+
+    # [SET-AGG 2026-08-20] BOTH directions on the collection constructors. `set` and `frozenset`
+    # sat in _AGGREGATORS, so `return set(rows[:MAX])` was silent while the identical
+    # `list(rows[:MAX])` was flagged - a shipped false negative with no corpus and no selftest
+    # coverage, which is why nothing was red. The negative half is asserted too: the fix must not
+    # become "any call suppresses nothing", or the guard starts firing on correct code.
+    for wrapper in ("set", "frozenset"):
+        node, _f = _scope_of("def f(xs):\n    return %s(xs[:12])\n" % wrapper, "f")
+        subs = [n for n in ast.walk(node) if isinstance(n, ast.Subscript)]
+        if id(subs[0]) in _aggregated_nodes(node):
+            fails.append("a slice inside %s() was treated as AGGREGATED. It is not reduced to a "
+                         "scalar - the truncated collection reaches the caller, which is exactly "
+                         "the defect this guard exists to report" % wrapper)
+    for reducer in ("len", "any", "bool", "sum"):
+        node, _f = _scope_of("def f(xs):\n    return %s(xs[:12])\n" % reducer, "f")
+        subs = [n for n in ast.walk(node) if isinstance(n, ast.Subscript)]
+        if id(subs[0]) not in _aggregated_nodes(node):
+            fails.append("a slice consumed by %s() stopped counting as aggregated - clause 2 is "
+                         "off and the guard will fire on code that hides nothing" % reducer)
 
     # the positional floor is a MEASURED boundary; pin both sides of it
     tree = ast.parse("a = [1, 2, 3, 4, 5, 12]")

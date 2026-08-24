@@ -35,7 +35,7 @@ python install.py
 
 > **Keep the clone somewhere permanent.** The installer points `settings.json` at these files *in place* (so `git pull` updates them). If you later move or delete the folder, run `python install.py --uninstall` first.
 
-`python install.py` enables all eighteen pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
+`python install.py` enables all 20 pieces, including `rate_prompt`, which adds an X/10 rating to *every* reply. Not for you? `python install.py --without rate_prompt` (or `--only …`). It's off-switchable any time with `CLAUDE_RATE_PROMPTS=off`.
 
 ## What's inside
 
@@ -102,7 +102,14 @@ Numbers that are derived, rounded beyond tolerance, or definitional are fine to 
 is a mechanical check, not a judge.
 ```
 
-It shares one **PostToolUse dispatcher** (`post_tooluse_dispatcher`) with `plan_defer_guard`, the same one-process design as `stop_dispatcher`: two PostToolUse hooks run in a single spawn per edit rather than two, and the shared fire-ledger records which fired.
+### post_tooluse_dispatcher · PostToolUse
+Runs the after-an-edit hooks in a single process, the same one-process design as `stop_dispatcher`: `numbers_match_on_write` and `plan_defer_guard` share one spawn per edit rather than taking one each, a broken sub-hook cannot take down the others, and the shared fire-ledger records which fired.
+
+### piped_gate_guard · PreToolUse
+Blocks a shell command that destroys a gate's exit status before you can read it. `pytest … | tail` returns **`tail`'s** status, not the suite's, so a failing run reports success - this repo shipped "5419 passed" twice over a suite that said `1 failed`. It catches the `sh` form (piping into `head`/`tail`/`grep`) and the PowerShell form (`Select-Object -First`, which tears the gate down before it finishes). Narrow by measurement, not by taste: it fires on 4 of 15 real commands in one session's history, and it caught its own author four times.
+
+### timing_claim_guard · PostToolUse
+Flags a duration written up as MEASURED with no control marker - "the run took 12s" with nothing saying what else was on the box. Wall-clock read off a loaded machine is not a measurement, and this repo has attributed a 3.9x-load timeout to the code under test. It fires on 18 of 109 duration lines across these docs, which is the shape a guard should have: often enough to matter, rare enough not to be switched off.
 
 ### consistency-audit · skill
 The reasoning half that pairs with `numbers-match`, the way `source-coverage` pairs with `plan_defer_guard`. The hook can mechanically flag "this number appears in no source file"; it cannot decide whether an unmatched number is drift, a legitimate derivation, or a definition - nor can it check figures, cross-references, and whether a *claim* is actually supported and consistent across sections. This skill does. It runs a bundled, format-agnostic extractor (docx/pdf/tex/md) that surfaces six drift classes - numbers with no source match, figures embedded but never referenced, cross-references with no matching caption, claims whose supporting number is absent, unfilled bracketed placeholders (`[TABLE]`/`[TODO]`/...), and tables the prose promises but never renders - then you adjudicate each against the data. You invoke it on purpose - `/consistency-audit`, or on cues like "do the numbers still match the data? / is anything stale or fabricated?".
@@ -125,7 +132,9 @@ Reports any hook wired from more than one directory. A hook registered twice run
 ![duplicate_registration_check reporting a hook wired from two directories](docs/duplicate-registration.png)
 
 ### pre_push_gate · git pre-push
-Never push source your tests have not seen. `fast_test_on_stop` debounces, so a passing run followed by another half hour of edits can end the turn silently and reach the remote unverified - silence and success look identical from outside. This makes them different at the one moment it matters. Installed as a real git hook (`--install-global` points `core.hooksPath` at your hooks dir so every repo is covered), so **git** enforces it, not a model that might forget. It reuses `fast_test_on_stop`'s command detection and state file, so the two gates agree on what has actually been verified.
+Never push source your tests have not seen. `fast_test_on_stop` debounces, so a passing run followed by another half hour of edits can end the turn silently and reach the remote unverified - silence and success look identical from outside. This makes them different at the one moment it matters. Installed as a real git hook (`--install-global` points `core.hooksPath` at your hooks dir so every repo is covered), so **git** enforces it, not a model that might forget. It shares `fast_test_on_stop`'s state file, so the two gates agree on what has actually been verified.
+
+It does **not** share the turn-end auto-detect, and that asymmetry is deliberate - see [SECURITY.md](SECURITY.md). `--install-global` fires in every repo on the disk, including ones you cloned to read, so a repo reached that way must name its command explicitly in `.claude/pre-push.cmd`. A repo where you ran `--install <repo>` keeps auto-detect: that install is the opt-in. When the gate declines for this reason it says so and allows the push - it never blocks on "you did not configure me".
 
 ![pre_push_gate blocking a push because tests fail](docs/pre-push-gate.png)
 
@@ -152,19 +161,19 @@ integration test below on Linux, macOS and Windows:
 ```text
 $ python run_selftests.py
 cap_shapes: OK  cap_types: OK  capped_report: OK  close_skills_guard: OK
-duplicate_registration_check: OK  fast_test_on_stop: OK  hook_health_check: OK
-hook_layers: OK  memory_hygiene_guard: OK  meta_audit_on_stop: OK
-numbers_match_on_write: OK  piped_gate_guard: OK  plan_defer_guard: OK
-post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK  selftest_budget: OK
-show_your_proof: OK  stop_dispatcher: OK  timing_claim_guard: OK  transcript_util: OK
-usage_snip_prompt: OK
+duplicate_registration_check: OK  fast_test_disclosure: OK  fast_test_on_stop: OK
+hook_health_check: OK  hook_layers: OK  memory_hygiene_guard: OK
+meta_audit_on_stop: OK  numbers_match_on_write: OK  piped_gate_guard: OK
+plan_defer_guard: OK  post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK
+selftest_budget: OK  show_your_proof: OK  stop_dispatcher: OK  timing_claim_guard: OK
+transcript_util: OK  usage_snip_prompt: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  install-guard: OK
-file-size: OK  ship-bar: OK  gate-ledger: OK  false-alarm-scorer: OK
+file-size: OK  ship-bar: OK  gate-ledger: OK  false-alarm-scorer: OK  no-network: OK
 python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK  hook-provenance: OK  hook-provenance-selftest: OK
-mutation-anchors: OK  corpus-scorer: OK
--- gate modes: 16 row(s) examined, 5 adjudicated as selftest-is-the-gate
-all 38 selftests passed
+git-isolation: OK  mutation-anchors: OK  corpus-scorer: OK
+-- gate modes: 18 row(s) examined, 5 adjudicated as selftest-is-the-gate
+all 41 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0
@@ -175,7 +184,7 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
 [PASS] A7 consistency-audit skill installed with bundled scripts
 [PASS] H3 hook/skill SOURCE_EXTS parity   [PASS] G2 all unbluff entries removed
-==== 30/30 scenarios passed ====
+==== 34/34 scenarios passed ====
 ```
 
 ## Install details
@@ -200,7 +209,15 @@ Remove everything and restore your `settings.json`:
 python install.py --uninstall
 ```
 
-It wires **4 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse) that drive the eighteen pieces.
+**If you also ran `--install-global`, that is a separate thing and `install.py` never set it.** It lives in git's own `core.hooksPath`, not in `settings.json`, so undo it separately:
+
+```bash
+python hooks/pre_push_gate.py --install-global --remove
+```
+
+Forgetting is no longer dangerous. The shims fail **loud but open**: if the clone has moved or gone, every push prints `NOTHING WAS VERIFIED` on stderr and is *allowed*. It used to run a missing script and block every `git push` on the machine - in every repo, with no usable diagnosis. A verification tool has no business bricking `git push` because you moved a folder; it also has no business going quiet about it.
+
+It wires **5 `settings.json` entries** (UserPromptSubmit / SessionStart / Stop / PostToolUse / PreToolUse) that drive the shipped hooks.
 
 **Plays well with your existing hooks.** The installer only ever manages its own `unbluff:*` id-prefixed entries: it *appends* to your event arrays (never overwrites), leaves unselected events untouched, backs up `settings.json` first, and writes atomically. Uninstall removes only its own entries. Your other hooks are never read, judged, or modified.
 
@@ -258,7 +275,11 @@ Every hook in this suite:
 - **Is mechanical.** Regex, counting, and file-existence checks only - no LLM calls, no network, no telemetry.
 - **Is stdlib-only.** No dependencies. Python 3.8+.
 - **Fires at most once per session** (where relevant) and is conservative - it would rather stay silent than nag.
-- **Self-tests.** Run `python hooks/<name>.py --selftest`; fixtures never touch real state.
+- **Self-tests.** Run `python run_selftests.py`, which isolates every fixture from your
+  repository and verifies afterwards that none of them touched it. A single hook's
+  `python hooks/<name>.py --selftest` also works and is safe from an ordinary shell, but it
+  bypasses that isolation - so do not run one from inside a git hook, where `GIT_DIR` redirects
+  a fixture's `git -C <tmpdir>` onto the real repository.
 
 ```bash
 # verify the whole suite (this is exactly what CI runs)

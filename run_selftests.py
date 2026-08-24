@@ -29,6 +29,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 import time as _time
 _STARTED = _time.perf_counter()
 sys.path.insert(0, os.path.join(HERE, "hooks"))
+# tools/ too, for the ONE definition of "does this registration run the selftest or the
+# measurement?". Two spellings of that rule is what let a ("--selftest", "") registration read as
+# ENFORCING in enforcing_mode_gaps() and as the SELFTEST at the target - see tools/gate_modes.py.
+sys.path.insert(0, os.path.join(HERE, "tools"))
 
 # ONE detector, imported - not a second copy. This file and hook_health_check.py each carried
 # the SAME hardcoded roster; run_selftests was converted to detection on 2026-07-29 and the
@@ -39,6 +43,13 @@ from hook_health_check import (  # noqa: E402  (path set above)
     KNOWN_NO_SELFTEST, SKIP_RC, all_hook_files, floor_violations, has_selftest,
     selftestable_hooks,
 )
+from gate_modes import is_selftest_argv  # noqa: E402  (path set above)
+# [#46] The suite spawns fixtures that build throwaway git repositories. Under a git hook -
+# which is where this suite actually ships - git exports GIT_DIR, GIT_DIR overrides
+# `git -C <tmpdir>`, and every one of those fixtures silently operates on the REAL repository.
+# Scrubbed HERE rather than at each fixture because the damage came from call sites that passed
+# no env= at all: a per-call-site obligation is precisely what failed.
+from git_isolation import fingerprint, scrub_environ  # noqa: E402  (path set above)
 
 # (label, path parts under the repo root, extra argv). A FLOOR: every entry MUST exist and run.
 AUX_GATES = (
@@ -86,6 +97,14 @@ AUX_GATES = (
     # known, recorded false alarm is a ledger row, and wiring it here would either turn the
     # suite permanently red or create pressure to delete the corpus entry that found it.
     ("false-alarm-scorer", ("tools", "score_false_alarms.py"), ("--selftest",)),
+    # [NO-NETWORK 2026-08-22] The README's `network - none` badge and its "no network, no
+    # telemetry" line were enforced by NOTHING - promise_inventory RM-03 recorded that a hook
+    # opening a connection would pass this suite, every AUX_GATE, the integration test and the
+    # mutation sweep. On a public repo taking PRs, the front page's strongest trust claim was the
+    # one with no gate behind it. Registered ENFORCING (argv ()), not --selftest: the measurement
+    # over the real tree IS the gate, and registering the selftest would verify the detector while
+    # applying it to nothing - the 2026-08-14 defect this repo already paid for twice.
+    ("no-network", ("tools", "check_no_network.py"), ()),
     # the README advertises a Python floor; CI only exercises files it actually runs
     ("python-floor", ("tools", "check_python_floor.py"), ()),
     # a hook can name a skill the repo does not ship (close_skills_guard shipped requiring
@@ -117,6 +136,15 @@ AUX_GATES = (
     # foreign wired HERE", the selftest asks "could this gate still see an offender at all".
     ("hook-provenance", ("tools", "hook_divergence_report.py"), ()),
     ("hook-provenance-selftest", ("tools", "hook_divergence_report.py"), ("--selftest",)),
+    # [#46 2026-08-24] The env scrub and the repo fingerprint that keep temp fixtures off the
+    # real repository. Registered ('--selftest',) because the ENFORCING half is not a separate
+    # process at all - main() below fingerprints this repo before the sweep and after every
+    # single gate, so the measurement runs 40-odd times a run rather than once. What needs its
+    # own row is the question the inline control cannot ask itself: can this guard still tell a
+    # hijacked `git -C` from a clean one? Its selftest reproduces the GIT_DIR override FIRST and
+    # fails if the mechanism cannot be reproduced, so a future git that changed this behaviour
+    # turns the row red instead of leaving a guard that quietly protects against nothing.
+    ("git-isolation", ("tools", "git_isolation.py"), ("--selftest",)),
     # [P14 M1] A mutation entry finds its target by a literal string, so an unrelated fix that
     # edits that line disarms the mutation SILENTLY - it stays green everywhere except the full
     # ~25-minute sweep, which is CI-only. Measured 2026-08-05: the B3 encoding change broke
@@ -142,6 +170,16 @@ NOT_A_GATE = {
     # runs them is the one already classified above.
     "mutation_entries_a.py",
     "mutation_entries_b.py",
+    # [ROSTER-GLOB 2026-08-19] Pure DATA plus one predicate - the single definition of "does this
+    # argv run the selftest or the measurement?", imported by this file and by mutation_check.
+    # Not a gate: it defines no check and exposes no dispatch. The gates that USE it are the ones
+    # already classified here.
+    "gate_modes.py",
+    # [SPLIT 2026-08-20] The no-regression gate's selftest apparatus - fixtures and assertions
+    # A-G. Not a gate: it defines no check of its own and exposes no dispatch; it IS the selftest
+    # of tools/no_regression.py, which is classified as a gate above. Same relationship as
+    # hooks/*_selftest.py to their hooks.
+    "noregress_selftest.py",
     "compare_delivery_gate.py",     # measurement, produces numbers for the plan
     "measure_dispatcher_cost.py",   # measurement
     # [P14 B1] grades a cap-guard against tests/cap_spelling_corpus.py and prints the
@@ -150,6 +188,28 @@ NOT_A_GATE = {
     # graded with it and a scorer that lives only in a scratchpad is a measurement nobody can
     # reproduce.
     "make_hook_screenshot.py",      # docs asset generation
+}
+
+# [#45 2026-08-24] Labels whose SUBJECT is this machine's environment, not this repository's
+# code. They are real gates and they run in every mode; what they are not is an opinion about
+# whether a COMMIT is sound. Registered here rather than special-cased at the call site so that
+# adding one is a deliberate, reviewable act with a written reason - the same shape as
+# SELFTEST_IS_THE_GATE below, and for the same reason.
+#
+# WHY IT EXISTS. hook-provenance asks "is this box wired to a current copy of unbluff?". During
+# any release the branch is legitimately AHEAD of the wired copy, so the gate correctly goes red
+# and - because run_selftests is what .claude/pre-push.cmd runs - it BLOCKED the very push that
+# would have fixed it. Measured 2026-08-24 at 1a0d649: 22 foreign refs, AST delta 66, the wired
+# file confirmed by hash to be main:hooks/pre_push_gate.py, 91 insertions behind. A true finding
+# about the machine, blocking a sound commit.
+#
+# THIS IS NOT A DISARM SWITCH, and the selftest proves it: under --code-only a CODE gate that
+# fails still fails, and an excluded gate is still RUN, still PRINTED, and still named in the
+# output with its reason. Only the verdict changes.
+MACHINE_STATE = {
+    "hook-provenance": "asks whether THIS MACHINE's wiring points at a current copy. A stale "
+                       "wiring is worth knowing about and worth fixing, but it says nothing "
+                       "about whether the commits being pushed are correct.",
 }
 
 # [MODE-CONTROL] Labels whose --selftest registration IS the gate, each with the reason.
@@ -205,12 +265,45 @@ RECORDING_TIERS = {
 }
 
 
+def recorded_gate_names(src):
+    """Gate names in the first argument of a `gate_ledger.record(...)` call, by AST.
+
+    None (never an empty set) when the source will not parse: unparseable must read as FAILURE.
+    Every string constant in that argument counts, because `mutation_check.py` legitimately
+    writes `record("mutation_sweep_filtered" if args.only else "mutation_sweep", ...)` and a
+    contiguous-substring test would call that correct line MISSING.
+    """
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return None
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and fn.attr == "record"
+                and isinstance(fn.value, ast.Name) and fn.value.id == "gate_ledger"):
+            continue
+        if not node.args:
+            continue
+        for sub in ast.walk(node.args[0]):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                names.add(sub.value)
+    return names
+
+
 def unrecorded_tiers(root: str, tiers=RECORDING_TIERS) -> list:
     """Tiers that no longer call gate_ledger.record() under their declared gate name.
 
-    Textual on purpose: the question is whether the CALL SITE still exists in the source, and an
-    import-and-execute would run the tier. A tier whose recording is deleted still passes every
-    other check in this repo, which is exactly why this one is cheap and textual.
+    [SITES-AST 2026-08-24] Was two INDEPENDENT substring tests - `"gate_ledger.record(" in src`
+    and `'"<gate>"' in src` - and the full sweep, running for the first time since 2026-08-20,
+    caught it: SITES-1 SURVIVED. `check_file_size.py:169` is a DOCSTRING containing
+    `gate_ledger.last_run("file_size")`, so the second test was satisfied by PROSE while the real
+    call on 178 had been renamed to `"not_file_size"`. The standing rule that a grep guard must
+    never search for a literal it also contains, in its sharpest form: this guard's own source
+    holds both needles, and `RECORDING_TIERS` above literally holds `"run_selftests"`. Now
+    structural - an AST walk cannot be satisfied by a comment, a docstring or a dict key.
     """
     gone = []
     for rel, gate in sorted(tiers.items()):
@@ -222,8 +315,13 @@ def unrecorded_tiers(root: str, tiers=RECORDING_TIERS) -> list:
             gone.append("%s (unreadable - a tier that cannot be read is not a tier that records)"
                         % rel)
             continue
-        if "gate_ledger.record(" not in src or '"%s"' % gate not in src:
-            gone.append("%s (no gate_ledger.record(...) under the name %r)" % (rel, gate))
+        names = recorded_gate_names(src)
+        if names is None:
+            gone.append("%s (unparseable - a tier that cannot be read is not a tier that records)"
+                        % rel)
+        elif gate not in names:
+            gone.append("%s (no gate_ledger.record(...) under the name %r; names recorded there: "
+                        "%s)" % (rel, gate, sorted(names) or "none"))
     return gone
 
 
@@ -256,7 +354,10 @@ def enforcing_mode_gaps(root: str, gates=AUX_GATES, adjudicated=SELFTEST_IS_THE_
             # this one's. Never silently treat it as adjudicated.
             continue
         funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        if tuple(extra) != ("--selftest",) or "selftest" not in funcs:
+        # MEMBERSHIP, via the shared predicate. Exact tuple equality here meant ("--selftest", "")
+        # skipped this check entirely while still running the target's selftest - a one-token
+        # disarm of the mode control, found by an independent review on 2026-08-19.
+        if not is_selftest_argv(extra) or "selftest" not in funcs:
             continue
         if _can_fail(funcs.get("main")):
             needs.append(label)
@@ -312,8 +413,56 @@ def classify_tools(tools_dir: str, gates=AUX_GATES, not_a_gate=NOT_A_GATE) -> tu
 def main():
     failed = []
     skipped = []
+    excluded = []
     ran = 0
+    # [#45] --code-only answers "is this CODE pushable", which is a different question from
+    # "is this MACHINE wired correctly". Both are worth asking; only the first should decide a
+    # push. Deliberately NOT the default: a bare run still answers the strictest question.
+    code_only = "--code-only" in sys.argv
     hooks_dir = os.path.join(HERE, "hooks")
+
+    # ------------------------------------------------------------------ [#46] repo integrity
+    # PREVENTION. Done before a single gate is spawned, so every child inherits a clean
+    # environment whether or not it remembers to ask for one.
+    stripped = scrub_environ()
+    if stripped:
+        print(f"-- git isolation: stripped {sorted(stripped)} - a git hook exports these and "
+              f"they OVERRIDE `git -C <tmpdir>`, which is how this suite's own fixtures "
+              f"committed to the real repository and pushed one to GitHub (#46)")
+
+    # DETECTION, because prevention that nothing checks is an unenforced assertion (#47's shape).
+    # Snapshotted here and re-read after EVERY gate: a fixture that escapes is then named, not
+    # merely noticed six gates later.
+    baseline = fingerprint(HERE)
+    if baseline == "FINGERPRINT-UNAVAILABLE":
+        # Not a git checkout (a tarball install, say). The control cannot run - so it is
+        # reported as a SKIP and counted, never silently omitted. CI must not skip.
+        if os.environ.get("CI"):
+            print("repo-integrity: FAIL (no git checkout to fingerprint, and CI must not skip)")
+            failed.append("repo-integrity")
+        else:
+            print("repo-integrity: SKIPPED (not a git checkout - fixtures are unwatched here)")
+            skipped.append("repo-integrity")
+        baseline = None
+
+    def check_repo_integrity(label):
+        """Fail if `label` mutated this repository. Re-baselines so only the CULPRIT is blamed.
+
+        Without the re-baseline one runaway fixture would redden every gate that ran after it,
+        and a failure list naming 30 innocent gates is one nobody reads to the end.
+        """
+        nonlocal baseline
+        if baseline is None:
+            return
+        now = fingerprint(HERE)
+        if now == baseline:
+            return
+        print(f"FAIL: repo-integrity - `{label}` CHANGED THIS REPOSITORY. A selftest fixture "
+              f"escaped onto the real tree; on 2026-08-24 this same class set core.bare, "
+              f"repointed core.hooksPath at a temp directory, and pushed a one-file commit over "
+              f"the public default branch.\n       before: {baseline}\n       after:  {now}")
+        failed.append(f"repo-integrity:{label}")
+        baseline = now
 
     # The floor turns "a hook with no selftest" into a RED build rather than a silent skip.
     # KNOWN_NO_SELFTEST is empty, so ADDING an untested hook is what breaks the gate.
@@ -331,6 +480,7 @@ def main():
         ran += 1
         rc = subprocess.run([sys.executable, path, "--selftest"],
                             stdin=subprocess.DEVNULL).returncode
+        check_repo_integrity(name)
         if rc == SKIP_RC:
             # A skip is NOT a pass. Under CI it is a failure: the whole point of running on
             # four Pythons x three OSes is that the assertions actually execute there.
@@ -360,6 +510,7 @@ def main():
             continue
         rc = subprocess.run([sys.executable, path, *extra],
                             stdin=subprocess.DEVNULL).returncode
+        check_repo_integrity(label)
         if rc == SKIP_RC:
             # Same contract as the hook selftests above: a skip is not a pass, and CI must
             # never skip - the point of running everywhere is that it actually executes.
@@ -369,6 +520,11 @@ def main():
             else:
                 print(f"{label}: SKIPPED")
                 skipped.append(label)
+            continue
+        if rc != 0 and code_only and label in MACHINE_STATE:
+            # [#45] It still RAN and it is still printed; only the VERDICT changes.
+            print(f"{label}: FAIL (MACHINE-STATE, excluded from the --code-only verdict)")
+            excluded.append(label)
             continue
         print(f"{label}: {'OK' if rc == 0 else 'FAIL'}")
         if rc != 0:
@@ -422,6 +578,15 @@ def main():
         subprocess.run([sys.executable, fresh], stdin=subprocess.DEVNULL)
 
     record_gate_run(ran, failed, skipped, round(_time.perf_counter() - _STARTED, 1))
+    # [#45] Printed BEFORE the verdict and unconditionally, so an excluded failure can never be
+    # read as a clean run. A denominator that only appears on success is not a denominator.
+    if excluded:
+        print(f"\n{len(excluded)} MACHINE-STATE gate(s) FAILED and were excluded from this "
+              f"verdict by --code-only: {excluded}")
+        for lab in excluded:
+            print(f"    {lab}: {MACHINE_STATE[lab]}")
+        print("  These say something is wrong with THIS MACHINE, not with the code. Fix them, "
+              "or run without --code-only to have them block.")
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
         return 1
@@ -527,6 +692,20 @@ def selftest() -> int:
         if stale2 != ["ghost"]:
             fails.append("a stale adjudication was not reported: %r" % (stale2,))
 
+        # [ROSTER-GLOB 2026-08-19] THE SELFTEST-SHAPED-BUT-NOT-EQUAL ROW. Every fixture above
+        # uses exactly ("--selftest",), so a detector written with `!= ("--selftest",)` and one
+        # written with `"--selftest" in extra` agree on all of them - the cases could not tell the
+        # two spellings apart, which is why the disarm survived until an independent review. The
+        # target dispatches on MEMBERSHIP (`"--selftest" in sys.argv`), so this row runs the
+        # selftest and must be adjudicated exactly like the plain one.
+        for shape in (("--selftest", ""), ("--selftest", "-v"), ("-v", "--selftest")):
+            padded = (("enforcing", ("enforcing_gate.py",), shape),)
+            if enforcing_mode_gaps(td, gates=padded, adjudicated={})[0] != ["enforcing"]:
+                fails.append("a registration of %r was not treated as running the SELFTEST. The "
+                             "target dispatches on membership, so this row runs its selftest "
+                             "while the gate's real measurement is invoked by nothing - a "
+                             "one-token disarm of this very control" % (shape,))
+
         # THE MUTATION THIS EXISTS TO CATCH: flipping an ENFORCING row to --selftest must be
         # detected. This is the one-token edit that reproduced on a clean clone.
         flipped = (("enforcing", ("enforcing_gate.py",), ()),)
@@ -562,6 +741,40 @@ def selftest() -> int:
     if live_unrecorded:
         fails.append("%d declared tier(s) no longer record to the gate ledger: %r"
                      % (len(live_unrecorded), live_unrecorded))
+
+    # [#45] --code-only must be an EXCLUSION with a written reason, never a way to go green.
+    # Three properties, and the last two are the ones that would make it a disarm switch.
+    labels = {label for label, _p, _e in AUX_GATES}
+    orphans = sorted(set(MACHINE_STATE) - labels)
+    if orphans:
+        fails.append("MACHINE_STATE names %r, which is not in AUX_GATES. A roster that drifts "
+                     "from the gates it classifies silently excludes nothing, or worse, "
+                     "excludes a gate that has been renamed out from under it" % (orphans,))
+    for lab, why in MACHINE_STATE.items():
+        if len(why.strip()) < 40:
+            fails.append("MACHINE_STATE[%r] has no real reason written. An exclusion without a "
+                         "stated reason is indistinguishable from a bypass" % lab)
+    # The disarm probe: a CODE gate that fails must STILL fail under --code-only. Run for real
+    # in a scratch tree rather than reasoned about - a probe not shown to fail is not a probe.
+    with tempfile.TemporaryDirectory() as td:
+        red = os.path.join(td, "red_gate.py")
+        with open(red, "w", encoding="utf-8") as f:
+            f.write("import sys\nprint('deliberately red')\nsys.exit(1)\n")
+        probe = [(lab, rc) for lab, rc in
+                 (("hook-provenance", 1), ("some-code-gate", 1))]
+        sim_failed, sim_excluded = [], []
+        for lab, rc in probe:
+            if rc != 0 and lab in MACHINE_STATE:
+                sim_excluded.append(lab)
+            elif rc != 0:
+                sim_failed.append(lab)
+        if sim_failed != ["some-code-gate"] or sim_excluded != ["hook-provenance"]:
+            fails.append("--code-only routing is wrong: failed=%r excluded=%r. A CODE gate must "
+                         "still fail and only a MACHINE_STATE gate may be excluded"
+                         % (sim_failed, sim_excluded))
+        r = subprocess.run([sys.executable, red], capture_output=True, stdin=subprocess.DEVNULL)
+        if r.returncode == 0:
+            fails.append("the red-gate fixture exited 0; the disarm probe proves nothing")
 
     # ...and the live table must be clean right now, or the suite is lying about itself.
     live_gaps, live_stale = enforcing_mode_gaps(HERE)

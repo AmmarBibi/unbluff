@@ -209,9 +209,60 @@ def provenance(settings_paths=None, hook_dirs=None, hooks_dir=None) -> dict:
                 continue
             if os.path.dirname(norm(t)) == repo_hooks:
                 result["matched"].append(entry)
+            elif _same_repo_same_bytes(t, repo_hooks, base):
+                # [#39] A LINKED WORKTREE IS NOT A FOREIGN COPY. Path equality alone called it
+                # one: settings.json wires the main checkout, so running from a worktree flagged
+                # all 29 references with `AST delta 0` and IDENTICAL shas, and the gate fired on
+                # correct work - hard enough to BLOCK the v1.4.0 push, which is how a guard ends
+                # up switched off. Two conditions, both required: git says the same repository
+                # (same common dir, so a genuinely separate clone still fails), AND the bytes
+                # match (so a STALE worktree - the drift this gate exists for - still fails).
+                entry["note"] = "same repository via a linked worktree, byte-identical"
+                result["matched"].append(entry)
             else:
                 result["foreign"].append(entry)
     return result
+
+
+def _git_common_dir(path: str):
+    """The repository a path belongs to, or None. Linked worktrees share this with their main
+    checkout, which is exactly the fact a path comparison cannot see."""
+    d = path if os.path.isdir(path) else os.path.dirname(path)
+    if not os.path.isdir(d):
+        return None
+    try:
+        r = subprocess.run(["git", "-C", d, "rev-parse", "--git-common-dir"],
+                           capture_output=True, timeout=15, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    # Decoded explicitly: subprocess text=True is cp1252 here and mangles non-ASCII paths.
+    out = r.stdout.decode("utf-8", "surrogateescape").strip()
+    if not out:
+        return None
+    return norm(out if os.path.isabs(out) else os.path.join(d, out))
+
+
+def _same_repo_same_bytes(wired: str, repo_hooks: str, base: str) -> bool:
+    """True only if `wired` is our OWN file reached through another worktree of this repository.
+
+    Fails closed: an unreadable side, a git failure, or any byte difference -> False, i.e. the
+    reference stays FOREIGN. The dangerous direction is a false negative - a genuinely stale copy
+    waved through - so every uncertainty resolves toward flagging.
+    """
+    mine = os.path.join(repo_hooks, base)
+    if not (os.path.isfile(wired) and os.path.isfile(mine)):
+        return False
+    ours = _git_common_dir(repo_hooks)
+    theirs = _git_common_dir(wired)
+    if not ours or not theirs or ours != theirs:
+        return False
+    try:
+        with open(wired, "rb") as a, open(mine, "rb") as b:
+            return a.read() == b.read()
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------- diffing a find

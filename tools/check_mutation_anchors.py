@@ -39,10 +39,39 @@ import tempfile
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
-from mutation_check import MUTATIONS, anchor_audit  # noqa: E402  (path set above)
+from mutation_check import COPY_FILES, COPY_TREES, MUTATIONS, anchor_audit  # noqa: E402
+from check_review_freshness import UNIT_GLOBS  # noqa: E402  (path set above)
 
 
-def verdict(problems, anchors, units, multi, entries) -> tuple:
+def roster_gaps(globs=UNIT_GLOBS, trees=COPY_TREES, files=COPY_FILES) -> list:
+    """Unit globs that the mutation harness's copy roster cannot supply. DERIVED, not declared.
+
+    [ROSTER-GLOB 2026-08-19] Two rosters answer "which files are ours": UNIT_GLOBS, which decides
+    what check_review_freshness asks about, and COPY_TREES/COPY_FILES, which decides what lands in
+    a scratch tree. Nothing tied them together, and an independent review found the consequence:
+    once `docs/audits` put the review ledger into every scratch tree, that gate's ORPHAN check -
+    "reviews are recorded for units the gate never asks about" - went live inside a tree whose
+    unit roster was a strict SUBSET of the real one. Recording a review for `scripts/make_demos.py`
+    (the gate's own prescribed action, and precisely what the task #17 sweep will do) would then
+    turn five unrelated pins into HARNESS ERROR, twenty-five minutes into a sweep.
+
+    Pure and fully parameterised so the selftest can hand it a roster with a KNOWN hole - a check
+    that could only ever inspect the live constants would pass on a healthy repo no matter what
+    this function did, which is how every mutation of such a guard survives.
+    """
+    gaps = []
+    for pattern in globs:
+        if "/" not in pattern:
+            if pattern not in files:            # a repo-root file, e.g. install.py
+                gaps.append("%s is a UNIT_GLOB but is in no COPY_FILES entry" % pattern)
+            continue
+        if not any(pattern.startswith(tree.rstrip("/") + "/") for tree in trees):
+            gaps.append("%s is a UNIT_GLOB but no COPY_TREES entry supplies its directory"
+                        % pattern)
+    return gaps
+
+
+def verdict(problems, anchors, units, multi, entries, gaps=()) -> tuple:
     """(exit_code, message) for one audit result. PURE, so the selftest can exercise EVERY branch.
 
     [P14 meta-review 2026-08-06] This decision used to be inline in `main()`, which left the
@@ -60,6 +89,14 @@ def verdict(problems, anchors, units, multi, entries) -> tuple:
     if not entries or anchors <= 0:
         return 1, ("mutation-anchors: FAIL - %d mutation entr(ies) and %d anchor(s) to check. A "
                    "zero denominator makes this gate pass against any repo." % (entries, anchors))
+
+    # The ROSTER gap is checked before the anchors: an anchor that matches proves nothing about a
+    # scratch tree that cannot contain the file. See roster_gaps().
+    if gaps:
+        return 1, ("mutation-anchors: FAIL - the mutation harness's copy roster cannot supply %d "
+                   "unit glob(s) the review-freshness gate asks about, so every scratch tree has "
+                   "a unit roster narrower than the repo's:%s"
+                   % (len(gaps), "".join("\n  " + g for g in gaps)))
 
     note = ""
     if multi:
@@ -82,7 +119,7 @@ def verdict(problems, anchors, units, multi, entries) -> tuple:
 
 def main() -> int:
     problems, anchors, units, multi = anchor_audit(REPO)
-    rc, msg = verdict(problems, anchors, units, multi, len(MUTATIONS))
+    rc, msg = verdict(problems, anchors, units, multi, len(MUTATIONS), roster_gaps())
     print(msg)
     return rc
 
@@ -92,6 +129,27 @@ def selftest() -> int:
     matter what the detector did - which is exactly why every mutation of such a guard survives.
     Each case below is built so that a detector which has stopped detecting FAILS."""
     fails = []
+
+    # [ROSTER-GLOB] Both directions, on PLANTED rosters. Asserting only against the live
+    # constants would make this pass on a healthy repo whatever roster_gaps() did.
+    if roster_gaps(globs=("hooks/*.py", "install.py"), trees=("hooks",), files=("install.py",)):
+        fails.append("roster_gaps() reported a gap on a roster that covers every glob - a guard "
+                     "that fires on a correct roster is one its owner deletes")
+    holed = roster_gaps(globs=("hooks/*.py", "scripts/*.py"), trees=("hooks",), files=())
+    if len(holed) != 1 or "scripts/*.py" not in holed[0]:
+        fails.append("roster_gaps() missed an uncopied unit directory: %r. That is the live "
+                     "defect - scripts/ was globbed by the freshness gate and copied by nothing, "
+                     "so recording a review for it turned five pins into HARNESS ERROR" % (holed,))
+    if not roster_gaps(globs=("install.py",), trees=("hooks",), files=()):
+        fails.append("roster_gaps() missed a repo-ROOT unit file absent from COPY_FILES")
+    # the live rosters must actually agree - the check above proves the detector works, this
+    # proves the repo is currently clean
+    live = roster_gaps()
+    if live:
+        fails.append("the live rosters disagree: %r" % (live,))
+    # and the gate's DECISION must carry it, not just compute it
+    if verdict([], 1, ["u"], [], 1, ["planted gap"])[0] != 1:
+        fails.append("verdict() ignored a roster gap - the check would be computed and discarded")
 
     with tempfile.TemporaryDirectory() as td:
         hooks = os.path.join(td, "hooks")

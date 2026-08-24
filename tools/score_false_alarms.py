@@ -51,6 +51,24 @@ import duplicate_registration_check as dup     # noqa: E402
 import false_alarm_corpus as corpus            # noqa: E402
 import install                                 # noqa: E402
 
+# [C7 2026-08-20] MODULE SCOPE, with tools/ named explicitly - not `import gate_ledger` inside
+# main(). Two defects came out of that in-function import. (a) It resolved only because running
+# `python tools/score_false_alarms.py` happens to put tools/ at sys.path[0]; under `python -m` or
+# any in-process import from another cwd it raises, the blanket `except` swallows it, and the
+# tier silently stops recording - the exact shape already fixed in check_file_size.py and listed
+# by the 2026-08-16 meta-review as an instance still owed a general mechanism. (b) The import
+# statement made `gate_ledger` a LOCAL name for the whole function, so a second reference to it
+# on an earlier exit path raised UnboundLocalError - which is precisely what happened when the
+# HARNESS ERROR path below was given its own record() call, and it turned a clean `return 1` into
+# a traceback. Caught by inducing the failure rather than by reading the diff.
+sys.path.insert(0, os.path.join(REPO, "tools"))
+try:
+    import gate_ledger                         # noqa: E402
+except ImportError as _e:                      # narrow: the import, never the recording
+    gate_ledger = None
+    print("[false-alarm-scorer] NOTE: gate_ledger unavailable (%s) - this run will not be "
+          "recorded" % _e)
+
 # rate_prompt is EXCLUDED, and loudly. It is not a guard: it injects a standing instruction on
 # every prompt by design, so "it emitted output on correct work" is its success condition, not
 # a false alarm. Scoring it would put a 100% rate in a table where every other row means the
@@ -346,6 +364,13 @@ def main() -> int:
     if dead:
         print("\nHARNESS ERROR: control(s) for %r never fired - the payload shape is wrong or "
               "the hook is unreachable, and every quiet result above is an artefact" % dead)
+        # RECORD THIS PATH TOO. It returned without writing a row, so last_run() kept serving the
+        # previous PASS for the run that PROVED the instrument was broken - and this is the tier
+        # that sat 45.2h stale on 2026-08-13 while every gate was green. The stale row was the
+        # only visible symptom then; without a row on this path there is not even that.
+        # Same class as the ship_bar and check_file_size fixes; found by the task #17 sweep.
+        if gate_ledger is not None:
+            gate_ledger.record("false_alarm_scorer", "HARNESS_ERROR", dead_controls=len(dead))
         return 1
     # The three buckets are computed as SETS and asserted to partition the roster. They were
     # briefly subtracted as counts, and because an uncovered hook lands in BOTH `unmeasured`
@@ -380,7 +405,6 @@ def main() -> int:
     # Criterion 3's numbers are a PUBLISHED claim, so when they were last measured has to be
     # answerable from the record rather than from a commit message.
     try:
-        import gate_ledger
         gate_ledger.record("false_alarm_scorer", "FAIL" if blocks(nagging) else "PASS",
                            measured=len(measured), unmeasured=len(unproven),
                            no_corpus_entry=len(no_entry), false_alarms=len(alarms),

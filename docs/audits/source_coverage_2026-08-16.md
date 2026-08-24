@@ -7,6 +7,21 @@ they were found is the instance-fix this project forbids.
 
 **DENOMINATOR: 55 tracked `.py` files. 4 reviewed. 51 never examined by any reviewer.**
 
+> **ERRATUM, added 2026-08-19T15:56:21Z.** The second half of that sentence is wrong, and wrong
+> in the direction that flatters the finding. `4 reviewed` is scoped to ONE review run
+> (`wf_f63b9ccf-816`); `never examined by any reviewer` is scoped to ALL of them, and the two
+> populations were subtracted from the same 55 as though they were the same question.
+> `docs/audits/review_runs.json` records 68 review runs, and `tools/check_review_freshness.py`
+> derives the real split: **32 UNREVIEWED** (never examined by any run), 18 STALE (examined by an
+> earlier run, changed since), 3 UNRESOLVED (examined, findings still open), 2 fresh - 32+18+3+2
+> = 55. So 21 of the "51" HAD been examined, and the honest statements are "51 files lack a review
+> newer than their last change" and "32 files have never been examined at all".
+> This matters for task #17's scope: the cheap high-yield target of tooling-discipline 7.1 is the
+> **32**, because the other 21 already carry a reviewer's attention and have a different expected
+> yield. The number is left uncorrected above because a dated audit is a record of what was found;
+> the correction lives here, and the forward-looking plan now cites the DERIVATION rather than
+> carrying a copy of the figure - a hand-carried count is what produced this defect.
+
 ## Per class
 
 | Class | Candidates found | Real | Verdict |

@@ -33,10 +33,21 @@ import sys
 # A command whose exit code is EVIDENCE. Substring match against the whole segment, because a
 # gate is invoked as `python tools/no_regression.py`, `py -3 run_selftests.py`, `pytest -q`,
 # and `python hooks/x.py --selftest` - the interpreter and flags vary, the unit name does not.
+# [ROSTER 2026-08-20] The five names on the last two lines were MISSING, and the gap was not
+# visible from this file: a gate invoked with --selftest is covered by the "--selftest" token
+# whatever it is called, so only the ENFORCING invocations fell through. DERIVED against
+# run_selftests.AUX_GATES: 7 of the 16 rows had no name here, of which 3 are registered enforcing
+# - regen_example_settings, check_file_size and ship_bar_gate. That last one is the ship bar, so
+# `python tools/ship_bar_gate.py | tail -5` read as clean while the gate whose whole job is
+# refusing to ship had its exit status eaten. selftest() now DERIVES this coverage from AUX_GATES
+# and prints the denominator, so the next gate added cannot be silently uncovered.
 GATE_TOKENS = (
     "run_selftests", "mutation_check", "no_regression", "check_mutation_anchors",
     "check_review_freshness", "check_readme_fresh", "check_python_floor", "check_skill_deps",
     "score_corpus", "hook_divergence_report", "compare_delivery_gate", "pytest", "--selftest",
+    "ship_bar_gate", "check_file_size", "regen_example_settings", "gate_ledger",
+    "check_no_network",
+    "score_false_alarms",
 )
 
 # Consumers that REPLACE the pipeline's exit status with their own. `tee` is here because it
@@ -54,6 +65,34 @@ STATUS_EATERS = (
 # equivalent of reading ${PIPESTATUS[0]}; it is meaningless in sh, so ONE tuple serves both
 # dialects and the line below stays untouched (it is PG2's mutation anchor).
 PROTECTED = ("pipefail", "PIPESTATUS", "LASTEXITCODE")
+
+# [DISARM 2026-08-20] ...but WHERE the word appears decides whether it protects anything, and
+# `any(p in command for p in PROTECTED)` did not ask. Any occurrence anywhere silenced a BLOCKING
+# guard: in a comment, in a filename, or - the case that matters - AFTER the pipeline, where it
+# does nothing at all. `python run_selftests.py | tail -2; set -o pipefail` is an ordinary
+# ordering mistake, and this hook's own block message ("or `set -o pipefail` first") is what
+# teaches the shape. An agent that takes the advice and writes it in the wrong place gets silence
+# on the retry, with the suite's exit status still eaten.
+#
+# The two behave DIFFERENTLY and the rule has to as well:
+#   `pipefail` is an option SET BEFOREHAND, so it only protects if it precedes the pipeline.
+#   `PIPESTATUS` / `LASTEXITCODE` are READ AFTERWARDS - `cmd | tail; exit $LASTEXITCODE` is the
+#   correct spelling - so position cannot be required of them.
+# Split by dialect too: LASTEXITCODE is meaningless in sh and PIPESTATUS in PowerShell, so
+# neither may silence the other's shell.
+_PROTECTORS = {
+    "bash": (("pipefail", "before"), ("PIPESTATUS", "anywhere")),
+    "powershell": (("LASTEXITCODE", "anywhere"),),
+}
+
+
+def _is_protected(command: str, dialect: str = "bash") -> bool:
+    """True if `command` genuinely guards the pipeline's status in `dialect`. See _PROTECTORS."""
+    head = command.split("|", 1)[0]
+    for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):
+        if word in (head if where == "before" else command):
+            return True
+    return False
 
 # --------------------------------------------------------------------------------------
 # PowerShell [PGG-PS]. The SAME hook, a DIFFERENT failure - and the difference was MEASURED
@@ -83,6 +122,27 @@ SHELL_TOOLS = ("Bash", "PowerShell")      # install.py DERIVES its PreToolUse ma
 
 PS_SELECT = ("select-object", "select")   # the cmdlet and its shipped alias
 PS_TRUNCATING = ("-first", "-index")      # the parameters that tear the producer down
+
+
+def _ps_truncates(token: str) -> bool:
+    """True if `token` is a PowerShell parameter that truncates Select-Object's input.
+
+    [PS-ABBREV 2026-08-20] PowerShell accepts any UNAMBIGUOUS prefix of a parameter name, so
+    `select -f 1` is `-First 1` and tears the producer down exactly as the full spelling does.
+    Matching the full words only meant the shorthand an operator actually types was undetected -
+    on the very shell this repo is developed on, where the file's own measurement (lines 71-76)
+    records the PowerShell case as STRICTLY WORSE than the sh one: no verdict at all, not merely
+    a replaced one.
+
+    `-i` is deliberately NOT accepted: it is ambiguous with -InputObject, so PowerShell itself
+    rejects it, and treating it as truncating would make the guard fire on a command that cannot
+    run. A guard that fires on correct work is one its owner disables.
+    """
+    t = token.lower()
+    if not t.startswith("-") or len(t) < 2:
+        return False
+    stem = t[1:]
+    return any(full[1:].startswith(stem) for full in PS_TRUNCATING) and stem != "i"
 PS_SAFE_ALIASES = ("sort", "tee")         # POSIX spellings that are SAFE cmdlets in PowerShell
 
 
@@ -159,7 +219,7 @@ def _eater(segment, dialect: str):
     words = [t for t in segment if "=" not in t.split(" ")[0] or t.startswith("-")]
     lowered = [_base(w.lower()) for w in words]
     if dialect == "powershell":
-        if any(w in PS_SELECT for w in lowered) and any(p in lowered for p in PS_TRUNCATING):
+        if any(w in PS_SELECT for w in lowered) and any(_ps_truncates(w) for w in lowered):
             return (next(w for w, low in zip(words, lowered) if low in PS_SELECT), "truncates")
         for w, low in zip(words, lowered):
             if low in PS_SAFE_ALIASES:      # MEASURED status-preserving here - never flag
@@ -184,7 +244,7 @@ def piped_gates(command: str, dialect: str = "bash") -> list:
     `dialect` defaults to "bash", which is what every caller got before PowerShell was covered
     at all: an unknown shell gets the STRICTER semantics rather than silently getting none.
     """
-    if any(p in command for p in PROTECTED):
+    if _is_protected(command, dialect):
         return []
     segments = _segments(command)
     if segments is None or len(segments) < 2:
@@ -340,6 +400,62 @@ def selftest() -> int:
     import subprocess
 
     fails = []
+
+    # [DISARM] The protector must actually PROTECT. Both directions, both dialects - a guard that
+    # any stray occurrence of a word can silence is not a guard, and one that ignores a real
+    # `set -o pipefail` is one its owner deletes.
+    # piped_gates() returns the OFFENDERS, so an empty list means "silenced".
+    _gate = "python run_selftests.py | tail -2"
+    if piped_gates("set -o pipefail; " + _gate):
+        fails.append("a real `set -o pipefail` BEFORE the pipeline did not silence the guard")
+    if piped_gates(_gate + "; echo ${PIPESTATUS[0]}"):
+        fails.append("reading ${PIPESTATUS[0]} after the pipeline did not silence the guard")
+    if not piped_gates(_gate + "; set -o pipefail"):
+        fails.append("`set -o pipefail` written AFTER the pipeline still silenced the guard - it "
+                     "protects nothing there, and this hook's own advice is what teaches the "
+                     "shape")
+    if not piped_gates("python run_selftests.py | tail -2  # remember pipefail"):
+        fails.append("the word pipefail in a COMMENT silenced a blocking guard")
+    if not piped_gates(_gate, dialect="bash"):
+        fails.append("the unprotected control is not flagged - the cases above prove nothing")
+    if not piped_gates("python run_selftests.py | tail -2; exit $LASTEXITCODE", dialect="bash"):
+        fails.append("LASTEXITCODE - which is meaningless in sh - silenced the BASH guard")
+
+    # [PS-ABBREV] the unambiguous abbreviations PowerShell actually accepts
+    for spelling in ("-First", "-first", "-fir", "-f"):
+        if not piped_gates("python run_selftests.py | select %s 1" % spelling,
+                           dialect="powershell"):
+            fails.append("PowerShell `select %s 1` was not detected as truncating; PowerShell "
+                         "accepts any unambiguous prefix" % spelling)
+    if piped_gates("python run_selftests.py | select -i 1", dialect="powershell"):
+        fails.append("`-i` was treated as truncating - it is ambiguous with -InputObject, so "
+                     "PowerShell rejects it and the guard would fire on a command that cannot run")
+
+    # [ROSTER] coverage DERIVED from the gate registry, with the denominator printed. A hardcoded
+    # GATE_TOKENS left 3 enforcing gates invisible, the ship bar among them.
+    import ast
+    _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        _tree = ast.parse(io.open(os.path.join(_repo, "run_selftests.py"),
+                                  encoding="utf-8").read())
+        _rows = next(ast.literal_eval(n.value) for n in ast.walk(_tree)
+                     if isinstance(n, ast.Assign)
+                     and any(getattr(t, "id", "") == "AUX_GATES" for t in n.targets))
+    except (OSError, SyntaxError, ValueError, StopIteration) as _exc:
+        _rows = ()
+        fails.append("could not read AUX_GATES to check gate coverage (%s) - this check must "
+                     "never pass by failing to look" % _exc)
+    _uncovered = []
+    for _label, _parts, _extra in _rows:
+        _invocation = "python %s %s | tail -1" % ("/".join(_parts), " ".join(_extra))
+        if not piped_gates(_invocation):
+            _uncovered.append(_label)
+    if _uncovered:
+        fails.append("%d of %d registered gate(s) are INVISIBLE to GATE_TOKENS, so piping them "
+                     "into a status-eater is not blocked: %s"
+                     % (len(_uncovered), len(_rows), ", ".join(_uncovered)))
+    print("-- piped-gate: gate coverage %d of %d AUX_GATES row(s) detected"
+          % (len(_rows) - len(_uncovered), len(_rows)))
     for label, cmd in SHOULD_FIRE:
         if not piped_gates(cmd):
             fails.append("BLIND to %s: %r" % (label, cmd))

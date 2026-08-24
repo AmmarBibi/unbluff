@@ -5,8 +5,14 @@
 > **Status as of 2026-08-09.** This file is retained as the record of how the v1.3.1 review
 > reasoned. It is **not** the current plan and **not** the current ledger. The live documents are:
 >
-> - `docs/NEXT_SESSION_PROMPT.md` - the single canonical recommended order
+> - `docs/PLAN.md` - **the single canonical recommended order**
 > - `docs/audits/coverage_ledger_2026-08-09.md` - the current BUILT / SCHEDULED / EXCLUDED state
+>
+> *Corrected 2026-08-24 by the close meta-review's CHECK 6.* This line named
+> `docs/NEXT_SESSION_PROMPT.md` as canonical. That file was reduced to a POINTER the day before
+> under `#10`, and this - the only other document naming it - was not updated in the same edit.
+> So a third document went on asserting a competing canonical order: `#10`'s own defect surviving
+> `#10`'s fix by one file, which is why CHECK 6 greps for the ASSERTION and not for a filename.
 >
 > **The collapse of this file is CANCELLED** (it discharges no v1.0 criterion, and
 > `CHANGELOG.md:56` stays true while the file keeps its phases). Everything that was carried
