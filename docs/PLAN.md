@@ -89,10 +89,17 @@ Materiality still decides ORDER, never WHETHER.
     reconstructed, by the close meta-review's CHECK 4. Gate 0 unblocked it but only FILTERED
     sweeps were run locally (`install` 13/13 CAUGHT, `check_review_freshness` 5/5 CAUGHT), and a
     filtered run proves nothing about the other 212 entries - the harness says so itself. The
-    full sweep is the two `mutation harness` jobs in this CI run, on ubuntu AND windows, which is
-    the cheaper path the plan already identified. **Until they land, no full sweep exists at the
-    release HEAD and #37 is NOT discharged.** `false_alarm_scorer` also predates this session
-    (2026-08-20).
+    full sweep is the two `mutation harness` jobs in CI, on ubuntu AND windows, which is the
+    cheaper path the plan already identified. **It ran, and it earned its keep on the first try:**
+    223 of 225 executed, 0 skipped, 0 unproven, **1 SURVIVED** - `check_file_size #SITES-1`, whose
+    detector was satisfied by a DOCSTRING containing the gate name while the real `record()` call
+    had been renamed away. Fixed structurally (AST, not substring) in `91f015e`; the ubuntu sweep
+    is re-running there. **#37 is NOT discharged until both platforms are green at the release
+    HEAD** - and BOTH is the operative word, checked rather than assumed: neither platform alone
+    covers the table. ubuntu cannot run `fast_test_on_stop D10/D10b` (windows-only) and windows
+    cannot run `pre_push_gate 30` / `fast_test_on_stop D10c` (posix-only), so each reports 223 of
+    225 and only their UNION is 225. A green sweep on one OS is a 99% claim wearing a 100% badge.
+    `false_alarm_scorer` also still predates this session (2026-08-20).
 11. **Tag v1.4.0**, then convert the ledger to GitHub issues.
 
 ## Phase 2 - post-release, as GitHub issues
