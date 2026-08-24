@@ -47,6 +47,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
 ## Open - and this list is deliberately short
 
+0. **Make `close_skills_guard` enforce RECENCY, not just presence.** Highest value here, because
+   it is the one failure that has recurred across sessions and the only reason it was caught
+   today is that you asked. The guard is WIRED (PostToolUse) and it checks "were all four audit
+   skills invoked since the last genuine user message" - which passed today while being wrong:
+   the skills ran at 15:54, then four more commits landed including a code fix to a guard, the
+   whole plan re-cut, and the merge to `main`. The close ritual certified a state that no longer
+   existed, and re-running it on that tail found four defects, all mine.
+   `hooks/close_skills_guard.py:333` deliberately tolerates tool activity after the skills, which
+   is right for a `tool_result` and wrong for a `Write`. **Rule to add: fire if any file was
+   WRITTEN after the last required-skill invocation** (excluding the close artifact itself, which
+   is by definition written last). Everything needed is already in the transcript scan; this is a
+   comparison of two indices it already computes.
+   This is the REMEMBER-vs-ENFORCE conversion in its purest form - the instruction "run the four
+   skills at close" is prose in a session prompt, and prose is advisory. Do not fix it by
+   promising to run them later.
 1. **Land the branch.** `feat/enforcing-verify` -> `main` via
    [PR #3](https://github.com/AmmarBibi/unbluff/pull/3). This is the whole point of the branch
    for a solo user: `main` currently still has (a) a moved or renamed clone **bricking every
