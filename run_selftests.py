@@ -265,12 +265,45 @@ RECORDING_TIERS = {
 }
 
 
+def recorded_gate_names(src):
+    """Gate names in the first argument of a `gate_ledger.record(...)` call, by AST.
+
+    None (never an empty set) when the source will not parse: unparseable must read as FAILURE.
+    Every string constant in that argument counts, because `mutation_check.py` legitimately
+    writes `record("mutation_sweep_filtered" if args.only else "mutation_sweep", ...)` and a
+    contiguous-substring test would call that correct line MISSING.
+    """
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return None
+    names = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not (isinstance(fn, ast.Attribute) and fn.attr == "record"
+                and isinstance(fn.value, ast.Name) and fn.value.id == "gate_ledger"):
+            continue
+        if not node.args:
+            continue
+        for sub in ast.walk(node.args[0]):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                names.add(sub.value)
+    return names
+
+
 def unrecorded_tiers(root: str, tiers=RECORDING_TIERS) -> list:
     """Tiers that no longer call gate_ledger.record() under their declared gate name.
 
-    Textual on purpose: the question is whether the CALL SITE still exists in the source, and an
-    import-and-execute would run the tier. A tier whose recording is deleted still passes every
-    other check in this repo, which is exactly why this one is cheap and textual.
+    [SITES-AST 2026-08-24] Was two INDEPENDENT substring tests - `"gate_ledger.record(" in src`
+    and `'"<gate>"' in src` - and the full sweep, running for the first time since 2026-08-20,
+    caught it: SITES-1 SURVIVED. `check_file_size.py:169` is a DOCSTRING containing
+    `gate_ledger.last_run("file_size")`, so the second test was satisfied by PROSE while the real
+    call on 178 had been renamed to `"not_file_size"`. The standing rule that a grep guard must
+    never search for a literal it also contains, in its sharpest form: this guard's own source
+    holds both needles, and `RECORDING_TIERS` above literally holds `"run_selftests"`. Now
+    structural - an AST walk cannot be satisfied by a comment, a docstring or a dict key.
     """
     gone = []
     for rel, gate in sorted(tiers.items()):
@@ -282,8 +315,13 @@ def unrecorded_tiers(root: str, tiers=RECORDING_TIERS) -> list:
             gone.append("%s (unreadable - a tier that cannot be read is not a tier that records)"
                         % rel)
             continue
-        if "gate_ledger.record(" not in src or '"%s"' % gate not in src:
-            gone.append("%s (no gate_ledger.record(...) under the name %r)" % (rel, gate))
+        names = recorded_gate_names(src)
+        if names is None:
+            gone.append("%s (unparseable - a tier that cannot be read is not a tier that records)"
+                        % rel)
+        elif gate not in names:
+            gone.append("%s (no gate_ledger.record(...) under the name %r; names recorded there: "
+                        "%s)" % (rel, gate, sorted(names) or "none"))
     return gone
 
 
