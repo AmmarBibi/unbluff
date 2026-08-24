@@ -76,9 +76,31 @@ def run(cmd, env, stdin="", cwd=None):
     return p.returncode, p.stdout or "", p.stderr or ""
 
 
+def _scrubbed_environ():
+    """os.environ minus git's redirect variables, with a local fallback.
+
+    [#46] `git -C <cwd>` is OVERRIDDEN by GIT_DIR, so under a git hook every fixture below
+    operates on the REAL repository. This file is a THIRD orchestrator - run_selftests' scrub
+    does not reach it, because integration runs from its own CI job and from the README's
+    copy-paste line. Imported lazily with a fallback so a partial checkout degrades to a local
+    copy of the roster instead of failing to start; the roster is duplicated deliberately and
+    the import is tried FIRST, so the shared definition stays authoritative.
+    """
+    try:
+        sys.path.insert(0, os.path.join(REPO, "tools"))
+        from git_isolation import scrubbed_env
+        return scrubbed_env()
+    except ImportError:
+        env = dict(os.environ)
+        for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+            env.pop(var, None)
+        return env
+
+
 def git(cwd, *args):
     subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True,
-                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                   env={**_scrubbed_environ(), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
 
 

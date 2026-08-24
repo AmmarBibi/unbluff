@@ -184,7 +184,7 @@ $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] H1 plan-defer-guard fires (rc 2)   [PASS] H2 numbers-match fires (rc 2)
 [PASS] A7 consistency-audit skill installed with bundled scripts
 [PASS] H3 hook/skill SOURCE_EXTS parity   [PASS] G2 all unbluff entries removed
-==== 30/30 scenarios passed ====
+==== 34/34 scenarios passed ====
 ```
 
 ## Install details

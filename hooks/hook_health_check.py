@@ -172,6 +172,25 @@ def run_weekly_selftests(hook_paths: list[str], state_dir: str,
     except OSError:
         pass  # no marker -> due
 
+    # [#46] This is the FOURTH orchestrator that spawns every hook's --selftest, and the only
+    # one that SHIPS TO END USERS - it runs from their SessionStart hook, over their machine's
+    # copy, sweeping fixtures that build throwaway git repositories. `git -C <tmpdir>` is
+    # overridden by GIT_DIR, so if this is ever reached with git's hook environment in scope
+    # those fixtures write to a real repository, which is how a one-file tree was published
+    # over a public default branch. run_selftests' scrub cannot help here: this path never goes
+    # through it. Scrubbed before the first spawn, and tolerant of a partial checkout - a
+    # missing tools/ must not stop a user's health check from running.
+    try:
+        _tools = os.path.join(os.path.dirname(_HOOKS_DIR), "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        from git_isolation import scrub_environ
+        scrub_environ()
+    except ImportError:
+        for _var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+            os.environ.pop(_var, None)
+
     progress_path = os.path.join(state_dir, _WEEKLY_PROGRESS)
     done = {}
     slice_started = None          # the date the CURRENT slice began, carried across sessions

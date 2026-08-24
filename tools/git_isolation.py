@@ -158,6 +158,21 @@ def fingerprint(repo) -> str:
             (_git(repo, "for-each-ref", "--format=%(refname) %(objectname)") or "")
             .encode("utf-8")).hexdigest()[:16],
         "config=" + _digest(os.path.join(common, "config")),
+        # The HOOKS DIRECTORY, by name and content. Added 2026-08-24 after the integration
+        # suite - which CI never reached, because install.py aborted first - failed on a
+        # delegating shim that found a `# husky / npx --no-install husky-run pre-push` file in
+        # the REAL repo's .git/hooks. It is byte-identical to the fixture written by
+        # pre_push_gate_selftest.py:945 and its mtime is 01:55, inside the #46 corruption
+        # window: a SEVENTH artifact that the incident report, the reflog sweep and this
+        # fingerprint had all missed. `core.hooksPath` made it inert for git itself, which is
+        # exactly why nothing noticed - but any code that resolves hooks the way the dispatcher
+        # does still executed it. Samples are excluded: git ships them and they never change.
+        "hooks=" + hashlib.sha256("\n".join(sorted(
+            "%s:%s" % (n, _digest(os.path.join(common, "hooks", n)))
+            for n in (os.listdir(os.path.join(common, "hooks"))
+                      if os.path.isdir(os.path.join(common, "hooks")) else [])
+            if not n.endswith(".sample")
+        )).encode("utf-8")).hexdigest()[:16],
         # The index by its CONTENT (`ls-files -s` = mode, blob, stage, path), never by hashing
         # .git/index itself. MEASURED: hashing the file made this guard fire on a completely
         # clean run, because ordinary read-only commands - the ones this repo's own gates issue
@@ -167,9 +182,18 @@ def fingerprint(repo) -> str:
         # replaced the real one and every entry changed.
         "index=" + hashlib.sha256(
             (_git(repo, "ls-files", "-s") or "NONE").encode("utf-8")).hexdigest()[:16],
+        # PATHS ONLY. `worktree list --porcelain` also prints `HEAD <sha>` and `branch <ref>`
+        # per entry, so hashing it whole made this term move whenever head= or symref= moved -
+        # and a field-deletion probe then showed head=, symref= AND refs= all SURVIVING
+        # deletion, because this term was quietly covering for all three. Overlapping terms
+        # cannot be individually pinned, and a term nothing can pin is indistinguishable from a
+        # deleted one. Narrowed to the registration itself, which is the thing only this term
+        # sees: `worktree add --detach` creates no ref at all.
         "worktrees=" + hashlib.sha256(
-            (_git(repo, "worktree", "list", "--porcelain") or "").encode("utf-8")
-        ).hexdigest()[:16],
+            "\n".join(sorted(
+                ln for ln in (_git(repo, "worktree", "list", "--porcelain") or "").splitlines()
+                if ln.startswith("worktree ")
+            )).encode("utf-8")).hexdigest()[:16],
     ]
     return " ".join(parts)
 
@@ -182,9 +206,21 @@ def _selftest() -> int:
     BOTH directions: with GIT_DIR set, a bare `git -C <tmp>` must be hijacked, and the scrubbed
     call must not be. If the first assertion ever stops holding, this file is guarding against
     something that no longer happens and the guard - not the code - is what needs revisiting.
+
+    The check ledger is RECORDED AT RUNTIME and set-compared against REQUIRED_CHECKS. The first
+    version printed a hand-written tuple of 7 names beside 9 `fails.append` sites, so deleting an
+    entire check left the evidence line byte-identical - and the gate-0 evidence document cites
+    one of those names as proof a regression is pinned. `_SH_SITES_REQUIRED` in
+    pre_push_gate_selftest.py is the model, and its enforcing half is the set comparison, not the
+    set literal.
     """
     import tempfile
     fails = []
+    ran = []
+
+    def ck(name):
+        """Record that a check actually EXECUTED. A name that never runs is a deleted check."""
+        ran.append(name)
 
     with tempfile.TemporaryDirectory() as td:
         victim = os.path.join(td, "victim")
@@ -197,28 +233,65 @@ def _selftest() -> int:
                 return 77
         victim_git = os.path.join(victim, ".git")
 
+        def fx(*args, **kw):
+            """A fixture git command whose FAILURE is a failure, not a silent no-op.
+
+            [M8] `config`, `add` and `commit` were previously unchecked. With an ambient
+            `commit.gpgsign = true` and no usable key - a state this repo has already been bitten
+            by, see [WT-CAUSE] in pre_push_gate_selftest.py - the commit no-ops, the fingerprint
+            correctly does not move, and the suite reports "fingerprint did not change after a
+            commit", sending the reader to rewrite a function that is working perfectly.
+            """
+            env = scrubbed_env()
+            env.update(kw.pop("extra_env", {}) or {})
+            r = subprocess.run(["git", "-C", victim, *args], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", env=env)
+            if r.returncode != 0:
+                fails.append("FIXTURE `git %s` failed (rc=%s): %s - this suite could not build "
+                             "its own case, which is a failure here and never a passing skip"
+                             % (" ".join(args), r.returncode,
+                                (r.stderr or r.stdout or "").strip()[:160] or "<no output>"))
+                return False
+            return True
+
+        def same_path(a, b):
+            """Compare two paths as GIT resolves them.
+
+            [H4] `os.path.normpath` does NOT expand an 8.3 short name, a junction or a subst
+            drive; git does, via GetLongPathNameW. `tempfile` inherits %TEMP% verbatim, so on any
+            box whose TEMP carries an alias this comparison failed on entirely correct code and
+            printed "the mechanism behind #46 could not be reproduced" - an invitation to delete
+            this branch's headline fix. `realpath` collapses all three spellings, which is the
+            same conclusion fast_test_on_stop.py:627-631 already reached for the same reason.
+            """
+            return os.path.realpath(a).replace("\\", "/").lower() in \
+                os.path.realpath(b).replace("\\", "/").lower()
+
         # 1. THE DEFECT, reproduced. With GIT_DIR pointed at `victim`, a command that names
         #    `fixture` explicitly must answer about `victim`. If this does NOT reproduce, the
         #    mechanism #46 was diagnosed from has changed and everything below is theatre.
         hijacked = dict(os.environ, GIT_DIR=victim_git)
         p = subprocess.run(["git", "-C", fixture, "rev-parse", "--absolute-git-dir"],
                            capture_output=True, text=True, env=hijacked)
-        got = (p.stdout or "").strip().replace("\\", "/").lower()
-        if os.path.normpath(victim_git).replace("\\", "/").lower() not in got:
+        got = (p.stdout or "").strip()
+        ck("git-dir-overrides-dash-C")
+        if not got or not same_path(victim_git, got):
             fails.append("GIT_DIR no longer overrides `git -C` (got %r) - the mechanism behind "
                          "#46 could not be reproduced, so this guard is unproven" % (got,))
 
         # 2. THE FIX. Same command, scrubbed env, must answer about `fixture`.
         p2 = subprocess.run(["git", "-C", fixture, "rev-parse", "--absolute-git-dir"],
                             capture_output=True, text=True, env=scrubbed_env(hijacked))
-        got2 = (p2.stdout or "").strip().replace("\\", "/").lower()
-        if os.path.normpath(os.path.join(fixture, ".git")).replace("\\", "/").lower() not in got2:
+        got2 = (p2.stdout or "").strip()
+        ck("scrubbed-env-restores-targeting")
+        if not got2 or not same_path(os.path.join(fixture, ".git"), got2):
             fails.append("scrubbed_env did not restore `git -C` targeting (got %r)" % (got2,))
 
         # 3. scrub_environ must actually empty this process's view, and report what it took.
         os.environ["GIT_DIR"] = victim_git
         os.environ["GIT_INDEX_FILE"] = os.path.join(victim_git, "index")
         removed = scrub_environ()
+        ck("scrub-environ-empties-environ")
         if "GIT_DIR" in os.environ or "GIT_INDEX_FILE" in os.environ:
             fails.append("scrub_environ left a redirect variable in os.environ")
         if set(removed) != {"GIT_DIR", "GIT_INDEX_FILE"}:
@@ -227,62 +300,152 @@ def _selftest() -> int:
         # 4. fingerprint must MOVE when the repo moves, and hold still when it does not.
         #    A fingerprint that never changes passes every comparison forever.
         before = fingerprint(victim)
+        ck("fingerprint-stable-when-idle")
         if before == "FINGERPRINT-UNAVAILABLE":
             fails.append("fingerprint could not read a freshly initialised repo")
         if fingerprint(victim) != before:
             fails.append("fingerprint is not stable across two reads of an unchanged repo - it "
                          "would fire on every gate and be disabled within a day")
-        # FIRES-ON-CORRECT-WORK, pinned. The first version of this fingerprint hashed .git/index
-        # directly and went red on a clean suite run, because read-only commands rewrite the
-        # index stat cache. Touching a tracked file and running `status` reproduces exactly that
-        # refresh with no tracked entry changed, so this assertion is what stops the cheaper
-        # spelling coming back.
-        touched = os.path.join(victim, "f.txt")
-        with open(touched, "w", encoding="utf-8") as fh:
-            fh.write("x\n")
-        subprocess.run(["git", "-C", victim, "add", "-A"], capture_output=True,
-                       env=scrubbed_env())
+
+        # 4a. [M7] index=, pinned ALONE. Staging a file moves `ls-files -s` and nothing else -
+        #     no ref, no symref, no config - so this is the only assertion that can tell the
+        #     index term from a deleted one. The incident replaced the real index with a
+        #     935-byte fixture index.
+        idx_base = fingerprint(victim)
+        with open(os.path.join(victim, "staged.txt"), "w", encoding="utf-8") as fh:
+            fh.write("staged\n")
+        fx("add", "-A")
+        ck("fingerprint-sees-index")
+        if fingerprint(victim) == idx_base:
+            fails.append("fingerprint did not change when a file was STAGED - the index term is "
+                         "dead, and a fixture index swapped over the real one would pass")
+
+        # 4b. FIRES-ON-CORRECT-WORK, pinned. The first version of this fingerprint hashed
+        #     .git/index directly and went red on a clean suite run, because read-only commands
+        #     rewrite the index stat cache. Touching a tracked file and running `status`
+        #     reproduces exactly that refresh with no tracked entry changed.
         settled = fingerprint(victim)
-        os.utime(touched, None)
-        subprocess.run(["git", "-C", victim, "status", "--porcelain"], capture_output=True,
-                       env=scrubbed_env())
+        os.utime(os.path.join(victim, "staged.txt"), None)
+        fx("status", "--porcelain")
+        ck("fingerprint-ignores-stat-refresh")
         if fingerprint(victim) != settled:
             fails.append("fingerprint moved after a stat-cache refresh with no tracked entry "
                          "changed - it would redden every clean run and be disabled within a day")
-        subprocess.run(["git", "-C", victim, "config", "core.hooksPath", "/tmp/whatever"],
-                       capture_output=True, env=scrubbed_env())
-        # Compared against `settled`, NOT `before`: the stat-cache check above legitimately
-        # staged a file, so `before` is stale by here and asserting against it would pass for a
-        # reason that has nothing to do with core.hooksPath.
+
+        # 4c. config=, pinned alone: the term that caught core.bare and core.hooksPath.
+        fx("config", "core.hooksPath", "/tmp/whatever")
+        ck("fingerprint-sees-hooksPath")
         if fingerprint(victim) == settled:
             fails.append("fingerprint did not change after core.hooksPath was set - the exact "
                          "corruption that silently disabled every hook on the machine")
 
+        # 4d. hooks=, pinned ALONE. A fixture `pre-push` left in .git/hooks is what the
+        #     integration suite tripped on, seventeen hours after the incident, and no other
+        #     term sees it - core.hooksPath had made it inert for git, so even the config term
+        #     could not infer it.
+        hooks_base = fingerprint(victim)
+        _hd = os.path.join(victim, ".git", "hooks")
+        os.makedirs(_hd, exist_ok=True)
+        with open(os.path.join(_hd, "pre-push"), "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\nexit 0\n")
+        ck("fingerprint-sees-hooks-dir")
+        if fingerprint(victim) == hooks_base:
+            fails.append("fingerprint did not change when a hook file appeared in .git/hooks - "
+                         "the hooks term is dead, and exactly such a fixture sat in the real "
+                         "repository unnoticed by every other guard in this suite")
+
         # 5. and it must see a commit, which is what reached GitHub.
         mid = fingerprint(victim)
+        author = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                  "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         with open(os.path.join(victim, "f.txt"), "w", encoding="utf-8") as fh:
             fh.write("x\n")
-        cenv = scrubbed_env()
-        cenv.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
-        subprocess.run(["git", "-C", victim, "add", "-A"], capture_output=True, env=cenv)
-        subprocess.run(["git", "-C", victim, "commit", "-qm", "local only"],
-                       capture_output=True, env=cenv)
-        if fingerprint(victim) == mid:
+        fx("add", "-A")
+        committed = fx("commit", "-qm", "local only", extra_env=author)
+        ck("fingerprint-sees-commit")
+        if committed and fingerprint(victim) == mid:
             fails.append("fingerprint did not change after a commit - the fixture commit that "
                          "was published to the public default branch would pass this gate")
 
-    # NAMED rather than counted. "5 check(s)" was already wrong one edit after it was written,
-    # and a bare integer cannot tell a deleted check from a renamed one - the same reason
-    # _SH_SITES_REQUIRED is a set and not a length.
-    checks = ("git-dir-overrides-dash-C", "scrubbed-env-restores-targeting",
-              "scrub-environ-empties-environ", "fingerprint-stable-when-idle",
-              "fingerprint-ignores-stat-refresh", "fingerprint-sees-hooksPath",
-              "fingerprint-sees-commit")
+        # 5a. [M7] symref=, pinned ALONE. The branch ref is created FIRST and fingerprinted, so
+        #     the only thing the final move changes is which branch HEAD points at - which is
+        #     precisely what the incident did to feat/enforcing-verify.
+        if committed:
+            # 5a. [M7] refs=, pinned ALONE. Creating a branch touches no worktree path, no
+            #     index entry and no config, and leaves HEAD exactly where it was. The incident
+            #     left two stray branches behind, so this is not a hypothetical term.
+            pre_branch = fingerprint(victim)
+            fx("branch", "other")
+            branched = fingerprint(victim)
+            ck("fingerprint-sees-refs")
+            if branched == pre_branch:
+                fails.append("fingerprint did not change when a branch ref was created - the "
+                             "refs term is dead, and the incident left two stray branches")
+
+            # 5b. [M7] symref=, pinned ALONE. The ref already exists by here, so the only thing
+            #     this moves is which branch HEAD points at - precisely what the incident did
+            #     to feat/enforcing-verify when it parked it on a fixture commit.
+            fx("symbolic-ref", "HEAD", "refs/heads/other")
+            ck("fingerprint-sees-symref")
+            if fingerprint(victim) == branched:
+                fails.append("fingerprint did not change when HEAD was moved to another branch "
+                             "with no other edit - the symref term is dead")
+
+            # 5c. [M7] head=, pinned ALONE - which requires a DETACHED head. While HEAD is a
+            #     symref its sha is a FUNCTION of refs= and symref=, so no edit can move it
+            #     alone and the term is genuinely redundant in that state. Detached, it stops
+            #     being derived: `update-ref --no-deref` then moves the raw HEAD and nothing
+            #     else, and a detached-HEAD move is invisible to every other term.
+            first = (_git(victim, "rev-parse", "HEAD") or "").strip()
+            with open(os.path.join(victim, "second.txt"), "w", encoding="utf-8") as fh:
+                fh.write("second\n")
+            fx("add", "-A")
+            if first and fx("commit", "-qm", "second", extra_env=author):
+                fx("checkout", "-q", "--detach")
+                detached = fingerprint(victim)
+                fx("update-ref", "--no-deref", "HEAD", first)
+                ck("fingerprint-sees-head")
+                if fingerprint(victim) == detached:
+                    fails.append("fingerprint did not change when a DETACHED HEAD was moved - "
+                                 "the head term is dead, and in a detached state no other term "
+                                 "can see that move")
+
+            # 5b. [M7] worktrees=, pinned ALONE. It is the ONLY term that detects incident
+            #     instance #5 (fast_test_on_stop_selftest.py registering a linked worktree),
+            #     because `worktree add --detach` creates no ref at all.
+            wt_base = fingerprint(victim)
+            wt_path = os.path.join(td, "linked")
+            if fx("worktree", "add", "--detach", "-q", wt_path):
+                ck("fingerprint-sees-worktree")
+                if fingerprint(victim) == wt_base:
+                    fails.append("fingerprint did not change when a linked worktree was "
+                                 "registered - the worktrees term is dead, and that is the only "
+                                 "term that sees a `worktree add --detach`, which creates no ref")
+
+    # DECLARED and ENFORCED. The set comparison is the half that makes the roster load-bearing:
+    # a deleted check no longer runs, so its name is absent from `ran`, so this goes red. A
+    # renamed one shows up on both sides at once.
+    REQUIRED_CHECKS = frozenset({
+        "git-dir-overrides-dash-C", "scrubbed-env-restores-targeting",
+        "scrub-environ-empties-environ", "fingerprint-stable-when-idle",
+        "fingerprint-sees-index", "fingerprint-ignores-stat-refresh",
+        "fingerprint-sees-hooksPath", "fingerprint-sees-hooks-dir", "fingerprint-sees-commit",
+        "fingerprint-sees-refs", "fingerprint-sees-symref",
+        "fingerprint-sees-head", "fingerprint-sees-worktree",
+    })
+    missing = sorted(REQUIRED_CHECKS - set(ran))
+    unexpected = sorted(set(ran) - REQUIRED_CHECKS)
+    if missing:
+        fails.append("check(s) declared but never executed: %r - a check that does not run is a "
+                     "deleted check, and the printed roster would not have shown it" % (missing,))
+    if unexpected:
+        fails.append("check(s) executed but not declared: %r - add them to REQUIRED_CHECKS or "
+                     "the roster stops describing what this gate does" % (unexpected,))
+
     for f in fails:
         print("FAIL: %s" % f)
-    print("git_isolation selftest: %d check(s) [%s], %d failure(s)"
-          % (len(checks), " ".join(checks), len(fails)))
+    print("git_isolation selftest: %d of %d declared check(s) executed [%s], %d failure(s)"
+          % (len(set(ran)), len(REQUIRED_CHECKS), " ".join(sorted(set(ran))), len(fails)))
     return 1 if fails else 0
 
 

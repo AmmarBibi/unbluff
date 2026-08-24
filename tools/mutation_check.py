@@ -523,6 +523,16 @@ def duplicate_ids() -> list:
 
 
 def main() -> int:
+    # [#46] This harness spawns every unit's selftest AND builds its own git fixtures, and it is
+    # a SECOND orchestrator: run_selftests' scrub does not reach it, because mutation_check is
+    # registered NOT_A_GATE and runs from its own CI job. An adversarial review found the #46
+    # fix reaching 1 of 4 such orchestrators while the evidence document claimed all four.
+    # Scrubbed in main() rather than at module level because check_mutation_anchors.py imports
+    # MUTATIONS from here, and a module that rewrites its importer's environment is its own
+    # defect.
+    from git_isolation import scrub_environ    # noqa: E402  (tools/ on sys.path above)
+    scrub_environ()
+
     ap = argparse.ArgumentParser()
     ap.add_argument("only", nargs="?", default="", help="only mutations for this hook")
     args = ap.parse_args()

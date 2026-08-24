@@ -901,16 +901,16 @@ def selftest() -> int:
                 fails.append("a timed-out run must BLOCK and name the typed escape, not warn "
                              "and allow: rc=%r err=%r" % (rc_m, err_m[:160]))
 
-        # 15b. [#25] THE SECURITY PROPERTY ITSELF, which nothing asserted before. A bare root
-        # conftest.py is enough for detect() to return a pytest command, and pytest IMPORTS
-        # conftest.py before collecting anything - so under --install-global, `git push` in a
-        # merely-cloned repo would execute a stranger's code with no opt-in anywhere. Both
-        # halves are asserted: the refusal must hold, and it must LIFT once the repo opts in,
-        # or the fix bought safety by quietly deleting the feature.
+        # 15b. [#25] THE SECURITY PROPERTY. A root conftest.py makes detect() return a pytest
+        # command that pytest IMPORTS before collecting, so under --install-global a merely-cloned
+        # repo's push ran a stranger's code with no opt-in. Refusal must hold AND lift on opt-in.
+        # [CI-PYTEST] package.json too, or a pytest-less runner resolves None and passes blind.
         ctdir = _repo(stack)
         if ctdir:
-            with open(os.path.join(ctdir, "conftest.py"), "w", encoding="utf-8") as f:
-                f.write("import sys\n")
+            for _n, _b in (("conftest.py", "import sys\n"),
+                           ("package.json", '{"scripts":{"test":"jest"}}')):
+                with open(os.path.join(ctdir, _n), "w", encoding="utf-8") as f:
+                    f.write(_b)
             if _m.repo_opted_in(ctdir):
                 fails.append("#25: repo_opted_in() was true before anything was installed")
             cmd_before, _ = _m.resolve_command(ctdir)

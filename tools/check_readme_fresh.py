@@ -28,6 +28,57 @@ sys.path.insert(0, REPO)
 
 _CLAIM_RE = re.compile(r"all (\d+) selftests passed")
 _JOBS_RE = re.compile(r"CI is (\d+) jobs")
+_SCEN_RE = re.compile(r"====\s*(\d+)/(\d+) scenarios passed\s*====")
+
+
+def expected_scenarios():
+    """(passed, total) of the newest recorded integration run. DERIVED, never remembered.
+
+    [SCEN 2026-08-24] The README pastes the integration transcript under the line "Don't take the
+    demos on faith - run it yourself", and that block was the ONE number in the file no gate read.
+    It said `30/30` against a live 34, and it had been wrong before: p14_audit_findings.md:132
+    filed the byte-identical defect at 26-vs-30 and p14_new_code_review.md:301 prescribed this
+    very regex - then only the instance was patched and the gate was never built. Two audits, one
+    prescription, no control; a third drift followed exactly as the standing rule predicts.
+
+    Derived from the gate ledger rather than by counting `record(` call sites, because the count
+    is not static: the J block emits four rows from two literal calls inside a loop, so an AST
+    walk would confidently answer 32 and gate the README against a number that is simply wrong.
+    The ledger row is written BY a real run and carries its own utc, which is also what
+    meta-review CHECK 4 means by reading the ledger instead of reconstructing it. No row is a
+    FAILURE, never a skip: "nobody has ever run it" and "it passes" must not look the same.
+    """
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    import gate_ledger
+    row = gate_ledger.last_run("integration")
+    if not row:
+        return None
+    try:
+        return int(row["passed"]), int(row["total"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def claimed_scenarios(readme_text: str) -> list:
+    return [(int(a), int(b)) for a, b in _SCEN_RE.findall(readme_text)]
+
+
+def verdict_scenarios(readme_text: str, recorded) -> tuple:
+    claims = claimed_scenarios(readme_text)
+    if recorded is None:
+        return 1, ("readme-scenarios: FAIL - no integration row in the gate ledger, so the "
+                   "pasted transcript is checked against nothing. Run tests/test_integration.py.")
+    passed, total = recorded
+    if not claims:
+        return 1, ("readme-scenarios: FAIL - README.md contains no 'N/M scenarios passed' line, "
+                   "so the integration transcript it offers as evidence is ungated.")
+    bad = [c for c in claims if c != (passed, total)]
+    if bad:
+        return 1, ("readme-scenarios: FAIL - README pastes %s; the newest recorded integration "
+                   "run is %d/%d. A stale paste reads exactly like a fresh one."
+                   % (bad, passed, total))
+    return 0, ("readme-scenarios: OK - README's %d/%d matches the newest recorded integration run"
+               % (passed, total))
 
 
 def expected_jobs() -> int:
@@ -283,7 +334,9 @@ def main() -> int:
     want_pieces, roster = expected_pieces()
     rc_pieces, msg_pieces = verdict_pieces(text, want_pieces, roster)
     print(msg_pieces)
-    return rc or rc_jobs or rc_pieces
+    rc_scen, msg_scen = verdict_scenarios(text, expected_scenarios())
+    print(msg_scen)
+    return rc or rc_jobs or rc_pieces or rc_scen
 
 
 def _selftest_pieces(fails: list) -> None:

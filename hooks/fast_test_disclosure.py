@@ -212,18 +212,64 @@ def selftest() -> int:
                                                        '{"scripts":{"test":"jest"}}')),
                   SOURCE_OVERRIDE))
 
+    # [CI-PYTEST] Whether pytest is importable is a fact about the BOX; this suite is about the
+    # RESOLUTION ORDER. Inheriting the box's answer made the two pytest rows assert SOURCE_PYTEST
+    # and receive 'none' on every runner without pytest - and .github/workflows/selftest.yml's
+    # own MEASURED note says no workflow here pip-installs anything, so that is 11 of 17 jobs,
+    # plus both mutation jobs whose baseline then aborts as HARNESS ERROR. It passed exactly
+    # where it was written, which is the environment-dependence class this repo has already paid
+    # for twice (install.py's docx incident, and hook-provenance). Pinned SYNTHETICALLY in both
+    # directions, so every box gives the same answer.
+    _real_imp = getattr(ft, "_pytest_importable", None)
+    if _real_imp is None:
+        fails.append("fast_test has no _pytest_importable to consult - the pytest rows below "
+                     "would silently inherit whether this box happens to have pytest installed")
+
     # 1. resolve_with_source AGREES with detect() on every branch. This is the twin-roster pin:
     #    the whole reason a second resolution order is tolerable here.
-    for label, build, want_source in cases:
-        with tempfile.TemporaryDirectory() as d:
-            build(d)
-            mine_cmd, mine_src = resolve_with_source(d)
-            theirs_cmd, _, _ = ft.detect(d)
-            if mine_cmd != theirs_cmd:
-                fails.append("%s: resolve_with_source gave %r, detect() gave %r - the two "
-                             "resolution orders have DRIFTED" % (label, mine_cmd, theirs_cmd))
-            if mine_src != want_source:
-                fails.append("%s: source %r, expected %r" % (label, mine_src, want_source))
+    if _real_imp is not None:
+        ft._pytest_importable = lambda: True
+    try:
+        for label, build, want_source in cases:
+            with tempfile.TemporaryDirectory() as d:
+                build(d)
+                mine_cmd, mine_src = resolve_with_source(d)
+                theirs_cmd, _, _ = ft.detect(d)
+                if mine_cmd != theirs_cmd:
+                    fails.append("%s: resolve_with_source gave %r, detect() gave %r - the two "
+                                 "resolution orders have DRIFTED" % (label, mine_cmd, theirs_cmd))
+                if mine_src != want_source:
+                    fails.append("%s: source %r, expected %r" % (label, mine_src, want_source))
+    finally:
+        if _real_imp is not None:
+            ft._pytest_importable = _real_imp
+
+    # 1b. The OTHER direction, which is the one CI actually runs and which nothing asserted:
+    #     with pytest unimportable, a pytest-shaped repo must resolve to NO command rather than
+    #     to a `pytest` invocation that cannot execute. Asserting only the happy branch is how
+    #     the absent-pytest path stayed unexercised on the very runners that live in it.
+    if _real_imp is not None:
+        ft._pytest_importable = lambda: False
+        # Looked up BY LABEL, never by index: positional access would silently retarget the
+        # moment a case is inserted above, and would then assert the absent-pytest contract
+        # against, say, the npm row while still printing two green checks.
+        _by_label = {c[0]: c[1] for c in cases}
+        _want = ["pytest-conftest", "pytest-ini"]
+        _absent = [n for n in _want if n not in _by_label]
+        if _absent:
+            fails.append("the absent-pytest pin names case(s) that no longer exist: %r - it "
+                         "would verify nothing while still reporting" % (_absent,))
+        try:
+            for label, build in [(n, _by_label[n]) for n in _want if n in _by_label]:
+                with tempfile.TemporaryDirectory() as d:
+                    build(d)
+                    absent_cmd, absent_src = resolve_with_source(d)
+                    if absent_src != SOURCE_NONE or absent_cmd is not None:
+                        fails.append("%s with pytest UNIMPORTABLE resolved %r/%r - the gate would "
+                                     "announce a test command the box cannot run"
+                                     % (label, absent_cmd, absent_src))
+        finally:
+            ft._pytest_importable = _real_imp
 
     # 2. The disclosure names the BODY, not the wrapper. This is the whole point of the module,
     #    so it is asserted directly: a notice that merely repeated the command would pass every

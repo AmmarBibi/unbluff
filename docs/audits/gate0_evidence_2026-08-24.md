@@ -54,9 +54,27 @@ deleted, which **silently disabled every hook on the machine** and is why nothin
 push); `fast_test_on_stop_selftest.py:895-902` (`commit -qm seed`, `worktree add` -> the `wt`
 branch and a prunable worktree under the system temp dir); `check_review_freshness.py:318-330`
 (the `fixture` commit). `hook_divergence_report.py:346-349` was caught by the new guard during
-probe C, making **five** confirmed instances. `mutation_check.py:221`,
-`noregress_selftest.py:74`, `tests/false_alarm_corpus.py:98` and `tests/test_integration.py:199`
-build git fixtures in the same shape and are covered by the same fix.
+probe C, making **five** confirmed instances.
+
+**A sixth artifact, and a correction to this document.** An independent adversarial review
+(gate 9, 49 agents) found that an earlier revision of this paragraph claimed
+`mutation_check.py:221`, `noregress_selftest.py:74`, `tests/false_alarm_corpus.py:98` and
+`tests/test_integration.py:199` were "covered by the same fix". **That was false for three of the
+four**, and it was false inside the document that adjudicates the CRITICAL as DONE - the exact
+unverified-claim shape this project exists to catch, committed while writing the fix for it. Only
+`false_alarm_corpus.py` was genuinely covered, via the `false-alarm-scorer` AUX row. The choke
+point covers everything run_selftests SPAWNS; it does not reach an orchestrator that runs on its
+own. Three more were therefore scrubbed explicitly, and they are separate entry points, not call
+sites:
+
+| orchestrator | reached by | fix |
+|---|---|---|
+| `tools/mutation_check.py` | its own CI job; `NOT_A_GATE` | `scrub_environ()` at the top of `main()` |
+| `tests/test_integration.py` | its own CI job; the README's copy-paste line | `_scrubbed_environ()` feeding `git()` |
+| `hooks/hook_health_check.py:236` | **ships to end users** as a SessionStart hook | `scrub_environ()` before the weekly sweep |
+
+The last is the one that mattered most and the one nobody had looked at: it sweeps every hook's
+selftest on a USER's machine, over a USER's repository.
 
 A prescribed fix is a hypothesis. This one was re-executed and found to be aimed at the wrong
 target and scoped an order of magnitude too small: applied literally it would have left
@@ -124,6 +142,40 @@ They were `#46`'s evidence and are preserved as text rather than as live refs.
 - `origin/main` and `origin/HEAD` tracking refs had followed the corrupted remote to `b70872c`;
   both now correctly track `b6cc6cc`.
 - Published-then-removed fixture commits: `eae6080` ("seed"), `b70872c` ("local only").
+
+## 5b. A SEVENTH artifact, found 17 hours later by running the suite CI could not reach
+
+`C:\Users\ammar\Downloads\unbluff\.git\hooks\pre-push`, mtime **2026-08-24 01:55**, containing:
+
+```sh
+#!/bin/sh
+# husky
+npx --no-install husky-run pre-push
+```
+
+Byte-identical to the fixture written by `pre_push_gate_selftest.py:945`. This repo has no
+`package.json` and no `.husky`, so it is unambiguously incident residue - and it survived the
+reflog sweep, the ref cleanup, the fingerprint, and this document's own section 5, all of which
+were written believing the cleanup complete.
+
+It was found because `tests/test_integration.py` reported **33/34**, `J2 global stale shim ALLOWS
+the push` failing with rc 1. The shim fails open on the missing gate exactly as gate 8 claims,
+then delegates to the repo's own hook via `--git-common-dir` - and found this one, which exits
+nonzero because `npx husky-run` is not installed. So the failure was residue, not a defect:
+gate 8's claim stands, and `34/34` was restored by deleting the file, with a backup taken first.
+
+Two lessons, both already this repo's own rules:
+
+* **`core.hooksPath` made it INERT FOR GIT, which is why nothing noticed.** Every guard that asks
+  git "what runs on push?" got the hijacked answer. Only code that resolves the hooks directory
+  structurally - as the dispatcher does - ever saw it.
+* **The integration suite is the only thing that looked.** It is not part of `run_selftests`, and
+  in CI it had aborted at `A1 install` before reaching `J2`. A tier that cannot run is a tier that
+  found nothing, and its silence read as agreement for seventeen hours.
+
+`fingerprint()` gained a `hooks=` term in response, pinned by `fingerprint-sees-hooks-dir` and
+mutation-verified: **7 of 7 terms now go red when deleted**, up from 3 of 6 when the review filed
+M7.
 
 ## 6. Still open at the time of writing
 
