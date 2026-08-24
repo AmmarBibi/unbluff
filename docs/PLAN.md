@@ -37,6 +37,16 @@ Seven hook commands wired in `~/.claude/settings.json`, running from
 `core.hooksPath` at `~/.claude/githooks`, plus four skills `install.py` copies into
 `~/.claude/skills`. That is the product. Everything else is scaffolding around it.
 
+**BUILT IS NOT LIVE, and right now they differ.** Measured 2026-08-24T22:06:53Z by hashing each
+wired file against `origin/main`: **2 of 6 wired hooks are STALE** - `close_skills_guard` (item 0,
+built today) and `hook_health_check` (the #46 scrub, built today). Both are on `main`; neither is
+running, because the wired copy lives in a clone that **cannot `git pull`** until item 2 repairs
+`core.bare`. Every improvement authored today is therefore inert on this machine until item 2
+runs, which makes item 2 the only item that unblocks the others. Recorded because the sentence
+above says "verified live" and, read alone, that is now false for a third of the suite - standing
+check 4 applied to the plan's own summary rather than to a hook. Found by this close's
+source-coverage pass, which reconciled the DESIGN claim against the machine, not the code.
+
 ## The bar
 
 **Does this make my sessions better?**
