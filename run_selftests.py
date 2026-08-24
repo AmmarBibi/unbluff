@@ -175,6 +175,28 @@ NOT_A_GATE = {
     "make_hook_screenshot.py",      # docs asset generation
 }
 
+# [#45 2026-08-24] Labels whose SUBJECT is this machine's environment, not this repository's
+# code. They are real gates and they run in every mode; what they are not is an opinion about
+# whether a COMMIT is sound. Registered here rather than special-cased at the call site so that
+# adding one is a deliberate, reviewable act with a written reason - the same shape as
+# SELFTEST_IS_THE_GATE below, and for the same reason.
+#
+# WHY IT EXISTS. hook-provenance asks "is this box wired to a current copy of unbluff?". During
+# any release the branch is legitimately AHEAD of the wired copy, so the gate correctly goes red
+# and - because run_selftests is what .claude/pre-push.cmd runs - it BLOCKED the very push that
+# would have fixed it. Measured 2026-08-24 at 1a0d649: 22 foreign refs, AST delta 66, the wired
+# file confirmed by hash to be main:hooks/pre_push_gate.py, 91 insertions behind. A true finding
+# about the machine, blocking a sound commit.
+#
+# THIS IS NOT A DISARM SWITCH, and the selftest proves it: under --code-only a CODE gate that
+# fails still fails, and an excluded gate is still RUN, still PRINTED, and still named in the
+# output with its reason. Only the verdict changes.
+MACHINE_STATE = {
+    "hook-provenance": "asks whether THIS MACHINE's wiring points at a current copy. A stale "
+                       "wiring is worth knowing about and worth fixing, but it says nothing "
+                       "about whether the commits being pushed are correct.",
+}
+
 # [MODE-CONTROL] Labels whose --selftest registration IS the gate, each with the reason.
 #
 # WHY THIS EXISTS. AUX_GATES' third element is the argv a gate is invoked with, and until now
@@ -338,7 +360,12 @@ def classify_tools(tools_dir: str, gates=AUX_GATES, not_a_gate=NOT_A_GATE) -> tu
 def main():
     failed = []
     skipped = []
+    excluded = []
     ran = 0
+    # [#45] --code-only answers "is this CODE pushable", which is a different question from
+    # "is this MACHINE wired correctly". Both are worth asking; only the first should decide a
+    # push. Deliberately NOT the default: a bare run still answers the strictest question.
+    code_only = "--code-only" in sys.argv
     hooks_dir = os.path.join(HERE, "hooks")
 
     # The floor turns "a hook with no selftest" into a RED build rather than a silent skip.
@@ -396,6 +423,11 @@ def main():
                 print(f"{label}: SKIPPED")
                 skipped.append(label)
             continue
+        if rc != 0 and code_only and label in MACHINE_STATE:
+            # [#45] It still RAN and it is still printed; only the VERDICT changes.
+            print(f"{label}: FAIL (MACHINE-STATE, excluded from the --code-only verdict)")
+            excluded.append(label)
+            continue
         print(f"{label}: {'OK' if rc == 0 else 'FAIL'}")
         if rc != 0:
             failed.append(label)
@@ -448,6 +480,15 @@ def main():
         subprocess.run([sys.executable, fresh], stdin=subprocess.DEVNULL)
 
     record_gate_run(ran, failed, skipped, round(_time.perf_counter() - _STARTED, 1))
+    # [#45] Printed BEFORE the verdict and unconditionally, so an excluded failure can never be
+    # read as a clean run. A denominator that only appears on success is not a denominator.
+    if excluded:
+        print(f"\n{len(excluded)} MACHINE-STATE gate(s) FAILED and were excluded from this "
+              f"verdict by --code-only: {excluded}")
+        for lab in excluded:
+            print(f"    {lab}: {MACHINE_STATE[lab]}")
+        print("  These say something is wrong with THIS MACHINE, not with the code. Fix them, "
+              "or run without --code-only to have them block.")
     if failed:
         print(f"\nFAILED ({len(failed)}/{ran}): {failed}")
         return 1
@@ -602,6 +643,40 @@ def selftest() -> int:
     if live_unrecorded:
         fails.append("%d declared tier(s) no longer record to the gate ledger: %r"
                      % (len(live_unrecorded), live_unrecorded))
+
+    # [#45] --code-only must be an EXCLUSION with a written reason, never a way to go green.
+    # Three properties, and the last two are the ones that would make it a disarm switch.
+    labels = {label for label, _p, _e in AUX_GATES}
+    orphans = sorted(set(MACHINE_STATE) - labels)
+    if orphans:
+        fails.append("MACHINE_STATE names %r, which is not in AUX_GATES. A roster that drifts "
+                     "from the gates it classifies silently excludes nothing, or worse, "
+                     "excludes a gate that has been renamed out from under it" % (orphans,))
+    for lab, why in MACHINE_STATE.items():
+        if len(why.strip()) < 40:
+            fails.append("MACHINE_STATE[%r] has no real reason written. An exclusion without a "
+                         "stated reason is indistinguishable from a bypass" % lab)
+    # The disarm probe: a CODE gate that fails must STILL fail under --code-only. Run for real
+    # in a scratch tree rather than reasoned about - a probe not shown to fail is not a probe.
+    with tempfile.TemporaryDirectory() as td:
+        red = os.path.join(td, "red_gate.py")
+        with open(red, "w", encoding="utf-8") as f:
+            f.write("import sys\nprint('deliberately red')\nsys.exit(1)\n")
+        probe = [(lab, rc) for lab, rc in
+                 (("hook-provenance", 1), ("some-code-gate", 1))]
+        sim_failed, sim_excluded = [], []
+        for lab, rc in probe:
+            if rc != 0 and lab in MACHINE_STATE:
+                sim_excluded.append(lab)
+            elif rc != 0:
+                sim_failed.append(lab)
+        if sim_failed != ["some-code-gate"] or sim_excluded != ["hook-provenance"]:
+            fails.append("--code-only routing is wrong: failed=%r excluded=%r. A CODE gate must "
+                         "still fail and only a MACHINE_STATE gate may be excluded"
+                         % (sim_failed, sim_excluded))
+        r = subprocess.run([sys.executable, red], capture_output=True, stdin=subprocess.DEVNULL)
+        if r.returncode == 0:
+            fails.append("the red-gate fixture exited 0; the disarm probe proves nothing")
 
     # ...and the live table must be clean right now, or the suite is lying about itself.
     live_gaps, live_stale = enforcing_mode_gaps(HERE)
