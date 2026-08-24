@@ -74,8 +74,9 @@ Reconciled `.claude/pre-push.cmd`, the `MACHINE_STATE` contract, and `SECURITY.m
 - The delta scope means **nothing here re-checks the eight gate rows closed before `9bcbbbd`**.
   Those were audited at that commit and have not been re-read.
 - `1,215 lines of new Python` is still unverified and is now two sessions old.
-- `mutation_sweep` has not run since `2026-08-20T17:28:15Z` - now **15 commits** stale, worse than
-  the 13 reported earlier today. It cannot be run until `#46` is fixed.
+- `mutation_sweep` has not run since `2026-08-20T17:28:15Z` - now **16 commits** stale at `20647d7`
+  (13 when first reported this morning; it was 15 when this line was drafted and the close commit
+  itself made it 16 - which is why a count belongs next to the commit it was taken at). It cannot be run until `#46` is fixed.
 - The stray local branch `feature` and six fixture commits from `#46` still exist as refs. Left in
   place deliberately: they are the evidence, and deleting them is a destructive op that belongs
   with the `#46` fix, not with its diagnosis.
