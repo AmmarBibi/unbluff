@@ -91,7 +91,7 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    wired copy is `main`'s older one.
 2. **Repair the main clone's git config.** **CONFIG HALF DONE 2026-08-24T23:05:49Z; the `git
    pull` is still blocked.** `core.bare=true`, a local `core.hooksPath` pointing at the deleted
-   `%TEMP%	mp7dq12juu\myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
+   `%TEMP%/tmp7dq12juu/myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
    section - all four #46 residue, all now unset, verified by re-reading the config and confirming
    the clone resolves to the global `~/.claude/githooks` as `AmmarBibi`, tree clean at `b6cc6cc`.
    Remaining, and it is one command: the clone is **44 commits behind `origin/main`** and cannot
