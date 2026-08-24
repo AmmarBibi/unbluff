@@ -98,10 +98,28 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    be advanced from here because `git pull` trips the tool-permission classifier. Until it runs,
    4 of 6 wired hooks are stale and every fix authored on 2026-08-23/24 is inert on this machine.
 
-3. **Make the per-hook `--selftest` form isolated.** `python hooks/<name>.py --selftest` is not
-   covered by the #46 fix, which lives at the `run_selftests` choke point. Real for solo use:
-   it is how a single hook gets debugged, and under a git hook it writes to the real repo. The
-   scrub belongs in a shared `--selftest` dispatch that does not exist yet.
+3. **Make the per-hook `--selftest` form isolated.** **PARTIAL 2026-08-24.**
+   `meta_audit_on_stop.py` now scrubs before a direct `--selftest`; it was the file that did the
+   damage and it is one of the two hooks currently LIVE. Population DERIVED, not listed - of the
+   five files with a `--selftest` that mention git, three run a mutating verb:
+   `meta_audit_on_stop` (done), `fast_test_on_stop_selftest` and `pre_push_gate_selftest`.
+   `fast_test_on_stop.py` is READ-ONLY and is not in the population, which matters because it is
+   pinned at 851 with zero ratchet headroom and "the fix will not fit" would have been the wrong
+   conclusion from a real constraint. The two remaining are 1003 and 1192 lines, both recorded
+   offenders, so their scrub needs a deliberate `_accepted_growth` re-record - the mechanism
+   `main` already used for 1109 -> 1131.
+   **CAVEAT, and it is load-bearing: the landed scrub is DEFENCE IN DEPTH, not a fix with a
+   demonstrated failure behind it.** The matched-control probe came back INVALID - the neutered
+   arm did not corrupt either - and the pre-fix file prints `SELFTEST SKIP: git unavailable`
+   under a poisoned `GIT_DIR`, never reaching the fixtures. The true pre-incident version was NOT
+   run, deliberately: its line 577 is `git push -q -u origin HEAD:refs/heads/main`, the line that
+   published a one-file tree over public `main` for eleven hours.
+   **This also corrects the record.** "#46 MECHANISM PROVEN BY PROBE" in the retired plan and in
+   `0427c5b`'s message was an overreach: what was proven is the general fact that `GIT_DIR`
+   overrides `git -C <tmpdir>`, not that it was the causal chain here. `tools/git_isolation.py`'s
+   header gives a detailed chain naming six instances across five files; that analysis has not
+   been independently reproduced, and the honest status of the mechanism is WELL-EVIDENCED, NOT
+   PROVEN.
 4. **Pin the #46 control's own wiring** (gate 9's H3, half-built). `scrub_environ()` at the top
    of `main()` is guarded by nothing - moving it into an uncalled helper leaves all 41 gates
    green. `unrecorded_tiers` is the mechanism to copy.

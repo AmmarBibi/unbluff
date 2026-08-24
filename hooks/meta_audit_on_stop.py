@@ -626,5 +626,35 @@ def selftest() -> int:
     return 0 if not fails else 1
 
 
+def _isolate_selftest() -> None:
+    """[item 3] Scrub git's redirect vars before a DIRECT `--selftest` run.
+
+    THIS FILE IS THE ONE THAT DID THE DAMAGE. Its fixtures around lines 557-591 committed
+    `local only`, `ahead of upstream` and `on a branch that was never pushed` into the LIVE
+    repository on 2026-08-24, because a git hook exports GIT_DIR and GIT_DIR OVERRIDES
+    `git -C <tmpdir>`. run_selftests' scrub sits at its own choke point and cannot help here:
+    `python hooks/meta_audit_on_stop.py --selftest` never passes through it - and that is
+    precisely how a single hook gets debugged.
+
+    Duplicated rather than shared, matching hook_health_check: the fallback exists for a partial
+    checkout with no `tools/`, and you cannot import your way to import-safety. The literal list
+    is checked against `git_isolation.GIT_REDIRECT_VARS` by `tools/check_selftest_isolation.py`,
+    so the copy cannot drift from the original in silence.
+    """
+    try:
+        _tools = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        from git_isolation import scrub_environ
+        scrub_environ()
+    except ImportError:
+        for _var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+            os.environ.pop(_var, None)
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        _isolate_selftest()
     raise SystemExit(selftest() if "--selftest" in sys.argv else main())
