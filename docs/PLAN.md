@@ -37,15 +37,27 @@ Seven hook commands wired in `~/.claude/settings.json`, running from
 `core.hooksPath` at `~/.claude/githooks`, plus four skills `install.py` copies into
 `~/.claude/skills`. That is the product. Everything else is scaffolding around it.
 
-**BUILT IS NOT LIVE, and right now they differ.** Measured 2026-08-24T22:06:53Z by hashing each
-wired file against `origin/main`: **2 of 6 wired hooks are STALE** - `close_skills_guard` (item 0,
-built today) and `hook_health_check` (the #46 scrub, built today). Both are on `main`; neither is
-running, because the wired copy lives in a clone that **cannot `git pull`** until item 2 repairs
-`core.bare`. Every improvement authored today is therefore inert on this machine until item 2
-runs, which makes item 2 the only item that unblocks the others. Recorded because the sentence
-above says "verified live" and, read alone, that is now false for a third of the suite - standing
-check 4 applied to the plan's own summary rather than to a hook. Found by this close's
-source-coverage pass, which reconciled the DESIGN claim against the machine, not the code.
+**BUILT IS NOT LIVE, and right now they differ.** First measured 2026-08-24T22:06:53Z as **2 of 6
+wired hooks STALE**. **RE-DERIVED 2026-08-24T23:06:35Z: it is 4 of 6, and the clone is 44 commits
+behind `origin/main`.** Stale: `close_skills_guard` (item 0), `hook_health_check` (the #46 scrub),
+`fast_test_on_stop` (the #25 disclosure) and `pre_push_gate` (the #30 moved-clone fix). Live:
+`meta_audit_on_stop`, `stop_dispatcher`.
+
+The earlier count was not wrong when taken - it named only the two hooks built that afternoon, and
+silently omitted the two whose fixes landed the session before. That is the same undercount shape
+the plan warns about elsewhere: a measurement scoped to what the author was thinking about rather
+than to the population. **The two it missed are the two that matter most to a user** - the
+execution-model disclosure and the gate that bricks pushes on a moved clone.
+
+**Item 2's config half is DONE (2026-08-24T23:05:49Z).** `core.bare`, the local `core.hooksPath`
+pointing at a deleted temp dir, and the `t@t` identity are all unset, plus the stale
+`branch.feat/enforcing-verify.*` section; the clone now resolves hooks to the global
+`~/.claude/githooks` and its identity to `AmmarBibi <ammarbibi@hotmail.com>`, with a clean tree at
+`b6cc6cc`. The full local config before the change is recorded in the commit message as the
+rollback record. **The `git pull` itself remains blocked by the tool-permission classifier** - so
+the clone is now REPAIRED BUT STILL BEHIND, and all four stale hooks stay inert until someone runs
+that one command. Before this repair the pull would have failed anyway on `core.bare=true`; now it
+is purely a permission away.
 
 ## The bar
 
@@ -77,11 +89,15 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    (d) the selftest that **corrupted the repo and pushed a one-file tree to public `main`**
    (#46). Merging also permanently clears `hook-provenance`, which fails today only because the
    wired copy is `main`'s older one.
-2. **Repair the main clone's git config** - `core.bare=true`, a `core.hooksPath` pointing at a
-   deleted temp directory (so **that repo's git hooks are all disabled right now**), a `t@t`
-   identity, and a stale `[branch]` section. All four are #46 residue. Blocked on a
-   tool-permission classifier; the command is in
-   [gate 0 evidence](audits/gate0_evidence_2026-08-24.md) s6.
+2. **Repair the main clone's git config.** **CONFIG HALF DONE 2026-08-24T23:05:49Z; the `git
+   pull` is still blocked.** `core.bare=true`, a local `core.hooksPath` pointing at the deleted
+   `%TEMP%	mp7dq12juu\myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
+   section - all four #46 residue, all now unset, verified by re-reading the config and confirming
+   the clone resolves to the global `~/.claude/githooks` as `AmmarBibi`, tree clean at `b6cc6cc`.
+   Remaining, and it is one command: the clone is **44 commits behind `origin/main`** and cannot
+   be advanced from here because `git pull` trips the tool-permission classifier. Until it runs,
+   4 of 6 wired hooks are stale and every fix authored on 2026-08-23/24 is inert on this machine.
+
 3. **Make the per-hook `--selftest` form isolated.** `python hooks/<name>.py --selftest` is not
    covered by the #46 fix, which lives at the `run_selftests` choke point. Real for solo use:
    it is how a single hook gets debugged, and under a git hook it writes to the real repo. The
