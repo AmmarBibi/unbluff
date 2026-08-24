@@ -38,14 +38,6 @@ into Phase 1 under the real bar, and they are marked ELEVATED below.
 Materiality still decides ORDER, never WHETHER.
 
 ## Phase 1 - what must be true before v1.4.0
-1. **Merge `main` into `feat/enforcing-verify`.** **DONE** `d89e3dc`. Baseline conflict resolved by RE-MEASURING the merged tree, which independently reproduced the planned union. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-1).
-2. **Fix the execution model** (#25) **DONE** `13a8845`. Disclosure of the untrusted surface (not the wrapper), no auto-detect for repos that never opted in, `SECURITY.md` shipped. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-2).
-3. **Prove the README subset** (#6, #28) **DONE** `1aed8cc`, and RE-CUT: the gate is claims the tests CONTRADICT, not an unenumerated ~30. Piece count AND roster now derived and gated. Criterion 1 survives as #6/#28, so `findings.json` needed no rewrite. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-3).
-4. **Mechanise the network claim** (#32a) **DONE 2026-08-22** `a80937c`. `tools/check_no_network.py`, population derived, fails closed. 59 files / 0 reaches (2026-08-23). See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-4).
-5. **Fix the shipped skill that audits documents it never read** (#16) **DONE** `2200229`. A scanned PDF is refused with an OCR instruction instead of reported CLEAN; pinned as PDF-1. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-5).
-6. **Fix `check_file_size`'s live C1** (#31) **DONE 2026-08-22** `1d90cff`. Every exit routes through one `_record` helper, verified by induction. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-6).
-7. **Make the release notes publishable** (#29) **PARTIAL** `a9b5cc6`. Reader-facing `[1.4.0]` written, 19 KB of working notes moved verbatim to `docs/audits/changelog_v1_4_0_engineering_log.md`. **The retroactive v1.3.1 GitHub Release is NOT published - that is the user's call.** See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-7).
-8. **Fix install/uninstall** (#30) **DONE** `31ec83e`. Fixed at the CLASS: both shims now fail loud-but-open when the clone has moved, instead of blocking every push on the machine. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-8).
 0. **CRITICAL - `pre_push_gate_selftest.py` COMMITS TO THE REAL REPOSITORY when the suite runs
    from inside a git hook** (#46, found 2026-08-24). Numbered 0 because it precedes everything:
    until it is fixed, **every push from a worktree corrupts the repo**, so gates 9, 10 and 11
@@ -66,6 +58,14 @@ Materiality still decides ORDER, never WHETHER.
    index or branch refs changed - the tree-guard shape, which this repo does not currently have.
    Note the irony for the write-up: the defect was invisible in six direct suite runs and only
    appeared once the suite ran where it actually ships - inside the hook.
+1. **Merge `main` into `feat/enforcing-verify`.** **DONE** `d89e3dc`. Baseline conflict resolved by RE-MEASURING the merged tree, which independently reproduced the planned union. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-1).
+2. **Fix the execution model** (#25) **DONE** `13a8845`. Disclosure of the untrusted surface (not the wrapper), no auto-detect for repos that never opted in, `SECURITY.md` shipped. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-2).
+3. **Prove the README subset** (#6, #28) **DONE** `1aed8cc`, and RE-CUT: the gate is claims the tests CONTRADICT, not an unenumerated ~30. Piece count AND roster now derived and gated. Criterion 1 survives as #6/#28, so `findings.json` needed no rewrite. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-3).
+4. **Mechanise the network claim** (#32a) **DONE 2026-08-22** `a80937c`. `tools/check_no_network.py`, population derived, fails closed. 59 files / 0 reaches (2026-08-23). See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-4).
+5. **Fix the shipped skill that audits documents it never read** (#16) **DONE** `2200229`. A scanned PDF is refused with an OCR instruction instead of reported CLEAN; pinned as PDF-1. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-5).
+6. **Fix `check_file_size`'s live C1** (#31) **DONE 2026-08-22** `1d90cff`. Every exit routes through one `_record` helper, verified by induction. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-6).
+7. **Make the release notes publishable** (#29) **PARTIAL** `a9b5cc6`. Reader-facing `[1.4.0]` written, 19 KB of working notes moved verbatim to `docs/audits/changelog_v1_4_0_engineering_log.md`. **The retroactive v1.3.1 GitHub Release is NOT published - that is the user's call.** See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-7).
+8. **Fix install/uninstall** (#30) **DONE** `31ec83e`. Fixed at the CLASS: both shims now fail loud-but-open when the clone has moved, instead of blocking every push on the machine. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-8).
 9. **Independent adversarial review of this session's code** (#20). ELEVATED from "a gate" to a
    real pass: 1,215 lines of new Python, most of it guard logic, reviewed by nobody but its author.
    **#46 is the strongest argument yet for this gate**: it sat in the most-edited file on the
@@ -161,10 +161,20 @@ every repo under `--install-global` (#25), still hard-blocking every push if the
 above. The push gate runs `python run_selftests.py`, rc 1 while `hook-provenance` correctly
 reports that drift - so the gate now BLOCKS the very push that would fix it. That is not a defect
 in the code being pushed: it is a MACHINE-STATE question ("is this box wired to a current copy?")
-sitting inside a CODE gate. Three options, none taken unilaterally: give the gate a
-release-in-flight mode; move it out of the pre-push blocking set to SessionStart only, where
-`hook_health_check` already lives; or accept a documented `--no-verify` for release pushes with
-the suite result recorded alongside. The third unblocks today and is the weakest of the three.
+sitting inside a CODE gate. **RESOLVED 2026-08-24 in `73e04bf`** - and the close completeness
+audit caught this row still reading "none taken" three commits after one was. Taken: a
+`MACHINE_STATE` roster in `run_selftests` plus `--code-only`, which excludes such gates from the
+VERDICT and nothing else, declared through an explicit `.claude/pre-push.cmd`. The `--no-verify`
+option was REJECTED: it disables every gate to route around one. Probed, not argued - with
+`check_python_floor.py` replaced by `sys.exit(1)`, `--code-only` still returned rc 1.
+
+**#47 (new, 2026-08-24, found by the close source-coverage pass reading the DESIGN):
+`--code-only` is asserted to be "deliberately NOT the default" and nothing enforces it.**
+`.claude/pre-push.cmd` says so in a comment; a comment is advisory. Adding `--code-only` to
+`.claude/fast-test.cmd` would silently weaken the strictest check in the project and no gate
+would notice - the same shape as the README's "no network" badge before `check_no_network`
+existed. Fix: assert in `run_selftests --selftest` that the turn-end command does not carry
+`--code-only`. Small, and it closes the loop the flag opened.
 
 **#10 is SUPERSEDED** - it would restore a second competing order. Delete
 `NEXT_SESSION_PROMPT.md` or reduce it to a pointer here.
