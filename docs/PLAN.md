@@ -46,8 +46,30 @@ Materiality still decides ORDER, never WHETHER.
 6. **Fix `check_file_size`'s live C1** (#31) **DONE 2026-08-22** `1d90cff`. Every exit routes through one `_record` helper, verified by induction. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-6).
 7. **Make the release notes publishable** (#29) **PARTIAL** `a9b5cc6`. Reader-facing `[1.4.0]` written, 19 KB of working notes moved verbatim to `docs/audits/changelog_v1_4_0_engineering_log.md`. **The retroactive v1.3.1 GitHub Release is NOT published - that is the user's call.** See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-7).
 8. **Fix install/uninstall** (#30) **DONE** `31ec83e`. Fixed at the CLASS: both shims now fail loud-but-open when the clone has moved, instead of blocking every push on the machine. See [gate evidence](audits/gate_evidence_2026-08-23.md#gate-8).
+0. **CRITICAL - `pre_push_gate_selftest.py` COMMITS TO THE REAL REPOSITORY when the suite runs
+   from inside a git hook** (#46, found 2026-08-24). Numbered 0 because it precedes everything:
+   until it is fixed, **every push from a worktree corrupts the repo**, so gates 9, 10 and 11
+   cannot safely run. OBSERVED, not theorised - the first real `git push` of this branch left
+   six fixture commits (`seed`, `local only`, `ahead of upstream`, `on a branch that was never
+   pushed`, `seed`, `fixture`) in the reflog, moved `feat/enforcing-verify` off my work onto a
+   FIXTURE commit `8f63aec`, created a stray branch `feature`, and replaced the index with a
+   935-byte fixture index. Repaired non-destructively (`branch -f` + `symbolic-ref` +
+   `read-tree`); nothing was lost, and `--hard` was never needed.
+   MECHANISM PROVEN BY PROBE, not inferred: a git hook exports `GIT_DIR`, and `GIT_DIR` OVERRIDES
+   `git -C <tmpdir>`. Probe output - with `GIT_DIR` set, `git -C <tmpdir> rev-parse
+   --absolute-git-dir` returned `.../unbluff/.git/worktrees/unbluff-enforcing`. Every temp-repo
+   fixture in that 1131-line selftest therefore operates on the real repository, and `grep`
+   confirms it passes `dict(os.environ)` through with no scrubbing at any of its ~6 git call
+   sites. PRESCRIBED FIX (a hypothesis until re-executed): strip `GIT_DIR`, `GIT_INDEX_FILE`,
+   `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY` and `GIT_COMMON_DIR` from the env of every git
+   subprocess in a temp fixture, and add a gate that FAILS if any selftest leaves the repo's HEAD,
+   index or branch refs changed - the tree-guard shape, which this repo does not currently have.
+   Note the irony for the write-up: the defect was invisible in six direct suite runs and only
+   appeared once the suite ran where it actually ships - inside the hook.
 9. **Independent adversarial review of this session's code** (#20). ELEVATED from "a gate" to a
    real pass: 1,215 lines of new Python, most of it guard logic, reviewed by nobody but its author.
+   **#46 is the strongest argument yet for this gate**: it sat in the most-edited file on the
+   branch, and no amount of self-review found it - running the code where it ships did.
 10. **One clean full sweep at the release HEAD** (#37) and **CI green via a PR** (#26). No clean
     sweep exists for the current HEAD - the last one is six commits back - and no commit on this
     branch has ever run in CI. A PR is the only trigger: pushing the branch runs nothing.
