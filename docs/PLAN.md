@@ -10,6 +10,15 @@ load-bearing line gets skipped. If this needs a third page, something in it is a
 > being written into the rows instead of into `docs/audits/`. Closed rows are now one line plus a
 > link; the evidence lives in `docs/audits/gate_evidence_2026-08-23.md`. Rule for anyone adding
 > here: a row states the OUTCOME and points at the proof. It does not carry the proof.
+>
+> **BREACHED AGAIN, 2026-08-24: 268 lines, and stated rather than quietly tolerated.** The cause
+> is diagnosed, not guessed: gate 9 landed 10 scheduled residue rows and the four close audits
+> landed 4 more, so the growth is BACKLOG, not evidence - the 08-23 breach was evidence, and that
+> cause has not recurred (every proof this session went to `audits/`). Backlog is exactly what
+> **gate 11** converts to GitHub issues, which is the remedy this header already prescribes, and
+> it is the next gate. If gate 11 slips, this file must be drained before anything else is added
+> to it: a briefing document that only grows is already failing, and being skipped is
+> indistinguishable from being absent.
 
 ## What unbluff is
 
