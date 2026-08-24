@@ -65,13 +65,28 @@ def claimed_scenarios(readme_text: str) -> list:
 
 def verdict_scenarios(readme_text: str, recorded) -> tuple:
     claims = claimed_scenarios(readme_text)
-    if recorded is None:
-        return 1, ("readme-scenarios: FAIL - no integration row in the gate ledger, so the "
-                   "pasted transcript is checked against nothing. Run tests/test_integration.py.")
-    passed, total = recorded
+    # The presence of the LINE is a repository property and is checked everywhere. Its VALUE can
+    # only be checked where a run happened, so the two are separated.
     if not claims:
         return 1, ("readme-scenarios: FAIL - README.md contains no 'N/M scenarios passed' line, "
                    "so the integration transcript it offers as evidence is ungated.")
+    if recorded is None:
+        # UNDETERMINED, not FAIL, and not OK. `docs/audits/gate_runs.json` is deliberately
+        # untracked, so NO CI runner has a ledger - the first spelling of this gate failed
+        # closed and reddened all 17 jobs on correct code, which is the environment-dependence
+        # class this very session spent its day removing, reintroduced by the commit removing
+        # it. Blocking on a ledger a runner cannot have is not strictness, it is a gate asking
+        # the wrong machine. The repo already settled this exact dilemma for tools/
+        # no_regression.py - "distinguishes 'I could not look' from 'there is nothing to look
+        # at' and reports the former as UNDETERMINED rather than blocking", quoted in
+        # .github/workflows/selftest.yml - so this follows that precedent rather than inventing
+        # a second answer. Printed distinctly so it can never be read as a pass, and the
+        # integration tier the value depends on is separately gated in CI by its own job.
+        return 0, ("readme-scenarios: UNDETERMINED - README pastes %s and there is no "
+                   "integration row in this checkout's gate ledger to check it against. NOT a "
+                   "pass: run tests/test_integration.py locally before tagging a release."
+                   % (claims,))
+    passed, total = recorded
     bad = [c for c in claims if c != (passed, total)]
     if bad:
         return 1, ("readme-scenarios: FAIL - README pastes %s; the newest recorded integration "

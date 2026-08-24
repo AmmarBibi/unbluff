@@ -78,6 +78,17 @@ ENTRIES = [
        '    return False\n'
        '    names = {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"}')],
      False, "install"),
+    # [ROOT-GLOB 2026-08-24] OPT-1's sibling, and the SECOND instance of that same class. OPT-1
+    # pins the try/except idiom; this pins the lazy one. `import fitz` (extract.py:157) and
+    # `from pdfminer.high_level import ...` (:163) sit at the top of their own functions with the
+    # caller's reader loop handling failure, so they fell through to find_spec - TRUE on the
+    # author's box, FALSE on every runner. install.py then demanded scripts/fitz.py and
+    # scripts/pdfminer.py, files that exist nowhere, and sys.exit'd: 15 of 17 CI jobs red, and
+    # any USER without both libraries unable to install unbluff at all.
+    ("install", "OPT-2", "a LAZY import is treated as REQUIRED again - the fitz/pdfminer defect "
+     "that made install.py refuse to run for anyone without PyMuPDF",
+     [("        if lazy_optional:", "        if False:")],
+     False, "install"),
     ("install", "EG-1", "a missing SKILL.md stops being reported, so install ships "
      "close_skills_guard demanding a skill the user never received",
      [('        if not os.path.exists(md):\n'

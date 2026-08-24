@@ -61,8 +61,16 @@ def _tracked(repo: str = REPO) -> set | None:
 # and this very file), tests/, and the skill scripts install.py ships to the user's machine.
 # The gate could not detect its own sabotage - proved by committing `def backdoor(): return 42`
 # into tools/mutation_check.py with --release still exiting 0 (P13 A1).
+#
+# [ROOT-GLOB 2026-08-24] The root entries were `install.py, run_selftests.py` - an ENUMERATED
+# roster standing in for the concept "tracked top-level Python", which is the shape this repo
+# has dug out four times already (REQUIRED_HOOKS, _SH_SITES_REQUIRED, the integration count,
+# ROSTER-DERIVE). Splitting install.py's selftest out added a 358-line top-level file that the
+# gate then did not ask about, and CI - not the author, and not this gate's own selftest -
+# caught it. A bare `*.py` derives the same set and cannot go stale; `units()` already
+# intersects with `git ls-files`, so untracked scratch in the repo root is still never demanded.
 UNIT_GLOBS = ("hooks/*.py", "tools/*.py", "tests/*.py", "scripts/*.py",
-              "skills/*/scripts/*.py", "install.py", "run_selftests.py")
+              "skills/*/scripts/*.py", "*.py")
 
 
 def units(repo: str = REPO) -> list:
@@ -324,11 +332,17 @@ def _selftest_fixture() -> list:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 f.write("x = 1\n")
-        with open(os.path.join(repo, "untracked_scratch.py"), "w", encoding="utf-8") as f:
-            f.write("x = 1\n")     # never `git add`ed - must NOT be demanded
         _git("add", "-A")
         if _git("commit", "-q", "-m", "fixture").returncode != 0:
             return [SKIP_RC]
+        # AFTER the commit, so it is genuinely untracked. [ROOT-GLOB 2026-08-24] It used to be
+        # written BEFORE `git add -A`, which tracked it - so the comment "never `git add`ed" was
+        # false and this assertion passed for the wrong reason: the old UNIT_GLOBS enumerated
+        # root files, so a root scratch file was excluded by the GLOB and the tracked-file
+        # intersection it claims to test was never exercised. Widening the root pattern to
+        # `*.py` turned it red immediately, which is the assertion finally doing its job.
+        with open(os.path.join(repo, "untracked_scratch.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")     # never `git add`ed - must NOT be demanded
 
         asked = set(units(repo))
         for rel in planted:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import glob
 import os
 import stat
 import shutil
@@ -64,7 +65,17 @@ COPY_TREES = ("hooks", "tools", "tests", "skills", ".github", "docs/audits", "ex
 # main() returns "cannot read README.md" and never reaches its checks, so every mutation of
 # that file died at baseline. The roster has to contain what the gates READ, not only what
 # gets mutated - the same distinction `.github` above turned on.
-COPY_FILES = ("install.py", "run_selftests.py", "README.md")
+#
+# [ROOT-GLOB 2026-08-24] Expressed as PATTERNS, and `*.py` rather than a list of root filenames.
+# The enumerated form went stale the moment install.py's selftest was split into a sibling: the
+# scratch tree got install.py without install_selftest.py, `install.py --selftest` died with
+# ModuleNotFoundError, and every one of the 10 install mutations reported HARNESS ERROR -
+# twenty-five minutes of CI proving nothing, with a summary line that still totalled cleanly.
+# check_mutation_anchors.roster_gaps() is deliberately PURE (it must accept planted rosters, or
+# its own mutations survive), so it cannot glob the filesystem to decide adequacy. Keeping the
+# roster in the same vocabulary as UNIT_GLOBS lets its membership test stay exact while the copy
+# loop below does the expansion.
+COPY_FILES = ("*.py", "README.md")
 
 
 def unit_path(root: str, name: str) -> str:
@@ -74,9 +85,10 @@ def unit_path(root: str, name: str) -> str:
     containing "/" is repo-relative (`tools/check_review_freshness`), which is what lets this
     harness reach the gate tooling.
 
-    A bare name that is NOT a hook falls back to the repo ROOT. Without that fallback the two
-    files in `COPY_FILES` - `install.py` and `run_selftests.py` - had no addressable form at
-    all: a bare name went to `hooks/`, and a repo-relative name needs a "/" they do not have.
+    A bare name that is NOT a hook falls back to the repo ROOT. Without that fallback the
+    repo-root files `COPY_FILES` supplies - `install.py` and `run_selftests.py` at the time,
+    every tracked root `*.py` now - had no addressable form at all: a bare name went to
+    `hooks/`, and a repo-relative name needs a "/" they do not have.
     The harness copied them into every scratch tree and could not mutate either, so the single
     most user-facing file in the repo - the one a user actually runs - was uncoverable BY
     CONSTRUCTION while the summary line printed a clean total. That is the INSTALL-TAUTOLOGY
@@ -409,10 +421,11 @@ def run(hook: str, finding: str, desc: str, edits, posix_only: bool, verify="") 
             src = os.path.join(REPO, *parts)
             if os.path.isdir(src):
                 shutil.copytree(src, os.path.join(scratch, *parts), ignore=_ignore)
-        for name in COPY_FILES:
-            src = os.path.join(REPO, name)
-            if os.path.isfile(src):
-                shutil.copy2(src, os.path.join(scratch, name))
+        # Patterns, expanded here. A literal name globs to itself, so plain entries still work.
+        for pattern in COPY_FILES:
+            for src in sorted(glob.glob(os.path.join(glob.escape(REPO), pattern))):
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(scratch, os.path.basename(src)))
         verify_target = unit_path(scratch, unit or hook)
 
         # The INVOCATION, chosen once and used for BOTH the baseline and the mutant. Deriving it

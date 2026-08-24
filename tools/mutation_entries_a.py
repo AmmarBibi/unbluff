@@ -409,9 +409,13 @@ ENTRIES = [
     # copy-tree widening above, which is the same blind spot as A1 itself.
     ("tools/check_review_freshness", "A1", "units() back to the hooks-only roster (tools/ and "
      "tests/ unwatched)",
+     # Anchor re-cut 2026-08-24 [ROOT-GLOB]: the enumerated root entries became `*.py`, so the
+     # old anchor stopped matching. The mutation's MEANING is unchanged - narrow the roster back
+     # to hooks plus the repo root, leaving tools/, tests/, scripts/ and the shipped skill
+     # scripts unwatched. Caught by check_mutation_anchors, not by the 25-minute sweep.
      [('UNIT_GLOBS = ("hooks/*.py", "tools/*.py", "tests/*.py", "scripts/*.py",\n'
-       '              "skills/*/scripts/*.py", "install.py", "run_selftests.py")',
-       'UNIT_GLOBS = ("hooks/*.py", "install.py", "run_selftests.py")')], False),
+       '              "skills/*/scripts/*.py", "*.py")',
+       'UNIT_GLOBS = ("hooks/*.py", "*.py")')], False),
     ("tools/check_review_freshness", "A1b", "_tracked() returns an empty set instead of None "
      "when git cannot answer",
      [("    if r.returncode != 0:\n        return None\n    return {x.replace",
