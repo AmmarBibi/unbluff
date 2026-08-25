@@ -5,6 +5,9 @@ validates, in a few hundred ms, that:
   - ~/.claude/settings.json parses;
   - every hook command's executable resolves (an absolute path that exists, or a name on PATH);
   - every absolute script path referenced in a hook command exists on disk;
+  - every git clone those commands actually run OUT OF is still a sane repository - not marked
+    core.bare while it has a working tree, core.hooksPath resolving to a directory that EXISTS,
+    and not committing under one of this suite's own test-fixture identities (item 10, #46);
   - each self-testable hook in this suite still passes its own --selftest (run at most weekly).
 Prints ONE line when healthy, a short warning list when not. ALWAYS exits 0 (never blocks a
 session) - even on a hand-edited/malformed settings.json, it reports the problem instead of
@@ -72,6 +75,9 @@ KNOWN_NO_SELFTEST = frozenset({
     # so the next addition would be a deliberate decision, and B3-P set the precedent that the
     # answer is to MOVE rather than log the violation. 536 + 359 now.
     "hook_health_check_selftest.py",
+    # Added 2026-08-25, same precedent, third time: item 10's machine-sanity checks took this
+    # file to 861 lines, so the checks moved to wired_clone_sanity.py and their battery here.
+    "wired_clone_sanity_selftest.py",
 })
 
 SKIP_RC = 77  # a selftest that could not run (no git/sh). Not a pass, not a failure.
@@ -501,6 +507,20 @@ def _script_tokens(text: str) -> list:
             if t.strip().strip('"').strip("'").lower().endswith(".py")]
 
 
+# [item 10] The machine-sanity checks live in wired_clone_sanity.py. MOVED there rather
+# than recorded as a file-size offender: adding them inline took this file to 861 lines,
+# over the 800 limit and in no baseline, which is item 7's finding arriving on the very
+# session that wrote item 7 down. B3-P's precedent is to MOVE. The split also puts the
+# battery's measured 1.56s of git fixtures on its own selftest budget instead of pushing
+# this hook's share to 84%.
+try:
+    from wired_clone_sanity import machine_sanity_problems
+except ImportError:  # partial checkout - a missing sibling must not stop a health check
+    def machine_sanity_problems(cfg):  # noqa: D103
+        return (["machine sanity: wired_clone_sanity.py is missing - the wired clone's git"
+                 " config was NOT checked"], 0, 0)
+
+
 def main() -> int:
     sp = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     try:
@@ -518,6 +538,20 @@ def main() -> int:
     n_cmd, problems = check_config(cfg)
     problems += floor_violations()
     problems += stale_root_registrations(cfg)
+    # [item 10] BEFORE the weekly sweep, so a machine whose git config is broken says so even
+    # when the sweep is not due - which is every session but one in seven.
+    sanity, n_repos, n_sanity_skipped = machine_sanity_problems(cfg)
+    problems += sanity
+    # Name this DENOMINATOR too. "OK - 30 hook commands verified" with zero clones examined and
+    # zero clones examined-and-clean are the same line, and only one of them means anything.
+    if n_repos:
+        sanity_note = f", {n_repos} wired clone(s) config-checked"
+        if n_sanity_skipped:
+            sanity_note += f" ({n_sanity_skipped} could not be checked)"
+    elif n_sanity_skipped:
+        sanity_note = f", {n_sanity_skipped} wired clone(s) NOT config-checked"
+    else:
+        sanity_note = ""
     swept = selftestable_hooks()
     total_hooks = len(all_hook_files())
     weekly_problems, n_run, n_passed, n_skipped, n_left = run_weekly_selftests(swept, _STATE_DIR)
@@ -535,7 +569,8 @@ def main() -> int:
         if gap:
             weekly_note += f"; {gap} of {total_hooks} hooks have NO selftest"
     if problems:
-        print(f"[hook-health] {len(problems)} problem(s) across {n_cmd} hook commands{weekly_note}:")
+        print(f"[hook-health] {len(problems)} problem(s) across {n_cmd} hook commands"
+              f"{sanity_note}{weekly_note}:")
         # [C1] Was a hand-rolled display cap: `for p in problems[:12]` plus a separately
         # computed "... and N more". The literal 12 sat on three different lines, so an edit to
         # one of them would make the notice lie, and the cap guard was blind to the whole
@@ -545,7 +580,7 @@ def main() -> int:
                                          prefix="  - ", noun="problem"):
             print(line)
     else:
-        print(f"[hook-health] OK - {n_cmd} hook commands verified{weekly_note}")
+        print(f"[hook-health] OK - {n_cmd} hook commands verified{sanity_note}{weekly_note}")
     return 0
 
 

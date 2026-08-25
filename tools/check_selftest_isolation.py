@@ -47,6 +47,18 @@ MUTATING_VERBS = frozenset({
     "config", "push", "merge", "update-ref", "am", "cherry-pick", "rebase", "tag",
 })
 
+# The read-only forms of `git config`, which is the one verb above that is a READ or a WRITE
+# depending on its flags. Added 2026-08-25: hooks/wired_clone_sanity.py's only git call is
+# `config -z --show-origin --get-regexp`, which cannot write, and the gate reported it
+# UNISOLATED - a false alarm against correct work, which is the failure mode this file's own
+# selftest already names ("a correctly scrubbed file was flagged as unisolated"). This is a
+# FROZEN EXTERNAL VOCABULARY, fixed by git's own documented interface, not a roster over this
+# repo's code - the same justification hook_health_check gives for the shell-builtin sets.
+CONFIG_READ_ONLY_FLAGS = frozenset({
+    "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool",
+    "--list", "-l",
+})
+
 # Matched by SHAPE, not by an exact roster. The first version was a frozenset of three exact
 # names and it missed `_scrub_environ` - the alias its own companion script had just inserted
 # into four files - so the gate reported four correctly-scrubbed files as UNISOLATED. A hardcoded
@@ -90,10 +102,20 @@ def mutating_verbs_in(tree) -> set:
                 flat.extend(a.elts)
             else:
                 flat.append(a)
-        for a in flat:
-            if isinstance(a, ast.Constant) and isinstance(a.value, str):
-                if a.value in MUTATING_VERBS:
-                    found.add(a.value)
+        strs = {a.value for a in flat
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+        for verb in strs & MUTATING_VERBS:
+            # `config` is the ONLY verb in the set that reads or writes depending on its flags,
+            # and this gate's own contract (see MUTATING_VERBS above) is that a file which cannot
+            # corrupt anything must not enter the population - "a gate that demands work with no
+            # failure behind it is how gates get switched off". A `--get-regexp` read cannot
+            # corrupt anything, and counting it flagged hooks/wired_clone_sanity.py, whose only
+            # git call is a read AND already passes env=scrubbed_env(). The flags are read from
+            # the SAME Call node, so a file that also WRITES config is still caught: that write
+            # is a different Call with no read flag on it.
+            if verb == "config" and (strs & CONFIG_READ_ONLY_FLAGS):
+                continue
+            found.add(verb)
     return found
 
 
@@ -257,6 +279,30 @@ def selftest() -> int:
     """Negative controls FIRST: a gate that cannot fail is not a gate."""
     import tempfile
     fails = []
+    # [CONFIG-RO 2026-08-25] `config` reads OR writes depending on its flags, and this gate
+    # counted every occurrence as a write - a false alarm against correct work, which is the
+    # exact failure this file's "a correctly scrubbed file was flagged" case below exists for.
+    # A NARROWING change to a gate can only ever let something through, so the load-bearing
+    # cases are the ones asserting a WRITE is still caught - including when a read flag appears
+    # elsewhere in the same file, which must not launder it.
+    for _src, _want, _why in (
+            ('x = _git(r, ["config", "-z", "--show-origin", "--get-regexp", k])', set(),
+             "a --get-regexp read cannot corrupt anything"),
+            ('x = _git(r, ["config", "--get", "core.bare"])', set(), "--get is a read"),
+            ('x = _git(r, ["config", "--list"])', set(), "--list is a read"),
+            ('sh(r, "config", "user.email", "t" + "@t")', {"config"}, "a bare write"),
+            ('sh(r, "config", "--unset", "core.bare")', {"config"}, "--unset is a write"),
+            ('a = _git(r, ["config", "--get", "x"])\nsh(r, "config", "core.bare", "true")\n',
+             {"config"}, "a read flag on ANOTHER call must not launder the write"),
+            ('sh(r, "init", "-q")', {"init"}, "verbs other than config are untouched"),
+    ):
+        _got = mutating_verbs_in(ast.parse(_src))
+        if _got != _want:
+            fails.append("CONFIG-RO: %s -> %s, expected %s (%s)"
+                         % (_src.replace("\n", " ; "), sorted(_got), sorted(_want), _why))
+    if "--get-regexp" not in CONFIG_READ_ONLY_FLAGS or not CONFIG_READ_ONLY_FLAGS:
+        fails.append("CONFIG-RO: the read-only flag vocabulary is empty or has lost "
+                     "--get-regexp, so the narrowing above is not the one that was probed")
     with tempfile.TemporaryDirectory() as td:
         for sub in ("hooks", "tools"):
             os.makedirs(os.path.join(td, sub))

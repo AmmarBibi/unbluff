@@ -59,7 +59,18 @@ REQUIRED_HOOKS = ("rate_prompt.py", "hook_health_check.py", "stop_dispatcher.py"
                   "numbers_match_on_write.py", "duplicate_registration_check.py",
                   "close_skills_guard.py", "usage_snip_prompt.py", "pre_push_gate.py",
                   "timing_claim_guard.py",
-                  "piped_gate_guard.py")
+                  "piped_gate_guard.py",
+                  # [item 10, 2026-08-25] Declared in the FLOOR because the import closure cannot
+                  # reach them: hook_health_check imports wired_clone_sanity inside a
+                  # `try/except ImportError` so a partial checkout still gets a health line, and
+                  # _catches_import_error correctly reads a guarded import as OPTIONAL. The
+                  # fallback is right and stays; what is wrong is concluding the file is
+                  # therefore expendable - without it the SessionStart machine-sanity check just
+                  # stops happening. install.py's own partial-checkout selftest caught this on
+                  # the first run (2 of 28 deleted files undetected), which is the floor doing
+                  # the one job the roster docstring says only it can do.
+                  "wired_clone_sanity.py",
+                  "wired_clone_sanity_selftest.py")
 
 
 def _cmd(script: str) -> str:

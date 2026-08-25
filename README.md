@@ -166,14 +166,15 @@ hook_health_check: OK  hook_layers: OK  memory_hygiene_guard: OK
 meta_audit_on_stop: OK  numbers_match_on_write: OK  piped_gate_guard: OK
 plan_defer_guard: OK  post_tooluse_dispatcher: OK  pre_push_gate: OK  rate_prompt: OK
 selftest_budget: OK  show_your_proof: OK  stop_dispatcher: OK  timing_claim_guard: OK
-transcript_util: OK  usage_snip_prompt: OK
+transcript_util: OK  usage_snip_prompt: OK  wired_clone_sanity: OK
 consistency-audit-skill: OK  examples-settings-fresh: OK  install-guard: OK
 file-size: OK  ship-bar: OK  gate-ledger: OK  false-alarm-scorer: OK  no-network: OK
 python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK  hook-provenance: OK  hook-provenance-selftest: OK
-git-isolation: OK  mutation-anchors: OK  corpus-scorer: OK
--- gate modes: 18 row(s) examined, 5 adjudicated as selftest-is-the-gate
-all 43 selftests passed
+git-isolation: OK  selftest-isolation: OK  selftest-isolation-selftest: OK
+mutation-anchors: OK  corpus-scorer: OK
+-- gate modes: 20 row(s) examined, 6 adjudicated as selftest-is-the-gate
+all 44 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

@@ -37,16 +37,32 @@ Seven hook commands wired in `~/.claude/settings.json`, running from
 `core.hooksPath` at `~/.claude/githooks`, plus four skills `install.py` copies into
 `~/.claude/skills`. That is the product. Everything else is scaffolding around it.
 
-**BUILT IS NOT LIVE, and right now they differ.** Measured three times and it has gone UP each
-time, because every fix widens the gap until the clone can pull: **2 of 6** at 2026-08-24T22:06:53Z,
-**4 of 6** at 23:06:35Z, and **5 of 6 at 2026-08-25T01:42:33Z** with the clone 44 commits behind
-`origin/main`. Stale: `close_skills_guard`, `hook_health_check`, `fast_test_on_stop`,
-`pre_push_gate`, and now `meta_audit_on_stop` - which item 3's scrub moved out of LIVE. Live:
-`stop_dispatcher` alone.
-That trajectory is the point, not the number: **this session made the live machine MORE stale, not
-less**, and it will keep doing so until item 2's pull runs. Caught by the close consistency pass
-re-deriving a figure the plan already carried, which is the only reason it is not still reading
-"4 of 6".
+**BUILT IS NOT LIVE, and right now they differ.** Re-derived 2026-08-25T02:19:47Z by content hash
+against committed `ff251e2`, with the DENOMINATOR derived rather than assumed - and **the figure
+this paragraph carried was wrong**:
+
+| population | how it is reached | stale |
+|---|---|---|
+| 7 hooks named in `settings.json` | Claude Code | **2** - `close_skills_guard`, `hook_health_check` |
+| 2 `stop_dispatcher` children | in-process import | **2** - `meta_audit_on_stop`, `fast_test_on_stop` |
+| 1 `core.hooksPath` target | `~/.claude/githooks/pre-push` | **1** - `pre_push_gate` |
+| **entry points that RUN** | | **5 of 10** |
+| every `hooks/*.py` | incl. the libraries those import | **12 of 26**; `fast_test_disclosure.py` is ABSENT |
+
+The five NAMES were exactly right. The denominator was not: it read **"5 of 6 ... Live:
+`stop_dispatcher` alone"**, when the population is 10 and FIVE hooks are live - `stop_dispatcher`,
+`duplicate_registration_check`, `post_tooluse_dispatcher`, `rate_prompt`, `usage_snip_prompt`.
+The 6 was the five files that had been worked on plus the one known-good: **a denominator scoped
+to what the author was thinking about rather than to the population**, which is the defect this
+plan names in three other places, and the third session running that this one number has been
+wrong. Found only because item 10's new check printed `1 wired clone config-checked` and that
+disagreed with the prose - the mechanism catching the memo, which is the whole argument for
+item 10.
+
+The trajectory still holds and is the real point: **every session that fixes something makes the
+live machine MORE stale**, and it will keep doing so until item 2's pull runs. The library row
+matters more than it looks - 12 of 26 files differ, so even the five LIVE entry points are
+importing stale siblings.
 
 The earlier count was not wrong when taken - it named only the two hooks built that afternoon, and
 silently omitted the two whose fixes landed the session before. That is the same undercount shape
@@ -228,11 +244,78 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     non-bare repo marked `core.bare=true`, `core.hooksPath` aimed at a DELETED temp directory
     which silently disabled every git hook on the machine, and a `t@t` identity - would sit
     unnoticed again.
-    Fix: have `hook_health_check` assert the wired clone's config is sane at SessionStart -
-    `core.bare` unset, `core.hooksPath` resolving to a directory that EXISTS, identity not a
-    fixture. Cheap, and it converts a repair I did by hand into something that reports itself.
-    This is the REMEMBER-vs-ENFORCE conversion applied to my own repair, and it is the one item
-    here that is NOT blocked behind item 2's pull.
+    **DONE 2026-08-25.** `hooks/wired_clone_sanity.py`, called by `hook_health_check.main()` at
+    SessionStart, registered as its own gate (`wired_clone_sanity`) and swept weekly. It asks the
+    three questions of every clone the machine wires hooks from, and the clones are **DERIVED
+    from `settings.json`**, never named - a hardcoded path would check this machine and nobody
+    else's. Fixture identities are DERIVED too, by scanning `hooks/` and `tools/` for the
+    call shape that writes one: the population is exactly right by construction, because an
+    identity no fixture here writes cannot have escaped from a fixture here. Verified against
+    `git_isolation.py`'s own header - the scan over 50 files returns exactly `{t@t, t}`, from the
+    3 files that write them. Measured live at 02:17:52Z: `1 wired clone(s) config-checked`, zero
+    problems, whole hook 0.33s. **10 states asserted, 7 of them CONTROLS that must NOT fire**,
+    plus 3 extractor and 5 totality cases.
+
+    **THE PROBE EARNED ITS COST, three times, and none of the three were typos.**
+    - `rev-parse --show-toplevel` FAILS on a repo marked `core.bare`, so the first version
+      dropped the broken clone out of the roster entirely and reported nothing while the
+      healthy-repo control still passed. **The defect made itself invisible to its own
+      detector.** Fixed with `--absolute-git-dir`, which answers in both states; pinned by
+      `the BROKEN repo is still in the roster`.
+    - The extractor scans `hooks/*.py`, and the battery LIVES in `hooks/` - so its control
+      identity was absorbed into the fixture vocabulary and the check began firing on the very
+      control meant to prove it does not fire on correct work. Five controls red at once.
+      **A grep guard must never search for a literal it contains**, and the first draft of the
+      comment explaining that contained the literal. Fixed by composing the strings, the same
+      technique `_flag = "--" + "selftest"` already uses in that file for the same reason, and
+      pinned by `this file contributes zero identities`.
+    - The blind-extractor CONTROL was not blind: it neutered the pattern with a sentinel WORD
+      that is itself a literal in the scanned file, and `findall` on a group-less pattern
+      returns WHOLE matches - so the "blind" extractor derived exactly one identity, its own
+      sentinel. It then reported that production "passes silently", **a finding about the probe
+      wearing the costume of a finding about the code.** Fixed with `(?!)`, and the control now
+      asserts it is controlling before it asserts anything else.
+
+    Three gates then caught three more things, which is the argument for running them rather than
+    reasoning about them: **file-size** (the block took `hook_health_check.py` to 861 lines, so
+    the checks MOVED to their own module per B3-P rather than being recorded as debt - item 7's
+    finding arriving on the session that wrote item 7 down); **install-guard** (2 of 28 deleted
+    files undetected, because the deliberate `try/except ImportError` fallback correctly reads as
+    OPTIONAL - both files are now declared in `REQUIRED_HOOKS`, which is the one job that floor
+    exists for); and **selftest-isolation**, twice - see items 11 and 12.
+    KNOWN LIMIT, adjudicated rather than left to be rediscovered, pinned as **HHC-SETTINGS-ONLY**:
+    the repo roster comes from `settings.json` alone, which is 7 of the 10 entry points that
+    actually run. It is a limit on the DENOMINATOR and not on the checks - each repo is asked
+    about its EFFECTIVE config, so a global `core.hooksPath` at a deleted directory is caught
+    through whichever repo is examined - and `n_repos` is printed rather than assumed.
+
+11. **`check_selftest_isolation` cannot see a mutating verb inside a CONCATENATED argument list.**
+    New 2026-08-25, found while verifying item 10's narrowing of that gate rather than accepting
+    its green. `mutating_verbs_in` walks Call nodes for string CONSTANTS, so
+    `_git(["config", "--global"] + args)` yields **nothing** - and that call is
+    `pre_push_gate.install_global()`, the code that writes `core.hooksPath` **globally, for every
+    repository on the machine**. Verified both directions: the same call written as a flat list
+    IS detected, and `sh(*(["config"] + rest))` is not.
+    Not caused by item 10 and not hidden by it: `pre_push_gate.py` was in the population on the
+    strength of a READ elsewhere in the file and was already adjudicated `scrubbed` by import
+    delegation, so no verdict changed. But the gate has never actually seen the write it most
+    needs to see. Fix: flatten `BinOp`/`Starred` argument nodes before extracting constants.
+
+12. **That gate's POPULATION is decided by a prose mention.** New 2026-08-25, same investigation.
+    Membership is `has a mutating verb AND the string "--selftest" appears in the file text` - so
+    `hooks/wired_clone_sanity_selftest.py`, which builds real repositories with `init` and
+    `config` writes, was **silently exempt from the gate that checks it scrubs**, purely because
+    its docstring did not happen to use the flag. Fixed for that file by documenting the dispatch
+    relationship it genuinely has, which is what its sibling already does - but the rule is the
+    defect. Fix: membership should follow DELEGATION, the way the scrub verdict already does
+    (`res["_deferred"]`), so a module reached from a `--selftest` path inherits it structurally.
+
+13. **`hook_health_check`'s selftest budget share should be revisited.** New 2026-08-25.
+    Not urgent and NOT currently a problem - the item-10 split took it from 8.37s/84% back to
+    **6.78s / 68%** of its 10.00s share, measured 02:31:55Z. Recorded because the 84% was reached
+    by adding ONE battery, that file records 93% as the level where the mutation harness reported
+    `baseline already RED` for six unrelated mutations, and the next addition starts from 68%
+    rather than from the 6.4s the existing comments still assume.
 
 ## Retired, not forgotten - and why each one died
 
