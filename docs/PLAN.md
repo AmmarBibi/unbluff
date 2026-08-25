@@ -219,6 +219,32 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    `plan_v140_retired` and appeared ZERO times here until now.
    Fix: assert in `run_selftests --selftest` that the turn-end command does not carry `--code-only`.
 
+   **BUILT AND PROBED 2026-08-25, THEN REVERTED - it is BLOCKED BEHIND ITEM 7, and the ratchet
+   is what proved it.** Attempted out of order because it is small and the pull does not block
+   it. It does not fit: adding it took `run_selftests.py` from **803 to 897 lines**, and
+   `file-size` failed with *"grew 803 -> 897, and it was ALREADY over the limit. The ratchet only
+   turns one way."* Reverted rather than re-recorded - `file_size_baseline.json` calls
+   re-recording "THE LOOPHOLE IN THIS DESIGN" and says the next growth should be preceded by the
+   split, and for this file the split IS item 7.
+   **So this is item 7's finding arriving as a measurement rather than a prediction.** Item 7
+   says the problem is not the 3-line overage but that the orchestrator has no headroom, so the
+   next addition hits the wall. It did, on the very next addition, and the addition was 94 lines
+   of a check this plan already wanted. Every route out is blocked the same way: a `tools/` gate
+   still needs an `AUX_GATES` row, and the ratchet fails on ANY growth. `hooks/` auto-detection
+   is the one path that needs no row - that is how `wired_clone_sanity` registered itself this
+   session without touching the orchestrator - but a check on THIS repo's own `.claude/*.cmd`
+   files is not a hook and does not belong there.
+   The design is settled, so re-landing it after item 7 is minutes, not rediscovery:
+   `code_only_placement_problems(claude_dir)` driven by a
+   `CODE_ONLY_PLACEMENT = (("fast-test.cmd", False, "turn-end"), ("pre-push.cmd", True,
+   "push-time"))` table; reads the command with `fast_test_on_stop._read_override` - **the SAME
+   parser the hook that runs it uses**, so it asserts against what EXECUTES and there is no twin
+   parser to drift; asserts BOTH directions, because checking only that turn-end lacks the flag
+   leaves the twin free and silently dropping it from `pre-push.cmd` re-creates #45; and a
+   missing file is 2 problems rather than silence. All four cases were SHOWN TO FAIL before the
+   revert - weakened turn-end fires, stripped push-time fires, an absent directory yields 2, and
+   a correct pair yields 0.
+
 9. **This session's four guards are hand-probed but NOT registered as mutation entries.** Found
    2026-08-25 by the close source-coverage pass, reading the design rather than the code.
    BUILT and enforced by their own selftests: `check_selftest_isolation`'s three questions each
