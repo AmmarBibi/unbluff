@@ -153,11 +153,26 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    forever gets the hook deleted. This one is a security disclosure, so the trade inverts.
    Note for the record: the probe was INVALID on its first two writes (wrong entry point, then
    wrong `source` constant) and both times returned an answer that looked like a finding.
-7. **Split `run_selftests.py`.** New 2026-08-25. It is now a recorded 803-line offender. The real
-   finding is that it had only SIX lines of headroom before this session, so registering one gate
-   with its reasoning pushed it over - and the next person to add a gate hits the same wall. The
-   growth was recorded deliberately with a written reason rather than absorbed by deleting the
-   comments, which was the third trim I declined to make.
+7. **Split `run_selftests.py`.** New 2026-08-25. It is a recorded 803-line offender, but the
+   overage is not the finding - the finding is that the orchestrator had SIX lines of headroom, so
+   registering one gate with its reasoning pushed it over and the next person hits the same wall.
+   **Scoped, and its trap is already mapped so nobody discovers it mid-refactor.** The right cut is
+   the REGISTRY - `AUX_GATES`, `NOT_A_GATE`, `MACHINE_STATE`, `SELFTEST_IS_THE_GATE`,
+   `RECORDING_TIERS`, lines 55-273, about 228 lines - into `tools/gate_registry.py`. That is
+   exactly the part that grows every time a gate is added, so after the move adding a gate stops
+   touching the orchestrator at all.
+   **THE TRAP, found 2026-08-25 by looking before cutting.** `tools/mutation_check.py:155`
+   `aux_gates()` does NOT import the registry - it `ast.literal_eval`s the assignment out of
+   `run_selftests.py`'s SOURCE TEXT, deliberately, so the rows it reads are the SCRATCH tree's.
+   Move `AUX_GATES` and it returns `"no AUX_GATES assignment in ..."`. It fails CLOSED, so this
+   surfaces as a red harness rather than a silent pass - but it means the split edits **the
+   instrument that certifies every other fix**, and that cannot be honestly verified without a
+   full sweep. The sweep is 16+ commits stale and blocked behind item 2.
+   **So the order is forced: item 2's pull, then a clean full sweep, THEN this.** Doing it before
+   there is a green sweep to compare against means changing the certifying instrument with no
+   baseline - which is the one move `tooling-discipline` section 4 is entirely about.
+   (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
+   fine, a re-export keeps it working.)
 
 ## Retired, not forgotten - and why each one died
 
