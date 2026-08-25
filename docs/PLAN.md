@@ -219,6 +219,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    full sweep exists to run it, and the sweep is stale and blocked behind item 2's pull. Order is
    therefore: item 2's pull -> clean sweep -> items 7 and 9 together.
 
+10. **The item-2 config repair was an INSTANCE fix; nothing would catch it happening again.**
+    Found 2026-08-25 by the close meta-review's CHECK 2 (instance vs mechanism).
+    `git_isolation.fingerprint()` catches a fixture mutating a repo DURING a sweep, which is the
+    upstream cause - but nothing ever asks whether THIS MACHINE's wired clone is currently sane.
+    `hook_health_check` runs at SessionStart and does not look at git config at all (grep:
+    zero hits for `core.bare` or `hooksPath`). So the exact state that sat there unnoticed - a
+    non-bare repo marked `core.bare=true`, `core.hooksPath` aimed at a DELETED temp directory
+    which silently disabled every git hook on the machine, and a `t@t` identity - would sit
+    unnoticed again.
+    Fix: have `hook_health_check` assert the wired clone's config is sane at SessionStart -
+    `core.bare` unset, `core.hooksPath` resolving to a directory that EXISTS, identity not a
+    fixture. Cheap, and it converts a repair I did by hand into something that reports itself.
+    This is the REMEMBER-vs-ENFORCE conversion applied to my own repair, and it is the one item
+    here that is NOT blocked behind item 2's pull.
+
 ## Retired, not forgotten - and why each one died
 
 Listed so the retirement is a decision on the record rather than a quiet omission. Every item is
