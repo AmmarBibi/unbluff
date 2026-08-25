@@ -130,16 +130,19 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    `--selftest` delegates to a module that scrubs at import - so it now resolves import delegation
    rather than firing on correct work.
 5. **Decide whether to wire `piped_gate_guard` at all - and only then fix its `pipefail` disarm.**
-   The re-cut originally listed this as "the highest-value residue row, a live PreToolUse hook".
-   **That was false and the source-coverage pass caught it**: it is wired NOWHERE in
-   `settings.json` (verified 21:20:34Z), so its defect currently costs nothing and fixing it
-   first would have been this plan's own standing check 4 violated on line 70 of the plan that
-   restates it.
-   The decision is real, though, and the evidence is from this session rather than theory: I read
-   `$?` after piping a gate into `head`/`tail` **twice today** and misread a FAIL as a pass both
-   times. If it gets wired, gate 9's M10 becomes live immediately - `# remember set -o pipefail`
-   on any earlier line silently turns the DENY into an allow - so wire and fix together, never
-   wire alone.
+   **STILL YOURS TO DECIDE. Evidence refreshed 2026-08-25T01:15:51Z; the recommendation is now WIRE.**
+   Re-derived, not trusted: it is wired **0 times** in `~/.claude/settings.json`, so its defect
+   currently costs nothing - which is why fixing it first would have violated standing check 4.
+   **What changed is the evidence FOR wiring it, and it is first-person.** Across 2026-08-24/25 I
+   read `$?` after piping a gate into `head`/`tail` **four times**, and at least twice it returned
+   0 over a real failure - once reporting `rc=0` while the same run printed `SELFTEST FAILED`, and
+   once masking a `SWEEP_RC=1`. Every instance was caught by reading the OUTPUT, never by the exit
+   code. That is precisely the hook's purpose, observed four times in two days on the maintainer's
+   own commands, which is a stronger case than any argument from principle.
+   **If it gets wired, gate 9's M10 becomes live the same instant**: `# remember set -o pipefail`
+   on any earlier line silently converts the DENY into an allow, because `PROTECTED` matches the
+   token anywhere in the command including inside a comment. So wire and fix together, never wire
+   alone - a guard that ships with a one-comment disarm is worse than the habit it replaces.
 6. **`fast_test_disclosure` records its marker before printing.** **DONE 2026-08-25.**
    Print moved ahead of the record, so an unwritable `STATE_DIR` can no longer silence the #25
    disclosure permanently and silently. PROVEN with a matched control: pre-fix, unwritable ->
