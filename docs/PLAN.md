@@ -37,11 +37,16 @@ Seven hook commands wired in `~/.claude/settings.json`, running from
 `core.hooksPath` at `~/.claude/githooks`, plus four skills `install.py` copies into
 `~/.claude/skills`. That is the product. Everything else is scaffolding around it.
 
-**BUILT IS NOT LIVE, and right now they differ.** First measured 2026-08-24T22:06:53Z as **2 of 6
-wired hooks STALE**. **RE-DERIVED 2026-08-24T23:06:35Z: it is 4 of 6, and the clone is 44 commits
-behind `origin/main`.** Stale: `close_skills_guard` (item 0), `hook_health_check` (the #46 scrub),
-`fast_test_on_stop` (the #25 disclosure) and `pre_push_gate` (the #30 moved-clone fix). Live:
-`meta_audit_on_stop`, `stop_dispatcher`.
+**BUILT IS NOT LIVE, and right now they differ.** Measured three times and it has gone UP each
+time, because every fix widens the gap until the clone can pull: **2 of 6** at 2026-08-24T22:06:53Z,
+**4 of 6** at 23:06:35Z, and **5 of 6 at 2026-08-25T01:42:33Z** with the clone 44 commits behind
+`origin/main`. Stale: `close_skills_guard`, `hook_health_check`, `fast_test_on_stop`,
+`pre_push_gate`, and now `meta_audit_on_stop` - which item 3's scrub moved out of LIVE. Live:
+`stop_dispatcher` alone.
+That trajectory is the point, not the number: **this session made the live machine MORE stale, not
+less**, and it will keep doing so until item 2's pull runs. Caught by the close consistency pass
+re-deriving a figure the plan already carried, which is the only reason it is not still reading
+"4 of 6".
 
 The earlier count was not wrong when taken - it named only the two hooks built that afternoon, and
 silently omitted the two whose fixes landed the session before. That is the same undercount shape
@@ -88,8 +93,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    the same defect as a stale count, one level up.
    **The branch is ahead again**: 4 commits (items 3, 4, 6, 7 and the config repair) are on
    `feat/enforcing-verify` and not on `main`, so a second PR is owed before they are live.
-2. **Repair the main clone's git config.** **CONFIG HALF DONE 2026-08-24T23:05:49Z; the `git
-   pull` is still blocked.** `core.bare=true`, a local `core.hooksPath` pointing at the deleted
+2. **Repair the main clone's git config.** **PARTIAL - config half done 2026-08-24T23:05:49Z, the
+   `git pull` is STILL BLOCKED and is the only thing standing between every fix on this branch and
+   the machine that runs them.** (Relabelled by the close completeness pass: this row led with the
+   word DONE over a body saying blocked, which is the same token-vs-body contradiction the plan
+   flags elsewhere.) `core.bare=true`, a local `core.hooksPath` pointing at the deleted
    `%TEMP%/tmp7dq12juu/myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
    section - all four #46 residue, all now unset, verified by re-reading the config and confirming
    the clone resolves to the global `~/.claude/githooks` as `AmmarBibi`, tree clean at `b6cc6cc`.
@@ -166,7 +174,7 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    registering one gate with its reasoning pushed it over and the next person hits the same wall.
    **Scoped, and its trap is already mapped so nobody discovers it mid-refactor.** The right cut is
    the REGISTRY - `AUX_GATES`, `NOT_A_GATE`, `MACHINE_STATE`, `SELFTEST_IS_THE_GATE`,
-   `RECORDING_TIERS`, lines 55-273, about 228 lines - into `tools/gate_registry.py`. That is
+   `RECORDING_TIERS`, lines 55-273 - **219 lines, derived by AST at 2026-08-25T01:42:33Z**, not the "about 228" first written here - into `tools/gate_registry.py`. That is
    exactly the part that grows every time a gate is added, so after the move adding a gate stops
    touching the orchestrator at all.
    **THE TRAP, found 2026-08-25 by looking before cutting.** `tools/mutation_check.py:155`
@@ -181,6 +189,35 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    baseline - which is the one move `tooling-discipline` section 4 is entirely about.
    (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
    fine, a re-export keeps it working.)
+
+8. **Nothing enforces that `--code-only` stays off the turn-end command** (was #47, ORPHANED by
+   the 2026-08-24 re-cut and re-homed here 2026-08-25 by the close completeness pass).
+   `.claude/pre-push.cmd` runs `python run_selftests.py --code-only`, and its own comment says the
+   flag is "deliberately NOT the default". That is a comment, and a comment is advisory. Adding
+   `--code-only` to `.claude/fast-test.cmd` would silently weaken the strictest check in the
+   project and no gate would notice - verified 2026-08-25T01:43:40Z, grep across `tools/` finds
+   nothing checking it.
+   **Why it matters more than its size:** this is the README "no network" badge shape from #32a,
+   created by the same session that fixed #32a, and then LOST by a plan re-cut - so it has now
+   failed twice over, once as a defect and once as a bookkeeping error. It appears exactly once in
+   `plan_v140_retired` and appeared ZERO times here until now.
+   Fix: assert in `run_selftests --selftest` that the turn-end command does not carry `--code-only`.
+
+9. **This session's four guards are hand-probed but NOT registered as mutation entries.** Found
+   2026-08-25 by the close source-coverage pass, reading the design rather than the code.
+   BUILT and enforced by their own selftests: `check_selftest_isolation`'s three questions each
+   carry a negative control; M10 carries five cases plus an over-strip control; `PG-QUOTED` is
+   pinned. **SCHEDULED gap:** `grep` over `tools/mutation_entries_{a,b}.py` finds **zero** entries
+   for `strip_comments`, for any `scrub_environ` call site, or for the isolation gate.
+   **Why that is not pedantry here.** `tools/mutation_check.py` exists because "the suite passes"
+   was twice read as "the suite asks the right questions", and its own docstring says a test that
+   stays green when you delete the code it covers is decorative. My controls were run BY HAND this
+   session - neutering `strip_comments` turned exactly the two M10 cases red, neutering the scrub
+   call was probed - and a hand-run control proves the test bites TODAY. It does not survive into
+   the sweep, so a refactor six months from now that disarms them is caught by nothing.
+   **Blocked on the same ordering as item 7**: a mutation entry is only meaningful once a clean
+   full sweep exists to run it, and the sweep is stale and blocked behind item 2's pull. Order is
+   therefore: item 2's pull -> clean sweep -> items 7 and 9 together.
 
 ## Retired, not forgotten - and why each one died
 
