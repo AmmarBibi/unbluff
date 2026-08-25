@@ -139,10 +139,18 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    once masking a `SWEEP_RC=1`. Every instance was caught by reading the OUTPUT, never by the exit
    code. That is precisely the hook's purpose, observed four times in two days on the maintainer's
    own commands, which is a stronger case than any argument from principle.
-   **If it gets wired, gate 9's M10 becomes live the same instant**: `# remember set -o pipefail`
-   on any earlier line silently converts the DENY into an allow, because `PROTECTED` matches the
-   token anywhere in the command including inside a comment. So wire and fix together, never wire
-   alone - a guard that ships with a one-comment disarm is worse than the habit it replaces.
+   **M10 IS NOW FIXED (2026-08-25), so the pairing constraint is discharged and wiring is a
+   one-line decision rather than a project.** `_is_protected` strips shell comments before asking,
+   quote-aware, so a commented `# remember set -o pipefail` no longer converts the DENY into an
+   allow - and neither does a trailing `# check PIPESTATUS` for the "anywhere" words. Both
+   directions probed, in both dialects, plus an OVER-STRIP control proving a quoted `#` does not
+   swallow a real protector after it. Mutation-proven: neutering the strip turns exactly the two
+   M10 cases red and names them.
+   One KNOWN LIMIT adjudicated rather than left to be rediscovered, pinned as **PG-QUOTED**: after
+   stripping, this is still a substring test, so `echo "# pipefail"` reads as protective.
+   Deliberate - tightening it to `set -o pipefail` would reject `set -euo pipefail` and
+   `bash -o pipefail -c`, and start firing on correct work. Exposure is small because the guard
+   only speaks when a GATE TOKEN is already present.
 6. **`fast_test_disclosure` records its marker before printing.** **DONE 2026-08-25.**
    Print moved ahead of the record, so an unwritable `STATE_DIR` can no longer silence the #25
    disclosure permanently and silently. PROVEN with a matched control: pre-fix, unwritable ->

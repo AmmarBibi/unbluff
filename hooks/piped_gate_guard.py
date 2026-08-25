@@ -90,8 +90,60 @@ _PROTECTORS = {
 }
 
 
+def strip_comments(command: str) -> str:
+    """`command` with shell comments removed, quotes respected.
+
+    [M10 2026-08-25] The DISARM fix above made POSITION matter; it never asked whether the word
+    was EXECUTABLE. A comment cannot set an option, so this silenced a blocking guard:
+
+        # remember to set -o pipefail
+        python run_selftests.py | tail -2
+
+    `pipefail` sits in the head, before the pipe, so the guard went quiet while the suite's exit
+    status was still eaten. The trailing form disarms the "anywhere" words the same way -
+    `python gate.py | tail  # check PIPESTATUS` - so both are stripped, not only the first.
+
+    Quote-aware, because over-stripping is its own failure mode: `echo "# pipefail"` is executable
+    text, and a guard that fires on correct work is the thing this repo says gets guards switched
+    off. A `#` opens a comment only at the start of a token - preceded by whitespace or line start
+    - and never inside quotes, which is the rule a shell itself applies.
+    """
+    out = []
+    for line in command.splitlines():
+        buf, quote, prev = [], None, ""
+        for ch in line:
+            if quote:
+                buf.append(ch)
+                if ch == quote and prev != "\\":
+                    quote = None
+            elif ch in ("'", '"'):
+                quote = ch
+                buf.append(ch)
+            elif ch == "#" and (not buf or buf[-1].isspace()):
+                break                      # a comment runs to end of line
+            else:
+                buf.append(ch)
+            prev = ch
+        out.append("".join(buf))
+    return "\n".join(out)
+
+
 def _is_protected(command: str, dialect: str = "bash") -> bool:
-    """True if `command` genuinely guards the pipeline's status in `dialect`. See _PROTECTORS."""
+    """True if `command` genuinely guards the pipeline's status in `dialect`. See _PROTECTORS.
+
+    Comments are stripped FIRST (M10): the question is whether this command protects the status,
+    and a commented-out protector protects nothing.
+
+    KNOWN LIMIT, adjudicated rather than left to be rediscovered. After stripping comments this is
+    still a SUBSTRING test, so executable text that merely CONTAINS the word counts as protective:
+    `echo "# pipefail"; python run_selftests.py | tail` reads as protected. Deliberate. Tightening
+    it to `set -o pipefail` would reject the legitimate spellings (`set -euo pipefail`,
+    `bash -o pipefail -c ...`) and start firing on correct work, which this repo holds to be worse
+    than no guard at all. The residual exposure is small because the guard only speaks when a GATE
+    TOKEN is present, so the word has to appear in a command that is already piping a gate.
+    Pinned as PG-QUOTED so the choice cannot be reversed by accident.
+    """
+    command = strip_comments(command)
     head = command.split("|", 1)[0]
     for word, where in _PROTECTORS.get(dialect, _PROTECTORS["bash"]):
         if word in (head if where == "before" else command):
@@ -414,8 +466,29 @@ def selftest() -> int:
         fails.append("a real `set -o pipefail` BEFORE the pipeline did not silence the guard")
     if piped_gates(_gate + "; echo ${PIPESTATUS[0]}"):
         fails.append("reading ${PIPESTATUS[0]} after the pipeline did not silence the guard")
+    # [M10 2026-08-25] A COMMENTED protector protects nothing. This hook's own block message
+    # teaches "or `set -o pipefail` first", so an agent taking the advice and writing it as a
+    # reminder comment is the likely shape, not a contrived one.
+    if not piped_gates("# remember to set -o pipefail\n" + _gate):
+        fails.append("a `pipefail` inside a COMMENT before the pipeline silenced the guard (M10) "
+                     "- a comment cannot set an option, and this hook's own message is what "
+                     "teaches people to write that word in the first place")
+    if not piped_gates(_gate + "  # check PIPESTATUS"):
+        fails.append("a PIPESTATUS mentioned only in a TRAILING COMMENT silenced the guard (M10)")
+    # [PG-QUOTED] The adjudicated KNOWN LIMIT, pinned so it cannot be reversed by accident: after
+    # comment-stripping this is still a substring test, so executable text containing the word
+    # reads as protective. Asserted in the direction it actually behaves, with the reason in
+    # _is_protected's docstring - tightening it would start firing on correct work.
+    if piped_gates('echo "# pipefail"; ' + _gate):
+        fails.append("PG-QUOTED changed: a quoted `# pipefail` no longer reads as protective. "
+                     "That may be an improvement, but it is a DELIBERATE limit - re-read "
+                     "_is_protected's KNOWN LIMIT note before accepting it")
+    # And the over-strip control: a quoted `#` must not eat a REAL protector that follows it.
+    if piped_gates("echo '# hi' ; set -o pipefail ; " + _gate):
+        fails.append("a quoted `#` swallowed the rest of the line, so a REAL `set -o pipefail` "
+                     "after it stopped protecting - over-stripping fires on correct work")
     if not piped_gates(_gate + "; set -o pipefail"):
-        fails.append("`set -o pipefail` written AFTER the pipeline still silenced the guard - it "
+        fails.append("`set -o pipefail` written AFTER the pipeline still silenced the guard - it"
                      "protects nothing there, and this hook's own advice is what teaches the "
                      "shape")
     if not piped_gates("python run_selftests.py | tail -2  # remember pipefail"):
