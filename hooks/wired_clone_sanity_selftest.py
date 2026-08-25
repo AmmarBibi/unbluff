@@ -112,6 +112,7 @@ def selftest() -> int:
     env = scrubbed_env()
     fails = []
     cases = []
+    _extractor = []
 
     # THIS FILE MUST CONTRIBUTE NOTHING TO THE FIXTURE VOCABULARY, and the keys are composed to
     # guarantee it. fixture_identities() scans hooks/*.py and tools/*.py as TEXT, and this file
@@ -206,6 +207,7 @@ def selftest() -> int:
 
         # 5. the extractor must prove it looked in the right place
         _vocab = _m.fixture_identities()
+        _extractor.append("vocabulary still carries the identities #46 wrote")
         if not {_FIX_EMAIL, _FIX_NAME} <= _vocab:
             fails.append("machine sanity: fixture_identities() no longer derives the identities "
                          f"#46 actually wrote: {sorted(_vocab)}")
@@ -215,12 +217,14 @@ def selftest() -> int:
         # Equality caught the contamination once; this catches it forever without the brittleness.
         _self_only = _m.fixture_identities(roots=[])
         _here = _m.fixture_identities(roots=[os.path.dirname(os.path.abspath(__file__))])
+        _extractor.append("this file contributes nothing to the vocabulary")
         if _REAL_EMAIL in _here or _REAL_NAME in _here:
             fails.append("machine sanity: this selftest file has put its CONTROL identity into "
                          "the fixture vocabulary - the check will now fire on the control that "
                          "proves it does not fire on correct work. Compose the call, do not "
                          "write the shape out in full. (a grep guard must never search for a "
                          "literal it contains)")
+        _extractor.append("an empty root list scans nothing")
         if _self_only:
             fails.append(f"machine sanity: an EMPTY root list derived {sorted(_self_only)} - "
                          f"fixture_identities is reading somewhere it was not asked to")
@@ -236,11 +240,13 @@ def selftest() -> int:
             # the probe wearing the costume of a finding about the code. A probe not shown to
             # FAIL is not a probe; the assertion below is what shows it.
             _m._FIXTURE_ID_RE = re.compile(r"(?!)")
+            _extractor.append("the blind control is actually controlling")
             if _m.fixture_identities() != set():
                 fails.append("machine sanity: the blind-extractor CONTROL is not controlling - "
                              f"neutering left {sorted(_m.fixture_identities())} behind, so "
                              f"whatever it reports next is about the probe, not the check")
             else:
+                _extractor.append("a blind extractor reports that it cannot fire")
                 blind, _n, _s = _m.machine_sanity_problems(cfg)
                 if not any("looking in the wrong place" in p for p in blind):
                     fails.append("machine sanity: an extractor that matches NOTHING passes "
@@ -249,8 +255,9 @@ def selftest() -> int:
             _m._FIXTURE_ID_RE = _saved
 
     # 6. TOTAL over a malformed settings tree [P13 C4]: this check may cost itself, never the report
-    for bad in ({"hooks": "not-a-dict"}, {"hooks": {"S": "x"}}, {"hooks": {"S": [None]}},
-                {"hooks": {"S": [{"hooks": [{"command": 17}]}]}}, {}):
+    _bad_shapes = ({"hooks": "not-a-dict"}, {"hooks": {"S": "x"}}, {"hooks": {"S": [None]}},
+                   {"hooks": {"S": [{"hooks": [{"command": 17}]}]}}, {})
+    for bad in _bad_shapes:
         try:
             out = _m.machine_sanity_problems(bad)
             if not (isinstance(out, tuple) and len(out) == 3):
@@ -266,7 +273,8 @@ def selftest() -> int:
     _red = sum(1 for _lbl, _r in cases if _r)
     print("SELFTEST %s - %d state(s) asserted (%d must fire, %d controls that must NOT), "
           "plus %d extractor and %d totality case(s)"
-          % ("OK" if not fails else "FAILED", len(cases), _red, len(cases) - _red, 3, 5))
+          % ("OK" if not fails else "FAILED", len(cases), _red, len(cases) - _red,
+             len(_extractor), len(_bad_shapes)))
     return 1 if fails else 0
 
 

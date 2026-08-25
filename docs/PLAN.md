@@ -64,11 +64,14 @@ live machine MORE stale**, and it will keep doing so until item 2's pull runs. T
 matters more than it looks - 12 of 26 files differ, so even the five LIVE entry points are
 importing stale siblings.
 
-The earlier count was not wrong when taken - it named only the two hooks built that afternoon, and
-silently omitted the two whose fixes landed the session before. That is the same undercount shape
-the plan warns about elsewhere: a measurement scoped to what the author was thinking about rather
-than to the population. **The two it missed are the two that matter most to a user** - the
-execution-model disclosure and the gate that bricks pushes on a moved clone.
+History of this one number, kept because it is the clearest worked example of the defect in this
+file: **2 of 6** (2026-08-24T22:06:53Z) named only the two hooks built that afternoon; **4 of 6**
+(23:06:35Z) added the two whose fixes landed the session before; **5 of 6** (2026-08-25T01:42:33Z)
+added `meta_audit_on_stop`. Each correction fixed the NUMERATOR and none of them ever questioned
+the DENOMINATOR, which was wrong from the first measurement and stayed wrong through three
+revisions by three separate consistency passes. **The two the first count missed are the two that
+matter most to a user** - the execution-model disclosure and the gate that bricks pushes on a
+moved clone.
 
 **Item 2's config half is DONE (2026-08-24T23:05:49Z).** `core.bare`, the local `core.hooksPath`
 pointing at a deleted temp dir, and the `t@t` identity are all unset, plus the stale
@@ -76,9 +79,12 @@ pointing at a deleted temp dir, and the `t@t` identity are all unset, plus the s
 `~/.claude/githooks` and its identity to `AmmarBibi <ammarbibi@hotmail.com>`, with a clean tree at
 `b6cc6cc`. The full local config before the change is recorded in the commit message as the
 rollback record. **The `git pull` itself remains blocked by the tool-permission classifier** - so
-the clone is now REPAIRED BUT STILL BEHIND, and all four stale hooks stay inert until someone runs
-that one command. Before this repair the pull would have failed anyway on `core.bare=true`; now it
-is purely a permission away.
+the clone is now REPAIRED BUT STILL BEHIND, and **five stale entry points** (and 12 of 26
+`hooks/*.py` files) stay inert until someone runs that one command. Before this repair the pull
+would have failed anyway on `core.bare=true`; now it is purely a permission away.
+(This sentence read "all four stale hooks" until 2026-08-25: it carried its own copy of the
+headline count, so correcting the table above would have left it silently disagreeing. A number
+restated in a second place is a number that will drift in one of them.)
 
 ## The bar
 
@@ -245,7 +251,13 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    revert - weakened turn-end fires, stripped push-time fires, an absent directory yields 2, and
    a correct pair yields 0.
 
-9. **This session's four guards are hand-probed but NOT registered as mutation entries.** Found
+9. **Five guard families are hand-probed but NOT registered as mutation entries** (was four;
+   **item 10's controls were added 2026-08-25 by the close meta-review's CHECK 2**, because a row
+   that names a fixed count silently stops covering whatever is built after it - the same
+   scoped-denominator shape this plan keeps paying for). The fifth family is item 10's:
+   `wired_clone_sanity`'s `--absolute-git-dir` derivation, its `has_worktree` gate, the composed
+   fixture vocabulary, and the `(?!)` blind control - all hand-probed this session, none of them
+   in `mutation_entries_{a,b}.py`. Originally found
    2026-08-25 by the close source-coverage pass, reading the design rather than the code.
    BUILT and enforced by their own selftests: `check_selftest_isolation`'s three questions each
    carry a negative control; M10 carries five cases plus an over-strip control; `PG-QUOTED` is
@@ -262,6 +274,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    therefore: item 2's pull -> clean sweep -> items 7 and 9 together.
 
 10. **The item-2 config repair was an INSTANCE fix; nothing would catch it happening again.**
+    **DONE 2026-08-25** - `hooks/wired_clone_sanity.py`, commit `60b9305`. (Marker hoisted into
+    the header by the close sweep for stale DONE markers: the row led with its problem statement
+    and buried the verdict seven lines down, so it scanned as OPEN. That is item 2's token-vs-body
+    contradiction inverted, and a row you have to read to the middle of is a row that gets
+    mis-sequenced.)
     Found 2026-08-25 by the close meta-review's CHECK 2 (instance vs mechanism).
     `git_isolation.fingerprint()` catches a fixture mutating a repo DURING a sweep, which is the
     upstream cause - but nothing ever asks whether THIS MACHINE's wired clone is currently sane.
@@ -336,7 +353,73 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     defect. Fix: membership should follow DELEGATION, the way the scrub verdict already does
     (`res["_deferred"]`), so a module reached from a `--selftest` path inherits it structurally.
 
-13. **`hook_health_check`'s selftest budget share should be revisited.** New 2026-08-25.
+13. **The heredoc trap is prose, and prose is advisory - it wants a hook.**
+    Found 2026-08-25 by the close completeness pass, as a **silent gap**: the meta-review of
+    2026-08-25 raised it as CHECK 5's third recommendation, and it appeared **ZERO times in this
+    plan** until now. That is failure mode (b) - the audit named it, the plan never did, so
+    nothing would ever have scheduled it. Same shape as item 8, which was orphaned by a re-cut.
+    The cost is measured, not asserted: **four incidents in two days**, and they are not all
+    loud. One put a literal TAB into this plan, inside the line documenting the path that broke
+    the clone. The dangerous one was silent - backticks inside a `python -c "..."` string were
+    COMMAND-SUBSTITUTED BY THE SHELL before Python saw them, the script printed its success
+    message, and it wrote a file with every backticked filename deleted. Nothing failed.
+    This repo already converts exactly this kind of recurring prose into a hook, twice:
+    `piped_gate_guard` (a gate piped into `head`/`tail` returns the pipe's status) and
+    `timing_claim_guard` (a duration written as MEASURED with no control marker). A heredoc /
+    inline-content guard is the third of the same family and belongs here more than anywhere.
+    Scope it by MEASUREMENT, as both of those were: they fire on 4 of 15 and 18 of 109 real
+    cases respectively, and a guard that fires on correct work gets disabled. The obvious
+    candidate shape is a `PreToolUse` check on a Bash command carrying an unquoted heredoc
+    delimiter, a backtick inside a double-quoted `-c` payload, or an apostrophe inside a
+    single-quoted block - **and its false-alarm rate must be measured against real history
+    before it is wired**, exactly as item 5's evidence was gathered.
+
+14. **Item 10 checks the CONFIG slice of #46's residue. A stray linked WORKTREE is not checked.**
+    Found 2026-08-25 by the close source-coverage pass, run against the DESIGN rather than the
+    code - i.e. by enumerating the authoritative source (`git_isolation.py`'s incident account and
+    `fingerprint()`'s own docstring) and reconciling it against what was built, rather than by
+    re-reading item 10.
+    `fingerprint()` names the FIVE classes the incident damaged: **HEAD, refs, config, index,
+    worktrees**. Item 10 built a standing check for exactly one of them - `config`, and 3 of its
+    4 fields. The gap is not that the others were rejected; it is that **they were never
+    enumerated**, so nothing recorded a decision about them. That is the failure mode a grep can
+    never find, because the plan did not mention them.
+    Adjudicated per class rather than scheduled wholesale:
+    - **`worktrees` - SCHEDULE.** `fast_test_on_stop_selftest.py:902` registered a linked worktree
+      in the real repo under the system temp directory. That is residue with **exactly the shape
+      item 10 already treats as material**: silent, persistent, and pointing at a path that no
+      longer exists. It is decidable and cheap - `git worktree list`, flag any entry whose path is
+      absent - and it cannot false-alarm on correct work, because a live worktree's path exists.
+      Verified clean on this machine 2026-08-25T03:0Z: two worktrees, both present.
+    - **`HEAD` / `index` - FINALIZED EXCLUSION.** Transient working state. A user legitimately has
+      a moved HEAD and a dirty index; a standing check here would fire on correct work constantly,
+      which is how a guard gets switched off.
+    - **`refs` - FINALIZED EXCLUSION.** The fixture created branches named `feature` and `wt`.
+      Detecting those needs a roster of fixture names, and a roster is the twin defect this repo
+      keeps paying for - a real branch called `feature` is not a defect.
+    - **the stale `branch.<name>.*` config section** (part of the item-2 repair) - **FINALIZED
+      EXCLUSION**: harmless, and unlike a dead `core.hooksPath` it disables nothing.
+
+15. **BUILT IS NOT LIVE is a hand-counted number, and hand-counting it has failed four times.**
+    Found 2026-08-25 by the close meta-review's CHECK 2 (instance vs mechanism), and it is the
+    sharpest durability gap of the session: **correcting the number was an INSTANCE fix.**
+    The history is in the plan above - 2 of 6, 4 of 6, 5 of 6, and now 5 of 10 / 12 of 26. Three
+    of those four were corrected by a consistency pass that re-derived the NUMERATOR and never
+    once questioned the DENOMINATOR. The fourth was caught only because item 10's new check
+    happened to print `1 wired clone config-checked` and that disagreed with the prose. **That is
+    luck wearing the costume of a process**, and next session the number goes stale again the
+    moment anything is committed.
+    The mechanism is close to free, because the gate already exists: `hook-provenance` ALREADY
+    compares the wired copies against the repo and already fails when they differ. It reports a
+    verdict; it does not report a COUNT. Have it derive and print `N of M entry points stale, P of
+    Q hooks/*.py`, with the entry-point population derived the way item 10 derives it -
+    `settings.json` commands, plus `stop_dispatcher`'s table, plus the `core.hooksPath` shim's
+    target - and the plan's sentence becomes checkable against a derived number instead of being
+    re-counted by hand by whoever notices next.
+    Do it AFTER item 2's pull: at that moment the true answer becomes 0 of 10, which is exactly
+    when a wrong count is least likely to be noticed.
+
+16. **`hook_health_check`'s selftest budget share should be revisited.** New 2026-08-25.
     Not urgent and NOT currently a problem - the item-10 split took it from 8.37s/84% back to
     **6.78s / 68%** of its 10.00s share, measured 02:31:55Z. Recorded because the 84% was reached
     by adding ONE battery, that file records 93% as the level where the mutation harness reported
@@ -378,8 +461,15 @@ recoverable from the archived plan.
 - **`install_selftest.py` has never been adversarially reviewed.** 358 lines, split out
   2026-08-24. `check_review_freshness` will keep asking; that is fine and it can keep asking.
 
-**Undecided, deliberately:** whether the repo stays public. It is currently public and is also
-the career artifact the old premise was built on. Parked by choice on 2026-08-24, not forgotten.
+**Undecided, deliberately:** whether the repo stays public. It is currently public and is also the
+career artifact the old premise was built on.
+**Given a TRIGGER 2026-08-25 by the close completeness pass, which is the only STEP 1 hit in this
+plan that was still optional-forever.** "Parked by choice, not forgotten" is the exact shape that
+sweep exists to catch: a decision with no date and no condition is indistinguishable from one that
+has been dropped. It is not a build item and needs no materiality slot - it is a DECISION, and the
+condition that forces it is: **the next time this repo would be shown to anyone (a CV link, an
+application, a PR from a stranger), or the next re-cut of this plan, whichever comes first.**
+Until then the status quo - public - stands by default rather than by omission.
 
 ## Known-stale by design: the ledger's `mutation_sweep` row
 
@@ -401,10 +491,20 @@ read CI for this tier. Every other tier is current as of 2026-08-24T21:23Z.
 These are the durable part of the old plan and they survive the re-cut unchanged. Each caught a
 real defect that nothing else did.
 
-1. **Did this fix create a new instance of the class it fixed?** Caught a C7 instance introduced
-   by the commit fixing C7 elsewhere - and on 2026-08-24 caught three more in one session,
-   including a gate whose input does not exist in CI, built by the commit removing exactly that
-   class of defect.
+1. **Did this fix create a new instance of the class it fixed? ASK IT MID-SESSION, NOT AT THE
+   CLOSE.** Caught a C7 instance introduced by the commit fixing C7 elsewhere - and on 2026-08-24
+   caught three more in one session, including a gate whose input does not exist in CI, built by
+   the commit removing exactly that class of defect.
+   **The timing is part of the check, added 2026-08-25 by the close completeness pass** - the
+   meta-review recommended it as CHECK 5.1 and it had ZERO hits in this plan, so the practice
+   existed only in an audit file nobody re-reads. It has now fired on my own work in **four
+   consecutive sessions**, and for the first three the fix was already committed before it fired.
+   Asked mid-session on 2026-08-25 it paid immediately and three times over: the machine-sanity
+   extractor scanned the directory its own battery lives in and swallowed the control identity;
+   the narrowing of `check_selftest_isolation` released a fixture-building module from the
+   population it belonged in; and the battery's own denominator shipped two hardcoded literals,
+   one of which was wrong. All three were caught BEFORE the commit, which is the entire
+   difference the timing makes.
 2. **What would have to be true for this control to be UNABLE to fire?** Caught
    `load_with_siblings` failing open, `roster_gaps` accepting a non-existent tree, and
    `unrecorded_tiers` being satisfied by its own docstring.
