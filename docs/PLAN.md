@@ -81,14 +81,13 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    selftest, and mutation-probed with a matched control - neutering the rule turns it red
    naming the right case. This is the REMEMBER-vs-ENFORCE conversion: the instruction was prose
    in a session prompt, and prose is advisory.
-1. **Land the branch.** `feat/enforcing-verify` -> `main` via
-   [PR #3](https://github.com/AmmarBibi/unbluff/pull/3). This is the whole point of the branch
-   for a solo user: `main` currently still has (a) a moved or renamed clone **bricking every
-   `git push` on the machine**, (b) the consistency-audit skill certifying a **scanned PDF as
-   CLEAN** without reading it, (c) the pre-push gate **blocking correct pushes** (#45), and
-   (d) the selftest that **corrupted the repo and pushed a one-file tree to public `main`**
-   (#46). Merging also permanently clears `hook-provenance`, which fails today only because the
-   wired copy is `main`'s older one.
+1. **Land the branch.** **DONE - [PR #3](https://github.com/AmmarBibi/unbluff/pull/3) MERGED
+   2026-08-24T20:55:41Z**, so `main` now carries the moved-clone fix, the scanned-PDF fix, #45 and
+   #46. Verified by asking GitHub, not by inferring it from a local ref. Marked here 2026-08-25
+   because the row still read OPEN after the merge - a plan that lags the world it describes is
+   the same defect as a stale count, one level up.
+   **The branch is ahead again**: 4 commits (items 3, 4, 6, 7 and the config repair) are on
+   `feat/enforcing-verify` and not on `main`, so a second PR is owed before they are live.
 2. **Repair the main clone's git config.** **CONFIG HALF DONE 2026-08-24T23:05:49Z; the `git
    pull` is still blocked.** `core.bare=true`, a local `core.hooksPath` pointing at the deleted
    `%TEMP%/tmp7dq12juu/myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
