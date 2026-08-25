@@ -27,6 +27,17 @@ import os
 import subprocess
 import sys
 
+# [#46 item 4] Scrub git's redirect variables at import, before any fixture can run.
+# Flagged by tools/check_selftest_isolation.py, which DERIVES this population from the AST
+# rather than from a list - and found this file after a hand-built roster of three missed it.
+# Reason this file is in the population: its line ~330 left a `fixture` commit behind in the real repo (git_isolation header).
+# No ImportError fallback here, unlike the hooks/ copies: git_isolation is a SIBLING in
+# tools/, so if it is missing this tool is broken anyway and failing loudly at import is the
+# honest outcome. The fallback in hooks/ exists only because a partial checkout can have
+# hooks/ without tools/.
+from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
+_scrub_environ()
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(REPO, "docs", "audits", "review_runs.json")
 

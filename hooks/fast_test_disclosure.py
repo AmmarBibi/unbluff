@@ -160,15 +160,19 @@ def notice_once(cwd: str, cmd: str, source: str) -> int:
     if os.path.exists(mp):
         return 0
     ft = _fast_test()
-    try:
-        os.makedirs(ft.STATE_DIR, exist_ok=True)
-        with open(mp, "w", encoding="utf-8") as f:
-            json.dump({"ts": time.time(), "cwd": cwd, "cmd": cmd, "source": source,
-                       "disclosed": lines}, f)
-    except OSError:
-        return 0   # cannot record it -> stay silent rather than repeat at every turn end
     name = os.path.basename(cwd.rstrip("/\\")) or cwd
     body = "".join("    %s\n" % ln for ln in lines)
+    # [item 6, L3] PRINT FIRST, then record. The order used to be the other way round, and an
+    # unwritable STATE_DIR returned 0 from inside the `except OSError` BEFORE this write - which
+    # silenced the #25 disclosure permanently and silently, on every machine where that directory
+    # is read-only.
+    #
+    # The sibling notices in fast_test_on_stop deliberately do the opposite ("cannot record it ->
+    # stay silent rather than repeat every turn"), and that IS right for them: they are nags, and
+    # a nag that repeats forever is a nag that gets the hook deleted. This one is not a nag. It is
+    # the disclosure that makes auto-detected execution consented-to rather than silent, and the
+    # trade inverts with it - a notice repeated every turn is annoying, a security disclosure that
+    # never appears is the failure #25 exists to close. Repeating is the SAFE direction here.
     sys.stderr.write(
         "[fast-test] AUTO-DETECTED a test command in '%s' and will run it at every turn end.\n"
         "    command: %s\n"
@@ -177,6 +181,13 @@ def notice_once(cwd: str, cmd: str, source: str) -> int:
         "    own command in .claude/fast-test.cmd. To run nothing, remove the Stop hook.\n"
         "[fast-test] Said once per project per disclosed command. Delete %s to hear it again.\n"
         % (name, cmd, body, mp))
+    try:
+        os.makedirs(ft.STATE_DIR, exist_ok=True)
+        with open(mp, "w", encoding="utf-8") as f:
+            json.dump({"ts": time.time(), "cwd": cwd, "cmd": cmd, "source": source,
+                       "disclosed": lines}, f)
+    except OSError:
+        pass       # already disclosed; we will simply disclose again next turn
     return 0
 
 

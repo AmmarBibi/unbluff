@@ -98,31 +98,38 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    be advanced from here because `git pull` trips the tool-permission classifier. Until it runs,
    4 of 6 wired hooks are stale and every fix authored on 2026-08-23/24 is inert on this machine.
 
-3. **Make the per-hook `--selftest` form isolated.** **PARTIAL 2026-08-24.**
-   `meta_audit_on_stop.py` now scrubs before a direct `--selftest`; it was the file that did the
-   damage and it is one of the two hooks currently LIVE. Population DERIVED, not listed - of the
-   five files with a `--selftest` that mention git, three run a mutating verb:
-   `meta_audit_on_stop` (done), `fast_test_on_stop_selftest` and `pre_push_gate_selftest`.
-   `fast_test_on_stop.py` is READ-ONLY and is not in the population, which matters because it is
-   pinned at 851 with zero ratchet headroom and "the fix will not fit" would have been the wrong
-   conclusion from a real constraint. The two remaining are 1003 and 1192 lines, both recorded
-   offenders, so their scrub needs a deliberate `_accepted_growth` re-record - the mechanism
-   `main` already used for 1109 -> 1131.
-   **CAVEAT, and it is load-bearing: the landed scrub is DEFENCE IN DEPTH, not a fix with a
-   demonstrated failure behind it.** The matched-control probe came back INVALID - the neutered
-   arm did not corrupt either - and the pre-fix file prints `SELFTEST SKIP: git unavailable`
-   under a poisoned `GIT_DIR`, never reaching the fixtures. The true pre-incident version was NOT
-   run, deliberately: its line 577 is `git push -q -u origin HEAD:refs/heads/main`, the line that
-   published a one-file tree over public `main` for eleven hours.
-   **This also corrects the record.** "#46 MECHANISM PROVEN BY PROBE" in the retired plan and in
-   `0427c5b`'s message was an overreach: what was proven is the general fact that `GIT_DIR`
-   overrides `git -C <tmpdir>`, not that it was the causal chain here. `tools/git_isolation.py`'s
-   header gives a detailed chain naming six instances across five files; that analysis has not
-   been independently reproduced, and the honest status of the mechanism is WELL-EVIDENCED, NOT
-   PROVEN.
-4. **Pin the #46 control's own wiring** (gate 9's H3, half-built). `scrub_environ()` at the top
-   of `main()` is guarded by nothing - moving it into an uncalled helper leaves all 41 gates
-   green. `unrecorded_tiers` is the mechanism to copy.
+3. **Make the per-hook `--selftest` form isolated.** **DONE 2026-08-25.** All 8 files that run
+   a MUTATING git verb from a `--selftest` path now scrub, enforced by item 4's gate rather than
+   by memory: `meta_audit_on_stop`, `fast_test_on_stop_selftest`, `pre_push_gate_selftest`,
+   `pre_push_gate` (by import delegation), `check_review_freshness`, `hook_divergence_report`,
+   `no_regression`, `noregress_selftest`.
+   **My hand-derived population was 3. The gate found 8.** The five I missed were all in `tools/`,
+   including `check_review_freshness` - which `git_isolation.py`'s own header names as one of the
+   six incident instances. I had called my roster "DERIVED"; it was derived over `hooks/` only,
+   which is a scoped denominator wearing the word derived. That is the finding, not the fix.
+   Placement was forced by the ratchet and is recorded: the scrub sits in the `*_selftest` modules
+   because `fast_test_on_stop.py` has ZERO headroom at 851/851, and in `tools/` it needs no
+   ImportError fallback because `git_isolation` is a sibling there.
+   **Standing caveat carried forward:** the underlying `GIT_DIR` mechanism is WELL-EVIDENCED, NOT
+   PROVEN, for this incident - see the note under item 4's history and `git_isolation.py`'s header.
+   The scrubs are correct regardless; what is unproven is that GIT_DIR was the causal path.
+4. **Pin the #46 control's own wiring.** **DONE 2026-08-25.**
+   `tools/check_selftest_isolation.py`, registered ENFORCING plus a paired `--selftest`. It walks
+   the AST and asks three questions with printed denominators: which selftests run a MUTATING git
+   verb (derived, never listed), is a scrub actually REACHED before their fixtures, and do the
+   inline fallback lists still match `git_isolation.GIT_REDIRECT_VARS` exactly. Item 4's precise
+   case - `scrub_environ()` moved out of `main()`'s direct body into an uncalled helper - is a
+   named failure.
+   **It paid for itself on its first run.** My hand-derived population was 3 files; the gate found
+   **8**, including `tools/check_review_freshness.py`, which `git_isolation.py`'s own header names
+   as one of the six incident instances. All 8 are now scrubbed. Read-only git callers are
+   deliberately excluded, so `fast_test_on_stop.py` - which has zero ratchet headroom - never
+   enters the population.
+   Two of its own defects were caught by running it: an exact-name roster missed the `_scrub_environ`
+   alias its companion script had just inserted (fixed to match by shape), and it flagged
+   `pre_push_gate.py`, whose only mutating verb is production `install_global()` and whose
+   `--selftest` delegates to a module that scrubs at import - so it now resolves import delegation
+   rather than firing on correct work.
 5. **Decide whether to wire `piped_gate_guard` at all - and only then fix its `pipefail` disarm.**
    The re-cut originally listed this as "the highest-value residue row, a live PreToolUse hook".
    **That was false and the source-coverage pass caught it**: it is wired NOWHERE in
@@ -134,8 +141,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    times. If it gets wired, gate 9's M10 becomes live immediately - `# remember set -o pipefail`
    on any earlier line silently turns the DENY into an allow - so wire and fix together, never
    wire alone.
-6. **`fast_test_disclosure` records its marker before printing** (L3), so an unwritable state dir
-   silences the #25 notice permanently. Small, and it is a hook that runs every turn.
+6. **`fast_test_disclosure` records its marker before printing.** **DONE 2026-08-25.**
+   Print moved ahead of the record, so an unwritable `STATE_DIR` can no longer silence the #25
+   disclosure permanently and silently. PROVEN with a matched control: pre-fix, unwritable ->
+   SILENT; post-fix, unwritable -> discloses, and it names the untrusted surface (`jest --ci`
+   from `scripts.test`) rather than the `npm test --silent` wrapper.
+   The sibling notices in `fast_test_on_stop` deliberately do the opposite - record first, stay
+   silent if they cannot - and that stays right for them: they are nags, and a nag that repeats
+   forever gets the hook deleted. This one is a security disclosure, so the trade inverts.
+   Note for the record: the probe was INVALID on its first two writes (wrong entry point, then
+   wrong `source` constant) and both times returned an answer that looked like a finding.
+7. **Split `run_selftests.py`.** New 2026-08-25. It is now a recorded 803-line offender. The real
+   finding is that it had only SIX lines of headroom before this session, so registering one gate
+   with its reasoning pushed it over - and the next person to add a gate hits the same wall. The
+   growth was recorded deliberately with a written reason rather than absorbed by deleting the
+   comments, which was the third trim I declined to make.
 
 ## Retired, not forgotten - and why each one died
 

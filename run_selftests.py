@@ -145,6 +145,10 @@ AUX_GATES = (
     # fails if the mechanism cannot be reproduced, so a future git that changed this behaviour
     # turns the row red instead of leaving a guard that quietly protects against nothing.
     ("git-isolation", ("tools", "git_isolation.py"), ("--selftest",)),
+    # [#46 item 4] git_isolation PROVIDES the scrub; this asks if anything REACHES it. ENFORCING
+    # because the measurement is the point: it found 5 files a hand roster of 3 missed.
+    ("selftest-isolation", ("tools", "check_selftest_isolation.py"), ()),
+    ("selftest-isolation-selftest", ("tools", "check_selftest_isolation.py"), ("--selftest",)),
     # [P14 M1] A mutation entry finds its target by a literal string, so an unrelated fix that
     # edits that line disarms the mutation SILENTLY - it stays green everywhere except the full
     # ~25-minute sweep, which is CI-only. Measured 2026-08-05: the B3 encoding change broke
@@ -243,6 +247,10 @@ SELFTEST_IS_THE_GATE = {
     "review-freshness-scope":
         "its enforcing mode is --release, which blocks only at a release; the default run is a "
         "measurement. The SCOPE check - does it ask about every tracked file - is the selftest",
+    "selftest-isolation-selftest":
+        "the PAIRED row; 'selftest-isolation' runs the measurement enforcing. This half asks "
+        "what its subject cannot: can the detector still SEE an unscrubbed fixture? A blind "
+        "detector reports a clean population exactly like a clean one.",
     "hook-provenance-selftest":
         "the PAIRED row. Its enforcing form is registered separately as 'hook-provenance' with "
         "argv (), so both halves run; this row exists because the measurement cannot prove the "

@@ -48,6 +48,10 @@ GATE_TOKENS = (
     "ship_bar_gate", "check_file_size", "regen_example_settings", "gate_ledger",
     "check_no_network",
     "score_false_alarms",
+    # Added with the gate itself, not after: piped_gate_guard
+    # FAILED the moment selftest-isolation was registered, which is the roster-drift check
+    # working. A gate its guard cannot see can be piped into `head` and silently ignored.
+    "check_selftest_isolation",
 )
 
 # Consumers that REPLACE the pipeline's exit status with their own. `tee` is here because it

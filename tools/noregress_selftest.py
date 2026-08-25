@@ -33,6 +33,14 @@ from no_regression import (  # noqa: E402  (path set directly above)
     shared_siblings,
 )
 
+# [#46 item 4] Scrub git's redirect variables at import, before any fixture can run.
+# Flagged by tools/check_selftest_isolation.py, which DERIVES this population from the AST.
+# Reason this file is in the population: it CLONES, which under a poisoned GIT_DIR clones
+# the REAL repository. Inserted after the last import's END line - a line regex put this
+# block inside the multi-line `from no_regression import (...)` and broke the file.
+from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
+_scrub_environ()
+
 # --------------------------------------------------------------------------------------
 
 def _scratch_repo():

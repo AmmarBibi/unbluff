@@ -19,6 +19,27 @@ import shutil
 
 import pre_push_gate as _m
 
+# [item 3] Scrub git's redirect vars AT IMPORT, before any fixture runs - same reasoning as the
+# twin block in fast_test_on_stop_selftest.py. This module's line ~1116 points core.hooksPath at
+# a temp directory that is then deleted; unscrubbed under a git hook that write lands on the REAL
+# repository and silently disables every hook on the machine, which is one of the six instances
+# tools/git_isolation.py enumerates.
+# The parent (pre_push_gate.py, 792 lines) has 8 lines of headroom before it becomes a NEW
+# ratchet offender, which is not enough for the guarded form - so this module carries it and its
+# growth is re-recorded deliberately.
+try:  # pragma: no cover - the fallback exists for a checkout with no tools/
+    import os as _os
+    import sys as _sys
+    _T = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
+    if _T not in _sys.path:
+        _sys.path.insert(0, _T)
+    from git_isolation import scrub_environ as _scrub
+    _scrub()
+except ImportError:
+    for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+               "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+        _os.environ.pop(_v, None)
+
 # Snapshot the parent's namespace so the test bodies can use bare names (including the
 # underscored helpers `from x import *` would skip). READS only - see the rebinding rule above.
 globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})

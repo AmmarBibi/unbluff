@@ -54,6 +54,17 @@ import sys
 import tempfile
 import types
 
+# [#46 item 4] Scrub git's redirect variables at import, before any fixture can run.
+# Flagged by tools/check_selftest_isolation.py, which DERIVES this population from the AST
+# rather than from a list - and found this file after a hand-built roster of three missed it.
+# Reason this file is in the population: it reads and writes git config while comparing trees.
+# No ImportError fallback here, unlike the hooks/ copies: git_isolation is a SIBLING in
+# tools/, so if it is missing this tool is broken anyway and failing loudly at import is the
+# honest outcome. The fallback in hooks/ exists only because a partial checkout can have
+# hooks/ without tools/.
+from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
+_scrub_environ()
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 

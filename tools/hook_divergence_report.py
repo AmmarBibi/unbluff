@@ -49,6 +49,17 @@ if _HOOKS_DIR not in sys.path:
 # home directory containing a space still parses) that a fresh regex would silently lose.
 from duplicate_registration_check import _path_tokens, settings_layers  # noqa: E402
 
+# [#46 item 4] Scrub git's redirect variables at import, before any fixture can run.
+# Flagged by tools/check_selftest_isolation.py, which DERIVES this population from the AST
+# rather than from a list - and found this file after a hand-built roster of three missed it.
+# Reason this file is in the population: its selftest plants foreign copies and writes git config.
+# No ImportError fallback here, unlike the hooks/ copies: git_isolation is a SIBLING in
+# tools/, so if it is missing this tool is broken anyway and failing loudly at import is the
+# honest outcome. The fallback in hooks/ exists only because a partial checkout can have
+# hooks/ without tools/.
+from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
+_scrub_environ()
+
 
 def norm(p: str) -> str:
     """One canonical spelling, so C:\\a\\b and c:/a/b compare equal on Windows."""

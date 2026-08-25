@@ -17,6 +17,29 @@ from __future__ import annotations
 
 import fast_test_on_stop as _m
 
+# [item 3] Scrub git's redirect vars AT IMPORT, before any fixture runs. This module is reached
+# two ways - run_selftests (already scrubbed at its choke point) and `python
+# hooks/fast_test_on_stop.py --selftest` (not scrubbed at all), which is how a single hook gets
+# debugged. It goes HERE rather than in the parent because fast_test_on_stop.py sits at 851
+# lines against an 851 baseline and has zero ratchet headroom, while this module's growth is
+# re-recorded deliberately. Its line ~902 registers a linked worktree, so an unscrubbed run under
+# a git hook registers that worktree in the REAL repository.
+# Import-time rather than call-time: there is no single entry point here - the parent calls
+# individual _selftest_* functions - so a call-site obligation would be one more thing to
+# remember, and #46 is what remembering costs.
+try:  # pragma: no cover - the fallback exists for a checkout with no tools/
+    import os as _os
+    import sys as _sys
+    _T = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
+    if _T not in _sys.path:
+        _sys.path.insert(0, _T)
+    from git_isolation import scrub_environ as _scrub
+    _scrub()
+except ImportError:
+    for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+               "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+        _os.environ.pop(_v, None)
+
 # Snapshot the parent's namespace so the test bodies can use bare names (including the
 # underscored helpers `from x import *` would skip). READS only - see the rebinding rule above.
 globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})
