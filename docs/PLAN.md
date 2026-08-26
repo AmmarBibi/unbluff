@@ -160,7 +160,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    `--selftest` delegates to a module that scrubs at import - so it now resolves import delegation
    rather than firing on correct work.
 5. **Decide whether to wire `piped_gate_guard` at all - and only then fix its `pipefail` disarm.**
-   **STILL YOURS TO DECIDE. Evidence refreshed 2026-08-25T01:15:51Z; the recommendation is now WIRE.**
+   **DECIDED AND DONE: WIRE.** The user chose WIRE on 2026-08-25 and it is now registered as
+   `unbluff-piped-gate`, PreToolUse, matcher `Bash|PowerShell` - the matcher DERIVED from the
+   guard's own `SHELL_TOOLS` exactly as `install.py` derives it, rather than the literal `"Bash"`
+   that was PGG-PS's defect. `~/.claude/settings.json` backed up first to
+   `settings.json.bak-2026-08-25-item5`; hook-health went 30 -> 31 commands and still reports
+   `1 wired clone(s) config-checked` with zero problems.
+   **PROVEN where it ships, both directions, against the copy that actually runs:**
+   `python run_selftests.py | tail -5` -> **rc=2, blocked**, naming `PIPESTATUS[0]` and
+   `set -o pipefail` as the fix. Control `ls -la | head -5`, no gate token -> **rc=0, silent.**
+   **CAVEAT, and it is the BUILT IS NOT LIVE problem again:** `piped_gate_guard.py` is one of the
+   12 stale files, so the wired copy is the PRE-M10 version. The main case fires (proven above),
+   but the commented-`pipefail` disarm is still live in the code that runs until item 2's pull.
+   The M10 fix exists on this branch and is inert on this machine - which is the whole argument
+   for the pull, restated by the first hook wired since it was written.
+   Evidence that decided it, refreshed 2026-08-25T01:15:51Z:
    Re-derived, not trusted: it is wired **0 times** in `~/.claude/settings.json`, so its defect
    currently costs nothing - which is why fixing it first would have violated standing check 4.
    **What changed is the evidence FOR wiring it, and it is first-person.** Across 2026-08-24/25 I
