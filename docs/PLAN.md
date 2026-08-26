@@ -59,10 +59,15 @@ wrong. Found only because item 10's new check printed `1 wired clone config-chec
 disagreed with the prose - the mechanism catching the memo, which is the whole argument for
 item 10.
 
-The trajectory still holds and is the real point: **every session that fixes something makes the
-live machine MORE stale**, and it will keep doing so until item 2's pull runs. The library row
-matters more than it looks - 12 of 26 files differ, so even the five LIVE entry points are
-importing stale siblings.
+**The table above is pinned to `ff251e2`. One session later, at `1443a59`, it already reads
+6 of 11 entry points and 14 of 28 files** (derived 2026-08-26T19:35:02Z). Two new modules exist
+in no live copy at all, and `piped_gate_guard` BECAME an entry point when item 5 wired it - while
+stale. So the population grew and the numerator grew with it.
+
+The trajectory is the real point, and it is now measured twice rather than asserted: **every
+session that fixes something makes the live machine MORE stale**, and it will keep doing so until
+item 2's pull runs. The library row matters more than it looks - 14 of 28 files differ, so even the
+LIVE entry points are importing stale siblings.
 
 History of this one number, kept because it is the clearest worked example of the defect in this
 file: **2 of 6** (2026-08-24T22:06:53Z) named only the two hooks built that afternoon; **4 of 6**
@@ -79,12 +84,15 @@ pointing at a deleted temp dir, and the `t@t` identity are all unset, plus the s
 `~/.claude/githooks` and its identity to `AmmarBibi <ammarbibi@hotmail.com>`, with a clean tree at
 `b6cc6cc`. The full local config before the change is recorded in the commit message as the
 rollback record. **The `git pull` itself remains blocked by the tool-permission classifier** - so
-the clone is now REPAIRED BUT STILL BEHIND, and **five stale entry points** (and 12 of 26
-`hooks/*.py` files) stay inert until someone runs that one command. Before this repair the pull
-would have failed anyway on `core.bare=true`; now it is purely a permission away.
-(This sentence read "all four stale hooks" until 2026-08-25: it carried its own copy of the
-headline count, so correcting the table above would have left it silently disagreeing. A number
-restated in a second place is a number that will drift in one of them.)
+the clone is now REPAIRED BUT STILL BEHIND, and **6 of 11 entry points** (and **14 of 28**
+`hooks/*.py` files) stay inert until someone runs that one command - derived
+**2026-08-26T19:35:02Z at `1443a59`**. Before this repair the pull would have failed anyway on
+`core.bare=true`; now it is purely a permission away.
+(This sentence read "all four stale hooks" until 2026-08-25 and "five ... 12 of 26" until
+2026-08-26. It carries its own copy of the headline count, so every correction to the table above
+leaves it silently disagreeing - twice now, in two consecutive sessions. **A number restated in a
+second place is a number that will drift in one of them, and this is the proof.** Item 15 is the
+fix: derive it in `hook-provenance` and stop restating it in prose at all.)
 
 ## The bar
 
@@ -161,19 +169,38 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    rather than firing on correct work.
 5. **Decide whether to wire `piped_gate_guard` at all - and only then fix its `pipefail` disarm.**
    **DECIDED AND DONE: WIRE.** The user chose WIRE on 2026-08-25 and it is now registered as
-   `unbluff-piped-gate`, PreToolUse, matcher `Bash|PowerShell` - the matcher DERIVED from the
+   **`unbluff:piped-gate`**, PreToolUse, matcher `Bash|PowerShell` - the matcher DERIVED from the
    guard's own `SHELL_TOOLS` exactly as `install.py` derives it, rather than the literal `"Bash"`
    that was PGG-PS's defect. `~/.claude/settings.json` backed up first to
-   `settings.json.bak-2026-08-25-item5`; hook-health went 30 -> 31 commands and still reports
-   `1 wired clone(s) config-checked` with zero problems.
+   `settings.json.bak-2026-08-25-item5`; hook-health went 30 -> 31 commands and reports
+   `1 wired clone(s) config-checked` with **zero MACHINE-SANITY problems** - it reports 8 problems
+   overall, all of them stale-root registrations from running out of the worktree, which is item
+   2's condition and not item 5's. (This sentence read "with zero problems" until 2026-08-26,
+   which is true only under the scoped reading and false under the plain one - caught by the close
+   consistency pass re-reading the live output instead of the prose.)
    **PROVEN where it ships, both directions, against the copy that actually runs:**
    `python run_selftests.py | tail -5` -> **rc=2, blocked**, naming `PIPESTATUS[0]` and
    `set -o pipefail` as the fix. Control `ls -la | head -5`, no gate token -> **rc=0, silent.**
-   **CAVEAT, and it is the BUILT IS NOT LIVE problem again:** `piped_gate_guard.py` is one of the
-   12 stale files, so the wired copy is the PRE-M10 version. The main case fires (proven above),
-   but the commented-`pipefail` disarm is still live in the code that runs until item 2's pull.
-   The M10 fix exists on this branch and is inert on this machine - which is the whole argument
-   for the pull, restated by the first hook wired since it was written.
+   **CAVEAT, and it is the BUILT IS NOT LIVE problem again - THIS WIRING MADE THAT NUMBER WORSE.**
+   `piped_gate_guard.py` is stale, so the wired copy is the PRE-M10 version: the main case fires
+   (proven above), but the commented-`pipefail` disarm is still live in the code that runs until
+   item 2's pull. The M10 fix exists on this branch and is inert on this machine.
+   **A DEFECT IN THE WIRING ITSELF, found 2026-08-26 by the close source-coverage pass and fixed:**
+   the group's `id` was written `unbluff-piped-gate`, with a HYPHEN. `install.ID_PREFIX` is
+   **`unbluff:`**, with a COLON, and `--uninstall` selects groups by
+   `str(g.get("id","")).startswith(ID_PREFIX)` - so **the hand-written group would have survived an
+   uninstall**, an orphan PreToolUse hook invisible to the tool that manages it. Corrected to
+   `unbluff:piped-gate` and verified against install.py's OWN predicate rather than a reading of
+   it: `uninstall WOULD remove it: True`, field set identical to install's. The guard was
+   re-probed after the change and still fires both directions. This is the "registered once, from
+   the wrong root" class that `stale_root_registrations` exists for, one level over: a
+   registration that WORKS but is unmanageable. Found by asking what `install.py` would write that
+   I did not - which is the entire value of running source-coverage against the DESIGN.
+   And wiring it **moved the denominator**: `piped_gate_guard` was not an entry point before, so
+   the population went **10 -> 11 and the stale count 5 -> 6** (derived 2026-08-26T19:35:02Z at
+   `1443a59`). The plan's own sentence - *every session that fixes something makes the live machine
+   MORE stale* - is not a metaphor; this is the mechanism, and item 5 is the instance. The first
+   hook wired since M10 was written is itself the argument for the pull.
    Evidence that decided it, refreshed 2026-08-25T01:15:51Z:
    Re-derived, not trusted: it is wired **0 times** in `~/.claude/settings.json`, so its defect
    currently costs nothing - which is why fixing it first would have violated standing check 4.
@@ -226,8 +253,12 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
    fine, a re-export keeps it working.)
 
-8. **Nothing enforces that `--code-only` stays off the turn-end command** (was #47, ORPHANED by
-   the 2026-08-24 re-cut and re-homed here 2026-08-25 by the close completeness pass).
+8. **Nothing enforces that `--code-only` stays off the turn-end command.**
+   **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
+   hoisted into the header 2026-08-26 by the close sweep: it sat 20 lines down, so the row scanned
+   as OPEN and could be picked up out of order - which is how it got orphaned the first time.)
+   Was #47, ORPHANED by the 2026-08-24 re-cut and re-homed here 2026-08-25 by the close
+   completeness pass.
    `.claude/pre-push.cmd` runs `python run_selftests.py --code-only`, and its own comment says the
    flag is "deliberately NOT the default". That is a comment, and a comment is advisory. Adding
    `--code-only` to `.claude/fast-test.cmd` would silently weaken the strictest check in the
@@ -265,7 +296,9 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    revert - weakened turn-end fires, stripped push-time fires, an absent directory yields 2, and
    a correct pair yields 0.
 
-9. **Five guard families are hand-probed but NOT registered as mutation entries** (was four;
+9. **Five guard families are hand-probed but NOT registered as mutation entries.**
+   **SCHEDULED - BLOCKED behind item 2's pull -> a clean sweep, together with item 7.** (Verdict
+   hoisted into the header 2026-08-26 by the close sweep.) Was four families;
    **item 10's controls were added 2026-08-25 by the close meta-review's CHECK 2**, because a row
    that names a fixed count silently stops covering whatever is built after it - the same
    scoped-denominator shape this plan keeps paying for). The fifth family is item 10's:
@@ -439,6 +472,61 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     by adding ONE battery, that file records 93% as the level where the mutation harness reported
     `baseline already RED` for six unrelated mutations, and the next addition starts from 68%
     rather than from the 6.4s the existing comments still assume.
+
+17. **Nothing flags a gate TIER whose last run predates the code it covers.**
+    Found 2026-08-26 by the close completeness pass as a **silent gap** - the plan does not
+    mention the `integration` tier anywhere (grep: zero hits), so nothing about its freshness was
+    ever scheduled or excluded.
+    MEASURED the session before: `integration` last ran 2026-08-24T18:42:34Z, predating every
+    commit of a session that added two hook modules and two `REQUIRED_HOOKS` entries `install.py`
+    acts on. It was caught **only because the meta-review's CHECK 4 procedure says READ the
+    ledger**, by hand, at the close - and re-running it returned 34/34, so nothing was wrong. But
+    "nothing was wrong" was unverified for a full session, and the mechanism that caught it is a
+    human reading a JSON file at the end.
+    `tools/gate_ledger.py` already records every run with a UTC stamp, so the data exists. What
+    does not exist is anything that ASKS. Fix: a gate that, per tier, compares its latest ledger
+    stamp against the newest commit touching the surface that tier covers, and reports any tier
+    that is older. Grep confirms no such check today.
+    **Fails-loud by construction and cheap** - it reads a JSON file and asks git for a date.
+    Note the trap before building it: `mutation_sweep` is PERMANENTLY stale by design (CI cannot
+    write the local ledger), so that tier must be exempted with its reason written down, or the
+    new gate is red forever and gets switched off. See "Known-stale by design" below.
+
+18. **The SHIPPED consistency extractor's placeholder class fires on source-code literals.**
+    Found 2026-08-26 by the close consistency pass, on itself. `skills/consistency-audit/scripts/
+    audit.py` is a REGISTERED gate (`consistency-audit-skill` in `AUX_GATES`), so this is unbluff's
+    own shipped code, not a note about a personal skill.
+    PROVEN against the shipped copy: a file containing `x = []` reports **`[E] UNFILLED
+    PLACEHOLDERS -> 2`**, flagging the bare `[]` alongside a real `[TODO]`. The class is written
+    for prose deliverables, where `[TABLE]` / `[insert value]` are genuine defects; fed anything
+    carrying code, every empty list, slice or subscript reads as an unfilled placeholder. It cost
+    11 false candidates in the 2026-08-25 close and 0 real ones.
+    Low materiality - it fails LOUD, as advisory candidates a human adjudicates, never a silent
+    pass - but it is still a guard firing on correct work, which is the shape this repo says gets
+    guards switched off. Fix: require a placeholder token to contain at least one letter, or skip
+    the class for known code extensions. Whichever, probe BOTH directions: `[TODO]` must still
+    fire and `[]` must not.
+
+19. **Nothing asserts that a wired unbluff group carries `ID_PREFIX`.**
+    Found 2026-08-26 by the close meta-review's CHECK 2, as the durability half of the id defect
+    fixed in item 5. Changing one id was an INSTANCE fix.
+    `install.ID_PREFIX` is `unbluff:` and `--uninstall` selects groups by
+    `str(g.get("id","")).startswith(ID_PREFIX)`. A group registered under any other id **works
+    perfectly and is unmanageable**: it fires, `hook_health_check` resolves its script,
+    `duplicate_registration_check` sees exactly one registration, and `--uninstall` silently
+    leaves it behind. Every existing check says green - which is why this survived being written
+    by hand and would survive being written by hand again.
+    Grep confirms nothing asserts it: `ID_PREFIX` appears in `install.py` only, and
+    `show_your_proof.py`'s hits are `SESSION_ID_PREFIX_LEN`, unrelated.
+    Fix: `hook_health_check` already walks every wired command and already owns "is the wiring
+    healthy" - have it report any command whose script is a file THIS SUITE SHIPS while its group's
+    id does not start with `ID_PREFIX`. The population is already derived there by
+    `stale_root_registrations`, so this is a few lines on an existing walk. Read `ID_PREFIX` from
+    `install.py` rather than restating it - a second copy of that literal is precisely the twin
+    roster this repo keeps digging out, and it is the constant whose exact spelling caused the
+    defect.
+    **Confirm-don't-assume:** third-party groups must NOT be flagged, only groups whose command
+    points at an unbluff-shipped file. Probe both directions before believing it.
 
 ## Retired, not forgotten - and why each one died
 
