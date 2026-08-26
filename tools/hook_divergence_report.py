@@ -39,6 +39,9 @@ import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
 _HOOKS_DIR = os.path.join(REPO_ROOT, "hooks")
 if _HOOKS_DIR not in sys.path:
     sys.path.insert(0, _HOOKS_DIR)
@@ -255,12 +258,39 @@ def _git_common_dir(path: str):
     return norm(out if os.path.isabs(out) else os.path.join(d, out))
 
 
+def _same_program(a: bytes, b: bytes) -> bool:
+    r"""Byte equality, blind to line endings ONLY.
+
+    A CRLF checkout and an LF checkout of the same commit differ by hundreds of bytes and are
+    the same program. MEASURED 2026-08-26 on this machine: `cap_shapes.py` and
+    `capped_report.py` differed from the wired copy by 756 and 171 bytes while git reported the
+    two commits IDENTICAL for both files. A raw byte compare called 10 of 28 `hooks/*.py` stale
+    when 8 were - a guard firing on correct work, which is the shape this repo says gets guards
+    switched off, and the CRLF case is named explicitly in `tooling-discipline`.
+
+    Deliberately narrow: only \r\n -> \n. Whitespace, comments and docstrings are NOT
+    normalised, because a copy differing in any of those IS a different file and noticing that
+    is the entire point of this gate.
+    """
+    return a.replace(b"\r\n", b"\n") == b.replace(b"\r\n", b"\n")
+
+
+def _read(path: str):
+    """File bytes, or None. None means COULD NOT LOOK and never means no difference."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
 def _same_repo_same_bytes(wired: str, repo_hooks: str, base: str) -> bool:
     """True only if `wired` is our OWN file reached through another worktree of this repository.
 
-    Fails closed: an unreadable side, a git failure, or any byte difference -> False, i.e. the
-    reference stays FOREIGN. The dangerous direction is a false negative - a genuinely stale copy
-    waved through - so every uncertainty resolves toward flagging.
+    Fails closed: an unreadable side, a git failure, or any difference that is not purely a line
+    ending -> False, i.e. the reference stays FOREIGN. The dangerous direction is a false
+    negative - a genuinely stale copy waved through - so every uncertainty resolves toward
+    flagging.
     """
     mine = os.path.join(repo_hooks, base)
     if not (os.path.isfile(wired) and os.path.isfile(mine)):
@@ -269,11 +299,192 @@ def _same_repo_same_bytes(wired: str, repo_hooks: str, base: str) -> bool:
     theirs = _git_common_dir(wired)
     if not ours or not theirs or ours != theirs:
         return False
-    try:
-        with open(wired, "rb") as a, open(mine, "rb") as b:
-            return a.read() == b.read()
-    except OSError:
+    a, b = _read(wired), _read(mine)
+    if a is None or b is None:
         return False
+    return _same_program(a, b)
+
+
+# ------------------------------------------------------------------ [item 15] the COUNT
+
+def dispatcher_children(hooks_dir: str = None) -> dict:
+    """{dispatcher basename: [child module names]}, READ FROM THE AST of `hooks/*.py`.
+
+    DERIVED, NEVER LISTED - and this population has already been counted wrong twice. The plan
+    carried 11 entry points: settings.json's 8, `stop_dispatcher`'s table counted as **2**, and
+    the pre-push shim. The truth measured 2026-08-26 is **16**. `stop_dispatcher.HOOKS` has
+    FOUR children, not two - `show_your_proof` and `memory_hygiene_guard` were never counted -
+    and `post_tooluse_dispatcher` has a table of its own (`plan_defer_guard`,
+    `numbers_match_on_write`, `timing_claim_guard`) that no count has ever included at all.
+    Five hooks that run on every matching event sat outside the denominator.
+
+    A dispatcher is recognised by SHAPE, not by name: a module-level `HOOKS` bound to a
+    tuple/list of pairs whose first element is a string. Naming the two known dispatchers here
+    is what would let a third be missed, which is exactly how the last two were.
+    """
+    d = hooks_dir or _HOOKS_DIR
+    tables = {}
+    for p in sorted(glob.glob(os.path.join(glob.escape(d), "*.py"))):
+        src = _read(p)
+        if src is None:
+            continue
+        try:
+            tree = ast.parse(src.decode("utf-8", "replace"))
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if "HOOKS" not in [t.id for t in node.targets if isinstance(t, ast.Name)]:
+                continue
+            if not isinstance(node.value, (ast.Tuple, ast.List)):
+                continue
+            kids = []
+            for elt in node.value.elts:
+                if isinstance(elt, (ast.Tuple, ast.List)) and elt.elts:
+                    first = elt.elts[0]
+                    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                        kids.append(first.value)
+            if kids:
+                tables[os.path.basename(p)] = kids
+    return tables
+
+
+def entry_points(settings_paths=None, hook_dirs=None, hooks_dir=None) -> dict:
+    """{basename: the path the machine actually RUNS} for every hook that executes here.
+
+    Three reaching mechanisms, all derived: a wiring surface names the script (settings.json or
+    a git hook shim), or a WIRED dispatcher imports it by name. A dispatcher that is not itself
+    wired contributes nothing - its children do not run - so the population tracks reality
+    rather than the repo's ambitions.
+    """
+    ours = our_hook_names(hooks_dir)
+    found = {}
+    for _surface, cmd in wired_sources(settings_paths, hook_dirs):
+        for t in _path_tokens(cmd):
+            base = os.path.basename(t.replace("\\", "/"))
+            if base in ours and ("/" in t or "\\" in t):
+                found.setdefault(base, t)
+    for disp, kids in sorted(dispatcher_children(hooks_dir).items()):
+        wired = found.get(disp)
+        if not wired:
+            continue
+        near = os.path.dirname(wired)
+        for k in kids:
+            base = k + ".py"
+            if base in ours:
+                found.setdefault(base, os.path.join(near, base))
+    return found
+
+
+def _classify(wired: str, mine: str) -> str:
+    """'same' | 'eol' | 'differs' | 'absent' | 'unreadable'.
+
+    'unreadable' is its own answer on purpose: could-not-look must never be recorded as
+    found-no-difference, which is this suite's most-repeated finding about its own instruments.
+    """
+    if not os.path.isfile(wired):
+        return "absent"
+    a, b = _read(wired), _read(mine)
+    if a is None or b is None:
+        return "unreadable"
+    if a == b:
+        return "same"
+    return "eol" if _same_program(a, b) else "differs"
+
+
+def staleness(entry: dict, hooks_dir: str = None) -> dict:
+    """How much of what RUNS is not what is BUILT - both numerators, both denominators.
+
+    ABSENT counts as stale and is labelled: a module living in no live copy at all is the most
+    stale a file can be, and lumping it in with "differs" hides that it was never delivered.
+    Line-ending-only differences are counted and PRINTED but never called stale - see
+    `_same_program`.
+    """
+    d = hooks_dir or _HOOKS_DIR
+    res = {"entry_total": len(entry), "entry_stale": [], "entry_absent": [], "entry_eol": [],
+           "entry_unreadable": [], "files_total": 0, "files_stale": [], "files_absent": [],
+           "files_eol": [], "files_unreadable": [], "wired_dirs": []}
+    for base in sorted(entry):
+        kind = _classify(entry[base], os.path.join(d, base))
+        if kind == "differs":
+            res["entry_stale"].append(base)
+        elif kind == "absent":
+            res["entry_absent"].append(base)
+        elif kind == "eol":
+            res["entry_eol"].append(base)
+        elif kind == "unreadable":
+            res["entry_unreadable"].append(base)
+
+    res["wired_dirs"] = sorted({norm(os.path.dirname(p)) for p in entry.values() if p})
+    names = sorted(our_hook_names(hooks_dir))
+    res["files_total"] = len(names)
+    # One wired hooks dir is the normal case. With two or more, "the live copy" is ambiguous and
+    # a single P/Q would be a made-up number - so the row is withheld and SAID to be withheld.
+    if len(res["wired_dirs"]) == 1:
+        wd = res["wired_dirs"][0]
+        for base in names:
+            kind = _classify(os.path.join(wd, base), os.path.join(d, base))
+            if kind == "differs":
+                res["files_stale"].append(base)
+            elif kind == "absent":
+                res["files_absent"].append(base)
+            elif kind == "eol":
+                res["files_eol"].append(base)
+            elif kind == "unreadable":
+                res["files_unreadable"].append(base)
+    return res
+
+
+def _git_out(cwd: str, *args):
+    try:
+        r = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, timeout=15,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.decode("utf-8", "surrogateescape").strip() or None
+
+
+def wired_divergence_note(wired_dirs: list, repo_root: str = REPO_ROOT) -> list:
+    """WHY the live copies differ - the sentence whose absence caused a wrong prediction.
+
+    "Run the pull and the count becomes 0" was written into the plan and acted on, and it was
+    FALSE. The wired copies are the MAIN worktree of THIS SAME repository, tracking `main`,
+    while the work happens on a branch ahead of it. A pull moves that clone to `origin/main`;
+    it cannot deliver commits that were never pushed. The number alone could not say this, and
+    a number that invites a wrong remedy is worse than no number - so the relationship is
+    derived and printed beside it.
+    """
+    notes = []
+    mine_common = _git_common_dir(repo_root)
+    for wd in wired_dirs:
+        top = _git_out(wd, "rev-parse", "--show-toplevel") or os.path.dirname(wd)
+        if norm(top) == norm(repo_root):
+            continue
+        wb, wc = _git_out(top, "rev-parse", "--abbrev-ref", "HEAD"), _git_out(top, "rev-parse",
+                                                                             "--short", "HEAD")
+        mb, mc = (_git_out(repo_root, "rev-parse", "--abbrev-ref", "HEAD"),
+                  _git_out(repo_root, "rev-parse", "--short", "HEAD"))
+        if not (wb and wc and mb and mc):
+            notes.append("live copies are in %s; git could not be asked how it relates to this "
+                         "repo, so the CAUSE of any difference above is UNKNOWN" % top)
+            continue
+        line = "live copies run from %s @ %s (%s); this repo is %s @ %s" % (top, wc, wb, mb, mc)
+        their_common = _git_common_dir(wd)
+        if mine_common and their_common and mine_common == their_common:
+            cnt = _git_out(repo_root, "rev-list", "--left-right", "--count",
+                           "%s...%s" % (wc, mc))
+            behind, ahead = ((cnt or "").split() + ["?", "?"])[:2]
+            line += ("\n      SAME repository, different branches: this branch is %s commit(s) "
+                     "AHEAD of\n      the live one and %s behind. A `git pull` over there CANNOT"
+                     " clear the count -\n      those commits have never been pushed. Only a "
+                     "push/merge, or rewiring, will." % (ahead, behind))
+        else:
+            line += "\n      a SEPARATE repository, not a worktree of this one."
+        notes.append(line)
+    return notes
 
 
 # --------------------------------------------------------------------------- diffing a find
@@ -324,147 +535,19 @@ def sha(path: str):
         return None
 
 
+# The selftest battery lives in tools/hook_divergence_selftest.py - see that file's header for
+# why, and for the two conditions the cut had to satisfy. Imported lazily inside main() so a
+# normal gate run never pays for tempfile/git fixtures it will not use, and so a missing sibling
+# is a loud failure ON THE SELFTEST PATH rather than an import error that takes the GATE down.
 def selftest() -> int:
-    """Plant a foreign copy and a matching control; the gate must separate them.
-
-    A detector that cannot SEE a planted offender is indistinguishable from a clean machine,
-    which is the failure this whole file is about.
-    """
-    import tempfile
-    fails = []
-
-    # The SURFACE LIST must be derived, not passed in. Every other case below hands hook_dirs
-    # in explicitly, which would leave _git_hook_dirs() itself unexercised - and git's hook
-    # surface is precisely where the 2026-08-05 divergence ran. A gate that stopped reading it
-    # would go silent on the only surface that has ever caught anything here.
-    own = os.path.join(REPO_ROOT, ".git", "hooks")
-    if os.path.isdir(own):
-        found = {norm(d) for d in _git_hook_dirs()}
-        if norm(own) not in found:
-            fails.append("_git_hook_dirs() no longer reports this repo's own .git/hooks (%r); "
-                         "git's hook surface is the one the real divergence ran on" % (own,))
-    # BEHAVIOURAL: build a repo that actually SETS core.hooksPath and require the function to
-    # find it. An earlier version asserted only that the literal "core.hooksPath" still appeared
-    # in the function - mutation A3a emptied the scope loop and SURVIVED, because the literal was
-    # untouched. core.hooksPath REPLACES .git/hooks wholesale, so a gate that stops reading it
-    # inspects the dead surface and calls the machine clean.
-    with tempfile.TemporaryDirectory() as gd:
-        repo = os.path.join(gd, "r")
-        os.makedirs(repo)
-        want = os.path.join(gd, "myhooks")
-        os.makedirs(want)
-        try:
-            ok = subprocess.run(["git", "-C", repo, "init", "-q"],
-                                capture_output=True, timeout=30).returncode == 0
-            if ok:
-                subprocess.run(["git", "-C", repo, "config", "--local", "core.hooksPath", want],
-                               capture_output=True, timeout=30)
-        except (OSError, subprocess.SubprocessError):
-            ok = False
-        if ok:
-            got = {norm(d) for d in _git_hook_dirs(repos=[repo], cwd=repo)}
-            if norm(want) not in got:
-                fails.append("_git_hook_dirs() did not report a repo's own core.hooksPath "
-                             "(%r not in %r) - that setting REPLACES .git/hooks, so the gate "
-                             "would read the dead surface and call the machine clean"
-                             % (want, sorted(got)))
-        else:
-            print("  [hook-provenance] NOTE: git unavailable; the core.hooksPath discovery "
-                  "assertion did NOT run")
-
-    with tempfile.TemporaryDirectory() as td:
-        fake_hooks = os.path.join(td, "hooks")
-        os.makedirs(fake_hooks)
-        for n in ("alpha_hook.py", "beta_hook.py"):
-            with open(os.path.join(fake_hooks, n), "w", encoding="utf-8") as fh:
-                fh.write("# hook\n")
-        foreign_dir = os.path.join(td, "elsewhere")
-        os.makedirs(foreign_dir)
-        with open(os.path.join(foreign_dir, "alpha_hook.py"), "w", encoding="utf-8") as fh:
-            fh.write("# stale copy\n")
-
-        def settings_with(*cmds):
-            p = os.path.join(td, "s%d.json" % len(os.listdir(td)))
-            with open(p, "w", encoding="utf-8") as fh:
-                json.dump({"hooks": {"Stop": [{"hooks": [{"command": c} for c in cmds]}]}}, fh)
-            return p
-
-        # CONTROL: wired from the real hooks dir -> matched, never foreign
-        ctl = settings_with('python "%s"' % os.path.join(fake_hooks, "beta_hook.py"))
-        r = provenance([ctl], [], fake_hooks)
-        if r["foreign"]:
-            fails.append("CONTROL flagged as foreign: %r - the gate would fire on a correct "
-                         "install, which gets a gate disabled" % (r["foreign"],))
-        if len(r["matched"]) != 1:
-            fails.append("CONTROL not recognised as ours: %r" % (r["matched"],))
-
-        # OFFENDER: same basename, different directory
-        off = settings_with('python "%s"' % os.path.join(foreign_dir, "alpha_hook.py"))
-        r = provenance([off], [], fake_hooks)
-        if len(r["foreign"]) != 1:
-            fails.append("planted FOREIGN copy not detected: %r - the gate matches nothing and "
-                         "would report any machine as clean" % (r,))
-
-        # OFFENDER via a git hook shim (the surface that actually bit): shell, not JSON
-        gh = os.path.join(td, "githooks")
-        os.makedirs(gh)
-        with open(os.path.join(gh, "pre-push"), "w", encoding="utf-8") as fh:
-            fh.write('#!/bin/sh\nexec "py" "%s" "$@"\n'
-                     % os.path.join(foreign_dir, "alpha_hook.py").replace("\\", "/"))
-        r = provenance([], [gh], fake_hooks)
-        if len(r["foreign"]) != 1:
-            fails.append("foreign copy wired via a GIT HOOK not detected: %r. That is the exact "
-                         "surface the 2026-08-05 divergence ran on" % (r,))
-
-        # a path with a SPACE must still parse - the _path_tokens fix must not be lost
-        spaced = os.path.join(td, "John Doe")
-        os.makedirs(spaced, exist_ok=True)
-        with open(os.path.join(spaced, "alpha_hook.py"), "w", encoding="utf-8") as fh:
-            fh.write("# stale\n")
-        sp = settings_with('python "%s"' % os.path.join(spaced, "alpha_hook.py"))
-        r = provenance([sp], [], fake_hooks)
-        if len(r["foreign"]) != 1:
-            fails.append("a foreign path CONTAINING A SPACE was not detected: %r - every user "
-                         "whose home dir has a space would be unchecked" % (r,))
-
-        # an UNPARSEABLE command naming one of ours must be reported, never silently skipped
-        up = settings_with("run-alpha_hook.py-somehow --with no path")
-        r = provenance([up], [], fake_hooks)
-        if not r["unparsed"]:
-            fails.append("a command naming one of our hooks with no extractable path was "
-                         "silently dropped - non-extraction must not read as non-divergence")
-
-        # NEGATIVE CONTROL 1: our own shim documents itself in a COMMENT. A comment cannot wire
-        # anything, and reading it made 22 correctly-installed dispatchers look foreign during
-        # the very repair that installed them.
-        gh2 = os.path.join(td, "githooks2")
-        os.makedirs(gh2)
-        with open(os.path.join(gh2, "pre-push"), "w", encoding="utf-8") as fh:
-            fh.write('#!/bin/sh\n# managed by ~/.claude/hooks/alpha_hook.py\nexec "py" "%s"\n'
-                     % os.path.join(fake_hooks, "alpha_hook.py").replace("\\", "/"))
-        r = provenance([], [gh2], fake_hooks)
-        if r["foreign"]:
-            fails.append("a path inside a shell COMMENT was read as a wiring: %r - every "
-                         "self-documenting shim would fail this gate" % (r["foreign"],))
-        if len(r["matched"]) != 1:
-            fails.append("the real exec line was lost while stripping comments: %r" % (r,))
-
-        # NEGATIVE CONTROL 2: a bare basename (our dispatcher greps for one) is not a wiring.
-        gh3 = os.path.join(td, "githooks3")
-        os.makedirs(gh3)
-        with open(os.path.join(gh3, "pre-push"), "w", encoding="utf-8") as fh:
-            fh.write('#!/bin/sh\ngrep -q alpha_hook.py "$local_hook" && exit 0\n')
-        r = provenance([], [gh3], fake_hooks)
-        if r["foreign"]:
-            fails.append("a BARE basename was classified as a foreign wiring: %r"
-                         % (r["foreign"],))
-        if len(r["bare"]) != 1:
-            fails.append("a bare basename was silently dropped instead of counted: %r" % (r,))
-
-    for f in fails:
-        print("SELFTEST FAIL:", f)
-    print("SELFTEST OK" if not fails else "SELFTEST FAILED")
-    return 0 if not fails else 1
+    try:
+        from hook_divergence_selftest import selftest as _run
+    except ImportError as exc:
+        print("SELFTEST FAILED: tools/hook_divergence_selftest.py could not be imported (%s). "
+              "The battery is not optional - a selftest that cannot load is not a selftest that "
+              "passed." % exc)
+        return 1
+    return _run()
 
 
 def main() -> int:
@@ -490,6 +573,44 @@ def main() -> int:
     print("  hook commands examined: %d" % r["examined"])
     print("  references to OUR hooks: %d ours, %d foreign, %d unparsed, %d bare-name"
           % (len(r["matched"]), len(r["foreign"]), len(r["unparsed"]), len(r["bare"])))
+
+    # [item 15] BUILT IS NOT LIVE, DERIVED. This number was hand-counted five times and was
+    # wrong five times - 2 of 6, 4 of 6, 5 of 6, 5 of 10, 6 of 11 - and each correction fixed
+    # the NUMERATOR while the denominator stayed scoped to whatever the author had in mind.
+    # It is printed here because this gate already walks every wiring surface; the count was
+    # the one thing it computed and threw away. The plain-prose copies of it are deleted from
+    # docs/PLAN.md: a number restated in a second place drifts in one of them, and it did, four
+    # sessions running.
+    ep = entry_points(hooks_dir=hooks_dir)
+    st = staleness(ep, hooks_dir)
+    n_entry = len(st["entry_stale"]) + len(st["entry_absent"])
+    n_files = len(st["files_stale"]) + len(st["files_absent"])
+    if len(st["wired_dirs"]) == 1:
+        files_row = "%d of %d hooks/*.py" % (n_files, st["files_total"])
+    else:
+        files_row = ("hooks/*.py row WITHHELD - %d wired hook dirs, so 'the live copy' is "
+                     "ambiguous" % len(st["wired_dirs"]))
+    print("  BUILT IS NOT LIVE: %d of %d entry points stale, %s"
+          % (n_entry, st["entry_total"], files_row))
+    for label, key in (("stale", "entry_stale"), ("ABSENT live", "entry_absent"),
+                       ("UNREADABLE", "entry_unreadable")):
+        if st[key]:
+            print("      entry points %s: %s" % (label, ", ".join(st[key])))
+    if st["files_stale"]:
+        print("      files differing: %s" % ", ".join(st["files_stale"]))
+    if st["files_absent"]:
+        print("      files ABSENT live: %s" % ", ".join(st["files_absent"]))
+    # Counted and named, never silently dropped: a line-ending-only difference is NOT staleness,
+    # and saying so is what stops the next reader "fixing" it.
+    eol = sorted(set(st["entry_eol"]) | set(st["files_eol"]))
+    if eol:
+        print("      %d line-ending-only difference(s), NOT counted as stale: %s"
+              % (len(eol), ", ".join(eol)))
+    if st["files_unreadable"]:
+        print("      %d file(s) COULD NOT BE READ - not counted either way: %s"
+              % (len(st["files_unreadable"]), ", ".join(st["files_unreadable"])))
+    for note in wired_divergence_note(st["wired_dirs"]):
+        print("      %s" % note)
 
     # [MODE-CONTROL follow-up] A zero denominator has TWO causes and they are not the same fact.
     # No surface at all = this machine has no wiring, so the gate is inapplicable (a fresh CI

@@ -33,7 +33,19 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCANNED_DIRS = ("hooks", "tools", "tests", "skills", "scripts")
-ROOT_FILES = ("install.py", "run_selftests.py")
+
+
+def _is_root_py(rel: str) -> bool:
+    """EVERY .py at the repo root, not a named pair.
+
+    [ROOT-GLOB 2026-08-26] This was `ROOT_FILES = ("install.py", "run_selftests.py")`, and the
+    enumerated form had ALREADY gone stale: the 2026-08-24 split of `install.py` produced
+    `install_selftest.py` at the root, and this gate has never scanned it - a file exempt from
+    the no-network claim because nobody remembered to add a string. The item-7 split of
+    `run_selftests.py` would have made that two. `check_review_freshness` made exactly this
+    change for exactly this reason ([ROOT-GLOB 2026-08-24]); DETECT, do not list.
+    """
+    return rel.endswith(".py") and "/" not in rel
 
 # Stdlib modules that can open a connection. Deliberately broad: the claim is "no network", so
 # the bar is "could this reach the outside", not "does this definitely send bytes".
@@ -61,7 +73,7 @@ def population(root: str = REPO) -> tuple:
         if out.returncode == 0 and out.stdout.strip():
             rels = [ln.strip().replace(os.sep, "/") for ln in out.stdout.splitlines() if ln.strip()]
             keep = [r for r in rels
-                    if (r.split("/", 1)[0] in SCANNED_DIRS or r in ROOT_FILES)
+                    if (r.split("/", 1)[0] in SCANNED_DIRS or _is_root_py(r))
                     and os.path.isfile(os.path.join(root, *r.split("/")))]
             return keep, "git"
     except (OSError, subprocess.SubprocessError):
@@ -73,7 +85,11 @@ def population(root: str = REPO) -> tuple:
             for f in fn:
                 if f.endswith(".py"):
                     rels.append(os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/"))
-    rels += [f for f in ROOT_FILES if os.path.isfile(os.path.join(root, f))]
+    try:
+        rels += [f for f in sorted(os.listdir(root))
+                 if _is_root_py(f) and os.path.isfile(os.path.join(root, f))]
+    except OSError:
+        pass
     return sorted(rels), "walk"
 
 

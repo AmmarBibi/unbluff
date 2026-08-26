@@ -37,62 +37,66 @@ Seven hook commands wired in `~/.claude/settings.json`, running from
 `core.hooksPath` at `~/.claude/githooks`, plus four skills `install.py` copies into
 `~/.claude/skills`. That is the product. Everything else is scaffolding around it.
 
-**BUILT IS NOT LIVE, and right now they differ.** Re-derived 2026-08-25T02:19:47Z by content hash
-against committed `ff251e2`, with the DENOMINATOR derived rather than assumed - and **the figure
-this paragraph carried was wrong**:
+**BUILT IS NOT LIVE, and this plan no longer says by how much.** The count is DERIVED and
+PRINTED by `hook-provenance`, as of item 15 (2026-08-26):
 
-| population | how it is reached | stale |
+```
+python tools/hook_divergence_report.py
+  BUILT IS NOT LIVE: N of M entry points stale, P of Q hooks/*.py
+```
+
+**No number is written here on purpose.** It was hand-counted five times and was wrong five
+times, and each correction fixed the NUMERATOR while the denominator stayed scoped to whatever
+the author had in mind. Ask the gate.
+
+History of this one number, kept because it is the clearest worked example of the defect this
+whole file is about - and it is HISTORY, not current state:
+
+| written | claimed | what was actually wrong |
 |---|---|---|
-| 7 hooks named in `settings.json` | Claude Code | **2** - `close_skills_guard`, `hook_health_check` |
-| 2 `stop_dispatcher` children | in-process import | **2** - `meta_audit_on_stop`, `fast_test_on_stop` |
-| 1 `core.hooksPath` target | `~/.claude/githooks/pre-push` | **1** - `pre_push_gate` |
-| **entry points that RUN** | | **5 of 10** |
-| every `hooks/*.py` | incl. the libraries those import | **12 of 26**; `fast_test_disclosure.py` is ABSENT |
+| 2026-08-24T22:06Z | 2 of 6 | numerator: only the two hooks built that afternoon |
+| 2026-08-24T23:06Z | 4 of 6 | numerator again |
+| 2026-08-25T01:42Z | 5 of 6 | numerator again; the 6 was "files I worked on", not a population |
+| 2026-08-25T02:19Z | 5 of 10 | denominator corrected once - still missing 5 hooks that RUN |
+| 2026-08-26T19:35Z | 6 of 11 | ditto, plus `piped_gate_guard` newly wired while stale |
+| 2026-08-26T20:34Z | **derived** | population is **16**, not 11 |
 
-The five NAMES were exactly right. The denominator was not: it read **"5 of 6 ... Live:
-`stop_dispatcher` alone"**, when the population is 10 and FIVE hooks are live - `stop_dispatcher`,
-`duplicate_registration_check`, `post_tooluse_dispatcher`, `rate_prompt`, `usage_snip_prompt`.
-The 6 was the five files that had been worked on plus the one known-good: **a denominator scoped
-to what the author was thinking about rather than to the population**, which is the defect this
-plan names in three other places, and the third session running that this one number has been
-wrong. Found only because item 10's new check printed `1 wired clone config-checked` and that
-disagreed with the prose - the mechanism catching the memo, which is the whole argument for
-item 10.
+The last row is the finding. `stop_dispatcher.HOOKS` has FOUR children and was counted as two;
+`post_tooluse_dispatcher` has a table of its own - `plan_defer_guard`, `numbers_match_on_write`,
+`timing_claim_guard` - that no count ever included. **Five hooks that run on every matching
+event sat outside the denominator through five hand-counts and three consistency passes.**
 
-**The table above is pinned to `ff251e2`. One session later, at `1443a59`, it already reads
-6 of 11 entry points and 14 of 28 files** (derived 2026-08-26T19:35:02Z). Two new modules exist
-in no live copy at all, and `piped_gate_guard` BECAME an entry point when item 5 wired it - while
-stale. So the population grew and the numerator grew with it.
+Two further things the derived count says that no hand-count did:
 
-The trajectory is the real point, and it is now measured twice rather than asserted: **every
-session that fixes something makes the live machine MORE stale**, and it will keep doing so until
-item 2's pull runs. The library row matters more than it looks - 14 of 28 files differ, so even the
-LIVE entry points are importing stale siblings.
+- **A `git pull` in the live clone could never take it to zero**, and the plan predicted it
+  would. The live copies are the MAIN worktree of THIS SAME repository tracking `main`; the work
+  is on a branch ahead of it. Pulling delivers `origin/main`, not unpushed commits. The gate now
+  prints the branch relationship next to the number, because a number that invites the wrong
+  remedy is worse than no number.
+- **Line endings are not staleness.** A raw byte compare called 10 of 28 files stale when 8
+  were: `cap_shapes.py` and `capped_report.py` differ from the live copy by 756 and 171 bytes
+  and are the same commit. `_same_repo_same_bytes` had that bug too, so this gate could have
+  flagged a correct linked worktree as FOREIGN.
 
-History of this one number, kept because it is the clearest worked example of the defect in this
-file: **2 of 6** (2026-08-24T22:06:53Z) named only the two hooks built that afternoon; **4 of 6**
-(23:06:35Z) added the two whose fixes landed the session before; **5 of 6** (2026-08-25T01:42:33Z)
-added `meta_audit_on_stop`. Each correction fixed the NUMERATOR and none of them ever questioned
-the DENOMINATOR, which was wrong from the first measurement and stayed wrong through three
-revisions by three separate consistency passes. **The two the first count missed are the two that
-matter most to a user** - the execution-model disclosure and the gate that bricks pushes on a
-moved clone.
+**Item 2 is DONE (2026-08-26T20:24:36Z).** The config half landed 2026-08-24T23:05:49Z -
+`core.bare`, the local `core.hooksPath` pointing at a deleted temp dir, the `t@t` identity and
+the stale `branch.feat/enforcing-verify.*` section are all unset, with the full prior config in
+that commit message as the rollback record. The `git pull --ff-only`, blocked by the
+tool-permission classifier for three sessions, ran on the fourth attempt: **`b6cc6cc` ->
+`d44138c`, 44 commits, 0 behind `origin/main`, clean tree.**
 
-**Item 2's config half is DONE (2026-08-24T23:05:49Z).** `core.bare`, the local `core.hooksPath`
-pointing at a deleted temp dir, and the `t@t` identity are all unset, plus the stale
-`branch.feat/enforcing-verify.*` section; the clone now resolves hooks to the global
-`~/.claude/githooks` and its identity to `AmmarBibi <ammarbibi@hotmail.com>`, with a clean tree at
-`b6cc6cc`. The full local config before the change is recorded in the commit message as the
-rollback record. **The `git pull` itself remains blocked by the tool-permission classifier** - so
-the clone is now REPAIRED BUT STILL BEHIND, and **6 of 11 entry points** (and **14 of 28**
-`hooks/*.py` files) stay inert until someone runs that one command - derived
-**2026-08-26T19:35:02Z at `1443a59`**. Before this repair the pull would have failed anyway on
-`core.bare=true`; now it is purely a permission away.
-(This sentence read "all four stale hooks" until 2026-08-25 and "five ... 12 of 26" until
-2026-08-26. It carries its own copy of the headline count, so every correction to the table above
-leaves it silently disagreeing - twice now, in two consecutive sessions. **A number restated in a
-second place is a number that will drift in one of them, and this is the proof.** Item 15 is the
-fix: derive it in `hook-provenance` and stop restating it in prose at all.)
+**It did not turn `hook-provenance` green, and that is the session's finding rather than a
+leftover.** The live copies are the MAIN worktree of this same repository on `main`; this branch
+is 15 commits ahead and has never been pushed, and those 15 commits touch 9 `hooks/*.py`. A pull
+delivers `origin/main` and cannot deliver what was never pushed. The condition clears on a
+**push or merge**, not on a pull. The count and its cause are now printed by the gate - see
+BUILT IS NOT LIVE above.
+
+(This paragraph used to carry its own copy of the headline count and drifted in four consecutive
+sessions - "all four stale hooks", then "five ... 12 of 26", then "6 of 11 ... 14 of 28", each
+one silently disagreeing with the table it copied. **A number restated in a second place is a
+number that will drift in one of them.** Item 15 removed both copies; the gate is the only
+source now.)
 
 ## The bar
 
@@ -123,17 +127,16 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    the same defect as a stale count, one level up.
    **The branch is ahead again**: 4 commits (items 3, 4, 6, 7 and the config repair) are on
    `feat/enforcing-verify` and not on `main`, so a second PR is owed before they are live.
-2. **Repair the main clone's git config.** **PARTIAL - config half done 2026-08-24T23:05:49Z, the
-   `git pull` is STILL BLOCKED and is the only thing standing between every fix on this branch and
-   the machine that runs them.** (Relabelled by the close completeness pass: this row led with the
-   word DONE over a body saying blocked, which is the same token-vs-body contradiction the plan
-   flags elsewhere.) `core.bare=true`, a local `core.hooksPath` pointing at the deleted
+2. **Repair the main clone's git config.** **DONE 2026-08-26T20:24:36Z.** The config half landed
+   2026-08-24T23:05:49Z: `core.bare=true`, a local `core.hooksPath` pointing at the deleted
    `%TEMP%/tmp7dq12juu/myhooks`, a `t@t` identity and a stale `branch.feat/enforcing-verify.*`
-   section - all four #46 residue, all now unset, verified by re-reading the config and confirming
+   section - all four #46 residue, all unset, verified by re-reading the config and confirming
    the clone resolves to the global `~/.claude/githooks` as `AmmarBibi`, tree clean at `b6cc6cc`.
-   Remaining, and it is one command: the clone is **44 commits behind `origin/main`** and cannot
-   be advanced from here because `git pull` trips the tool-permission classifier. Until it runs,
-   4 of 6 wired hooks are stale and every fix authored on 2026-08-23/24 is inert on this machine.
+   The `git pull --ff-only` had tripped the tool-permission classifier three sessions running; it
+   was attempted a fourth time and **went through**: `b6cc6cc` -> `d44138c`, 44 commits, 56 files,
+   clean tree, 0 behind `origin/main`. Three sessions of "Claude cannot run this" were three
+   sessions of not re-trying a classifier decision that had changed.
+   **It did NOT clear `hook-provenance`, and that is a finding, not a leftover** - see item 20.
 
 3. **Make the per-hook `--selftest` form isolated.** **DONE 2026-08-25.** All 8 files that run
    a MUTATING git verb from a `--selftest` path now scrub, enforced by item 4's gate rather than
@@ -232,7 +235,29 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    forever gets the hook deleted. This one is a security disclosure, so the trade inverts.
    Note for the record: the probe was INVALID on its first two writes (wrong entry point, then
    wrong `source` constant) and both times returned an answer that looked like a finding.
-7. **Split `run_selftests.py`.** New 2026-08-25. It is a recorded 803-line offender, but the
+7. **Split `run_selftests.py`.** **PARTIAL 2026-08-26 - the headroom is bought, the REGISTRY cut
+   this item actually specifies is NOT done and still waits on a clean sweep.** Read the two
+   halves separately before marking this row anything else.
+   **What landed (2026-08-26T20:51Z):** `selftest()` -> `run_selftests_selftest.py`, 803 -> 655
+   lines, removed from the file-size baseline by the ratchet's own rule. **This is a DIFFERENT
+   cut from the one specified below, chosen precisely because it does not touch the trap:**
+   `AUX_GATES` does not move, so `mutation_check.aux_gates()`'s `ast.literal_eval` of this
+   file's source text keeps working, and no sweep baseline is needed to verify it honestly. The
+   seam was measured before cutting - ZERO pinned mutation anchors inside `selftest()`, no
+   parent-global rebinds, and `main()` stays put for `check_selftest_isolation`'s assertion.
+   **What that does NOT achieve:** this item's stated goal is *"after the move, adding a gate
+   stops touching the orchestrator at all."* It still does - `AUX_GATES` and `NOT_A_GATE` are
+   still here, and this session added a `NOT_A_GATE` entry to prove it. What changed is only
+   that there are now 145 lines of headroom instead of 6, so the next gate registration is no
+   longer a file-size failure.
+   **Why it was done now rather than in its scheduled slot:** it became hard-blocking. Item 15
+   split `hook_divergence_report.py`, the new sibling had to be classified in `NOT_A_GATE`, and
+   at 803/800 there was no room to write the line. The 08-25 baseline note predicted this in
+   those words - "the orchestrator having only 6 lines of headroom is the actual finding here,
+   and it will bite the next person who adds a gate." It bit on the next session.
+   **Still open below, unchanged:** the registry cut, its trap, and the forced order.
+
+   New 2026-08-25. It is a recorded 803-line offender, but the
    overage is not the finding - the finding is that the orchestrator had SIX lines of headroom, so
    registering one gate with its reasoning pushed it over and the next person hits the same wall.
    **Scoped, and its trap is already mapped so nobody discovers it mid-refactor.** The right cut is
@@ -252,6 +277,10 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    baseline - which is the one move `tooling-discipline` section 4 is entirely about.
    (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
    fine, a re-export keeps it working.)
+   **The forced order is now itself blocked, and by a different thing than when it was written.**
+   It waited on item 2's pull; the pull has run. It now waits on a CLEAN sweep, and the sweep
+   cannot be clean while `hook-provenance` fails - which needs item 20's decision, not a pull.
+   The registry cut is therefore still correctly parked, for a reason that has moved.
 
 8. **Nothing enforces that `--code-only` stays off the turn-end command.**
    **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
@@ -447,24 +476,33 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     - **the stale `branch.<name>.*` config section** (part of the item-2 repair) - **FINALIZED
       EXCLUSION**: harmless, and unlike a dead `core.hooksPath` it disables nothing.
 
-15. **BUILT IS NOT LIVE is a hand-counted number, and hand-counting it has failed four times.**
-    Found 2026-08-25 by the close meta-review's CHECK 2 (instance vs mechanism), and it is the
-    sharpest durability gap of the session: **correcting the number was an INSTANCE fix.**
-    The history is in the plan above - 2 of 6, 4 of 6, 5 of 6, and now 5 of 10 / 12 of 26. Three
-    of those four were corrected by a consistency pass that re-derived the NUMERATOR and never
-    once questioned the DENOMINATOR. The fourth was caught only because item 10's new check
-    happened to print `1 wired clone config-checked` and that disagreed with the prose. **That is
-    luck wearing the costume of a process**, and next session the number goes stale again the
-    moment anything is committed.
-    The mechanism is close to free, because the gate already exists: `hook-provenance` ALREADY
-    compares the wired copies against the repo and already fails when they differ. It reports a
-    verdict; it does not report a COUNT. Have it derive and print `N of M entry points stale, P of
-    Q hooks/*.py`, with the entry-point population derived the way item 10 derives it -
-    `settings.json` commands, plus `stop_dispatcher`'s table, plus the `core.hooksPath` shim's
-    target - and the plan's sentence becomes checkable against a derived number instead of being
-    re-counted by hand by whoever notices next.
-    Do it AFTER item 2's pull: at that moment the true answer becomes 0 of 10, which is exactly
-    when a wrong count is least likely to be noticed.
+15. **BUILT IS NOT LIVE is a hand-counted number, and hand-counting it failed five times.**
+    **DONE 2026-08-26T20:34Z.** Found 2026-08-25 by the close meta-review's CHECK 2 (instance vs
+    mechanism): **correcting the number was an INSTANCE fix.** `hook-provenance` already walked
+    every wiring surface and already failed when copies differed - it computed the count and
+    threw it away. It now derives and prints
+    `BUILT IS NOT LIVE: N of M entry points stale, P of Q hooks/*.py`.
+    **Built immediately after item 2's pull deliberately**, because a wrong count is least likely
+    to be noticed at the moment everyone expects a zero. Three things fell out of doing it then,
+    and none would have been found by re-counting by hand:
+    - **The denominator was wrong AGAIN - 11, when it is 16.** `stop_dispatcher.HOOKS` has FOUR
+      children and the plan counted two; `post_tooluse_dispatcher` has a table of its own that no
+      count ever included. Five hooks that run on every matching event were outside the
+      population through five hand-counts and three consistency passes. `dispatcher_children()`
+      therefore recognises a dispatcher **by SHAPE** - a module-level `HOOKS` of string-pairs -
+      because naming the two known ones is exactly how the third gets missed.
+    - **The predicted post-pull answer, 0, was wrong: it is 3 of 16.** See item 20.
+    - **A raw byte compare over-reports.** `cap_shapes.py` and `capped_report.py` differ from the
+      live copy by 756 and 171 bytes and are the same commit - CRLF vs LF. That made it 10 of 28
+      instead of 8 of 28, and `_same_repo_same_bytes` carried the same bug, so this gate could
+      have called a correct linked worktree FOREIGN. Fixed via `_same_program`, which normalises
+      **line endings only** - deliberately not whitespace, comments or docstrings.
+    Prose restatements DELETED from this file, both of them; the history table above is labelled
+    as history and carries no current figure. **7 mutations placed against the new probes, 7
+    caught, 0 survived** (raw-byte compare, over-wide normalisation, name-based dispatcher
+    lookup, unwired-dispatcher children, ABSENT folded into stale, line-endings counted as
+    stale, and `_same_repo_same_bytes` reverted) - run against a COPY in `tools/`, never the
+    real file, so there was nothing to restore and no sentinel to leak.
 
 16. **`hook_health_check`'s selftest budget share should be revisited.** New 2026-08-25.
     Not urgent and NOT currently a problem - the item-10 split took it from 8.37s/84% back to
@@ -527,6 +565,38 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     defect.
     **Confirm-don't-assume:** third-party groups must NOT be flagged, only groups whose command
     points at an unbluff-shipped file. Probe both directions before believing it.
+
+20. **The machine is wired to `main`, and the work is on a branch. NEEDS A DECISION.**
+    New 2026-08-26, the session's sharpest finding, and it exists because item 2's pull finally
+    ran and **did not do what four sessions of planning said it would.**
+    The prediction was "the pull clears `hook-provenance`; the true answer becomes 0". Measured
+    after the pull: **3 of 16 entry points stale, 8 of 28 `hooks/*.py`**, and `hook-provenance`
+    still FAILS on `hook_health_check.py` and `piped_gate_guard.py`.
+    The cause is structural and was never written down. `C:\Users\ammar\Downloads\unbluff` is
+    not a stale clone - it is the **MAIN WORKTREE of this same repository** (`git-common-dir` is
+    identical; `git worktree list` shows both), checked out on `main` at `origin/main`. This
+    branch is 15 commits ahead and has never been pushed, and those 15 commits touch 9
+    `hooks/*.py`. **A pull can only deliver `origin/main`; it cannot deliver unpushed commits.**
+    So the divergence is now BRANCH divergence, and no amount of pulling will ever close it.
+    Three options, and this is the user's call rather than a mechanical fix:
+    - **Push / merge `feat/enforcing-verify` to `main`.** Closes it properly and makes every fix
+      on this branch live. Needs the suite green first, which needs `hook-provenance` green,
+      which is only true after the push - so the pre-push gate has to be run deliberately rather
+      than relied on to gate itself out of the loop.
+    - **Rewire `settings.json` to the enforcing worktree.** Makes the branch live immediately and
+      moves the staleness to `main` instead. Cheap, reversible, and it makes the machine run
+      code that has not been merged.
+    - **Accept it and mark `hook-provenance` known-red on an unpushed branch.** The cheapest and
+      the worst: a gate that is red by design is a gate that gets switched off, which is this
+      repo's own most-repeated finding.
+    Related but NOT the same as the "Known-stale by design" `mutation_sweep` row below: that one
+    is stale because CI cannot write a local ledger. This one is red because the machine runs a
+    different branch, and it will recur on **every** branch unless a rule is chosen.
+    **Also worth recording:** the wired `piped_gate_guard` (still pre-M10) fired a FALSE POSITIVE
+    on this session's own command - it flagged `hook_divergence_report.py` as "piped into head"
+    when that filename was an argument to `wc -l` in a `for` loop and the `| head` belonged to a
+    different command in the same compound line. Whether M10 fixes that shape is unverified, and
+    it should be checked when item 5's fix goes live rather than assumed.
 
 ## Retired, not forgotten - and why each one died
 
