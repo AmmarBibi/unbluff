@@ -447,6 +447,23 @@ def _git_out(cwd: str, *args):
     return r.stdout.decode("utf-8", "surrogateescape").strip() or None
 
 
+def sync_phrase(ahead: str, behind: str) -> str:
+    """SAY THE REMEDY ONLY WHEN THERE IS SOMETHING TO REMEDY.
+
+    The first version printed "only a push/merge will clear the count" unconditionally, so the
+    moment the merge landed and the answer became 0 of 16 it was still demanding a merge - a
+    guard telling you to fix what you have just fixed, which is the shape this repo says gets
+    guards switched off. Found by running it where it ships, immediately after the merge it had
+    itself recommended. Split out as a pure function so both directions can be probed without a
+    git fixture.
+    """
+    if ahead == "0" and behind == "0":
+        return "same repository, IN SYNC with the live worktree - nothing to reconcile."
+    return ("SAME repository, different commits: this branch is %s commit(s) AHEAD of\n      "
+            "the live one and %s behind. A `git pull` over there cannot clear a count\n      "
+            "caused by unpushed commits - only a push/merge, or rewiring, will." % (ahead, behind))
+
+
 def wired_divergence_note(wired_dirs: list, repo_root: str = REPO_ROOT) -> list:
     """WHY the live copies differ - the sentence whose absence caused a wrong prediction.
 
@@ -477,10 +494,7 @@ def wired_divergence_note(wired_dirs: list, repo_root: str = REPO_ROOT) -> list:
             cnt = _git_out(repo_root, "rev-list", "--left-right", "--count",
                            "%s...%s" % (wc, mc))
             behind, ahead = ((cnt or "").split() + ["?", "?"])[:2]
-            line += ("\n      SAME repository, different branches: this branch is %s commit(s) "
-                     "AHEAD of\n      the live one and %s behind. A `git pull` over there CANNOT"
-                     " clear the count -\n      those commits have never been pushed. Only a "
-                     "push/merge, or rewiring, will." % (ahead, behind))
+            line += "\n      " + sync_phrase(ahead, behind)
         else:
             line += "\n      a SEPARATE repository, not a worktree of this one."
         notes.append(line)

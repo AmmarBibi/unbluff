@@ -43,6 +43,7 @@ from hook_divergence_report import (  # noqa: E402
     norm,
     provenance,
     staleness,
+    sync_phrase,
 )
 
 # [#46 item 4] Scrub git's redirect variables at import, before any fixture can run. This file
@@ -153,6 +154,23 @@ def _selftest_item15() -> list:
         if st["entry_total"] != 4:
             fails.append("entry_total was %r, not the 4 examined - a numerator without its own "
                          "denominator is the defect this item exists to remove" % st["entry_total"])
+
+    # 4b. THE REMEDY SENTENCE MUST NOT FIRE ON A SYNCED TREE. This one is not hypothetical: the
+    #     first version printed "only a push/merge will clear the count" unconditionally, and
+    #     the merge it recommended was landed, the count went to 0 of 16, and it was STILL
+    #     demanding a merge. Both directions, because a guard that never speaks is as useless
+    #     as one that never stops.
+    synced = sync_phrase("0", "0")
+    if "push/merge" in synced or "AHEAD" in synced:
+        fails.append("the divergence note still demands a push/merge when the trees are IN "
+                     "SYNC (%r) - a guard telling you to fix what you just fixed" % synced)
+    if "IN SYNC" not in synced:
+        fails.append("a synced tree produced %r, which does not SAY it is synced - silence and "
+                     "'in sync' are not the same report" % synced)
+    diverged = sync_phrase("15", "0")
+    if "push/merge" not in diverged or "15" not in diverged:
+        fails.append("a genuinely ahead branch produced %r - it must name the remedy and the "
+                     "count, since a pull cannot clear unpushed commits" % diverged)
 
     # 5. THE REGRESSION THIS SESSION FIXED. _same_repo_same_bytes must delegate to
     #    _same_program: a linked worktree checked out with different line endings is our own

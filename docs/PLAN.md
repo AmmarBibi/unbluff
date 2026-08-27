@@ -277,10 +277,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    baseline - which is the one move `tooling-discipline` section 4 is entirely about.
    (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
    fine, a re-export keeps it working.)
-   **The forced order is now itself blocked, and by a different thing than when it was written.**
-   It waited on item 2's pull; the pull has run. It now waits on a CLEAN sweep, and the sweep
-   cannot be clean while `hook-provenance` fails - which needs item 20's decision, not a pull.
-   The registry cut is therefore still correctly parked, for a reason that has moved.
+   **THE FORCED ORDER IS NOW SATISFIED.** It waited on item 2's pull (ran 2026-08-26T20:24Z),
+   then on a clean full sweep - which item 20's push+merge produced: **44/44, rc=0,
+   2026-08-27T05:26Z at `aeba569`**. The registry cut is no longer blocked by anything except
+   `mutation_sweep`, which is the baseline the cut must be compared against and which is itself
+   now unblocked for the first time in six days. Next session: run the sweep, THEN cut.
 
 8. **Nothing enforces that `--code-only` stays off the turn-end command.**
    **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
@@ -566,32 +567,50 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     **Confirm-don't-assume:** third-party groups must NOT be flagged, only groups whose command
     points at an unbluff-shipped file. Probe both directions before believing it.
 
-20. **The machine is wired to `main`, and the work is on a branch. NEEDS A DECISION.**
-    New 2026-08-26, the session's sharpest finding, and it exists because item 2's pull finally
-    ran and **did not do what four sessions of planning said it would.**
-    The prediction was "the pull clears `hook-provenance`; the true answer becomes 0". Measured
-    after the pull: **3 of 16 entry points stale, 8 of 28 `hooks/*.py`**, and `hook-provenance`
-    still FAILS on `hook_health_check.py` and `piped_gate_guard.py`.
-    The cause is structural and was never written down. `C:\Users\ammar\Downloads\unbluff` is
-    not a stale clone - it is the **MAIN WORKTREE of this same repository** (`git-common-dir` is
-    identical; `git worktree list` shows both), checked out on `main` at `origin/main`. This
-    branch is 15 commits ahead and has never been pushed, and those 15 commits touch 9
-    `hooks/*.py`. **A pull can only deliver `origin/main`; it cannot deliver unpushed commits.**
-    So the divergence is now BRANCH divergence, and no amount of pulling will ever close it.
-    Three options, and this is the user's call rather than a mechanical fix:
-    - **Push / merge `feat/enforcing-verify` to `main`.** Closes it properly and makes every fix
-      on this branch live. Needs the suite green first, which needs `hook-provenance` green,
-      which is only true after the push - so the pre-push gate has to be run deliberately rather
-      than relied on to gate itself out of the loop.
-    - **Rewire `settings.json` to the enforcing worktree.** Makes the branch live immediately and
-      moves the staleness to `main` instead. Cheap, reversible, and it makes the machine run
-      code that has not been merged.
-    - **Accept it and mark `hook-provenance` known-red on an unpushed branch.** The cheapest and
-      the worst: a gate that is red by design is a gate that gets switched off, which is this
-      repo's own most-repeated finding.
-    Related but NOT the same as the "Known-stale by design" `mutation_sweep` row below: that one
-    is stale because CI cannot write a local ledger. This one is red because the machine runs a
-    different branch, and it will recur on **every** branch unless a rule is chosen.
+20. **The plan predicted the pull would clear `hook-provenance`. The repo already knew it would
+    not, and the plan never read its own design note.**
+    New 2026-08-26. **The first version of this item called the mechanism an undocumented
+    structural finding. That was wrong and is corrected here**, because the correction is the
+    more useful fact: the mechanism was already written down, in `.claude/pre-push.cmd` under
+    `[#45 2026-08-24]`, and in `run_selftests.MACHINE_STATE`. Both say, in as many words, that
+    `hook-provenance` "during any release is legitimately false, because the branch is ahead of
+    the copy that is wired." The plan asserted the opposite for two sessions without either
+    being consulted.
+    **What is true.** `C:\Users\ammar\Downloads\unbluff` is not a stale clone - it is the MAIN
+    WORKTREE of this same repository (`git-common-dir` identical; `git worktree list` shows
+    both), on `main` at `origin/main`. This branch is 16 commits ahead, unpushed, touching 9
+    `hooks/*.py`. A pull delivers `origin/main` and cannot deliver unpushed commits, so the
+    divergence is BRANCH divergence and pulling will never close it. Measured after the pull:
+    **3 of 16 entry points stale, 8 of 28 `hooks/*.py`**.
+    **There is no deadlock, and the first version of this item claimed one.** `.claude/
+    pre-push.cmd` runs `run_selftests.py --code-only`, which excludes machine-state gates from
+    the VERDICT while still running and naming them. Verified 2026-08-26T20:58Z: **exit 0, "all
+    44 selftests passed", with `hook-provenance` listed as excluded and its reason printed.**
+    The push is not blocked and never was.
+    **So the real defect is in the PLAN, not the machine**, and it has one live consequence:
+    item 7's "forced order" requires *a clean full sweep*, and a full sweep can never be clean
+    on an unpushed branch **by design**. Read literally, that gate can never open. It should
+    read "clean under `--code-only`, with `hook-provenance` adjudicated as machine-state" -
+    which is exactly the state reached today.
+    **DECIDED AND DONE 2026-08-27T05:21Z: push, merge to `main`, update the main worktree.**
+    `feat/enforcing-verify` -> `origin` (the pre-push gate ran `--code-only` and allowed it in
+    125s), then `git merge --ff-only` in the live worktree: `d44138c` -> `aeba569`. Result,
+    measured immediately after:
+    **`BUILT IS NOT LIVE: 0 of 16 entry points stale, 0 of 28 hooks/*.py`, `hook-provenance` rc=0,
+    and the full suite 44/44 rc=0** - the first clean sweep in this chain, and the one items 7
+    and 9 were waiting on.
+    The two options not taken are recorded rather than dropped: rewiring `settings.json` to the
+    worktree would have made the branch live without merging it, and accepting the divergence
+    was what the design already permitted. Neither is needed while the branch is merged; both
+    come back the moment the next branch starts, which is why this item stays in the file.
+    **The derived count immediately caught a defect in itself here.** With 0 of 16 stale the
+    note still printed "only a push/merge will clear the count" - a guard demanding the fix that
+    had just been applied. `sync_phrase()` was split out as a pure function so both directions
+    are probed without a git fixture, and M8 was added to the battery: 8 of 8 mutations caught.
+    Found by running it where it ships, immediately after the merge it had itself recommended.
+    NOT the same as the "Known-stale by design" `mutation_sweep` row below: that is stale
+    because CI cannot write a local ledger. This was red because the machine ran a different
+    branch, and it recurs on EVERY branch.
     **Also worth recording:** the wired `piped_gate_guard` (still pre-M10) fired a FALSE POSITIVE
     on this session's own command - it flagged `hook_divergence_report.py` as "piped into head"
     when that filename was an argument to `wc -l` in a `for` loop and the `| head` belonged to a
