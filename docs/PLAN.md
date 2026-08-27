@@ -758,9 +758,26 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
     **Verified 10 cases, 0 mismatches**, four quiet-directions and six fire-directions including
     the three the statement fix could have broken (a gate on the second line, a gate after `;`,
-    a backslash-continued pipeline). The guard's own corpus grew from `sh 10 fire / 17 quiet` to
-    `13 fire / 19 quiet`, and three rows went into `tests/false_alarm_corpus.py` as the item
-    asked - the shared corpus, not a new list.
+    a backslash-continued pipeline). Three rows went into `tests/false_alarm_corpus.py` as the
+    item asked - the shared corpus, not a new list.
+
+    **AND THE FIX SILENTLY DISARMED TWO PINNED MUTATIONS. This is the most valuable thing the
+    session bought, and only a FULL sweep could have found it.** The post-fix sweep reported
+    **PG1 and PG3 SURVIVING** while the suite, the guard's own selftest and `mutation-anchors`
+    were all green - the anchors still matched, so nothing looked wrong.
+    Cause: both were pinned by probes whose producer is `grep` - `grep "run_selftests|x"
+    notes.txt | head` and `cat log.txt | grep run_selftests` - and the new `_reads_a_file()`
+    skips those segments **before the mutated code is reached**. Base and mutated both go quiet,
+    so the pin stopped pinning. A fix that improves a guard can retire the very test that proves
+    the guard works, and it leaves no trace.
+    **Adjudicated as NARROWED, not redundant**, which decides whether the mutations are deleted
+    or re-probed: `tooling-discipline` says a mutation another guard absorbs should be deleted,
+    but these are not absorbed in general - both defects stay reachable through a NON-reader
+    producer. So both were kept and given probes the reader rule cannot swallow:
+    `python analyze.py "run_selftests|mutation_check" | head` for PG1 (mutated: FIRES) and
+    `cat log.txt | xargs python run_selftests.py` for PG3 (mutated: IndexError, loud).
+    Each was verified to be absorbed BEFORE and to catch AFTER, in-process against a mutated
+    copy, rather than assumed. Re-run: **9 of 9 `piped_gate_guard` mutations CAUGHT.**
 
     The original finding, kept because the control is the part that made it a finding:
 

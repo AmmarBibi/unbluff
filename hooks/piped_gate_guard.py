@@ -535,6 +535,23 @@ SHOULD_STAY_QUIET = (
      'grep -n "800" tools/check_file_size.py | head -20'),
     ("a gate named in an earlier STATEMENT on the same line",
      "echo tools/run_selftests.py; grep -n x tools/check_file_size.py | head"),
+    # [item 22 fallout, 2026-08-27] THESE TWO EXIST BECAUSE THE ITEM-22 FIX SILENTLY DISARMED
+    # TWO PINNED MUTATIONS. The full sweep reported PG1 and PG3 SURVIVING, and the cause was
+    # this file's own new reader rule: both were pinned by probes whose producer is `grep`
+    # (`grep "run_selftests|x" notes.txt | head` and `cat log.txt | grep run_selftests`), and
+    # `_reads_a_file()` now skips those segments BEFORE the mutated code is reached. Base and
+    # mutated both go quiet, so the pin stopped pinning while every other signal stayed green.
+    # Adjudicated as NARROWED, not redundant: the underlying defects are still reachable by a
+    # NON-reader producer, so the mutations are kept and re-probed here rather than deleted.
+    #   PG1 - substring matching. Mutated, the quoted argument names a gate and this FIRES.
+    ("a quoted argument naming gates, with a NON-reader producer",
+     'python analyze.py "run_selftests|mutation_check" | head'),
+    #   PG3 - examining the LAST segment. A gate in the final segment is not discarded: its
+    #   status IS the pipeline's. Mutated, this reaches `segments[i + 1]` past the end and
+    #   raises IndexError - the catch is a crash, which is loud, and that is how PG3 was
+    #   detected before this change too.
+    ("a gate in the FINAL segment behind a wrapper - its status is the pipeline's",
+     "cat log.txt | xargs python run_selftests.py"),
 )
 
 # [PGG-PS] PowerShell. Every entry below is a MEASURED case, 2026-08-13, not a guess - the
