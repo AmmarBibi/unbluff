@@ -287,10 +287,14 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    as the baseline to compare the cut against. All three landed:
    - suite **44/44 rc=0** (2026-08-27T06:30Z)
    - `integration` **34/34 rc=0** (06:28Z, re-run because it was stale BY CONTENT)
-   - **`mutation_sweep` 2026-08-27T06:24:42Z PASS** - **223 of 225 executed, every executed
-     mutation CAUGHT, 0 skipped, 0 unproven**; the 2 remaining are not-runnable-on-this-platform
-     (`pre_push_gate` #30, `fast_test_on_stop` #D10c) and are named as proven by the OTHER
-     platform's job or nowhere. First PASS of this tier since 2026-08-20, six days.
+   - **`mutation_sweep` PASS, twice** - 06:24:42Z (first PASS since 2026-08-20, six days) and
+     again at **18:59Z after items 21, 22 and 25**: **223 of 225 executed, every executed
+     mutation CAUGHT, 0 skipped, 0 unproven.** The 2 remaining are
+     not-runnable-on-this-platform (`pre_push_gate` #30, `fast_test_on_stop` #D10c), named by
+     the harness as proven by the OTHER platform's job or nowhere.
+     **The sweep in between those two earned its runtime**: it caught PG1 and PG3 SURVIVING
+     after item 22's fix, with the suite, the guard's own selftest and `mutation-anchors` all
+     green. See item 22.
    **This is the baseline the registry cut must be measured against.** Cut it next session and
    re-run the sweep immediately after: `mutation_check.aux_gates()` reads `AUX_GATES` out of
    `run_selftests.py`'s source text, so the cut edits the instrument that certifies every other
