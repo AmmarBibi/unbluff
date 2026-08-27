@@ -524,6 +524,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     by adding ONE battery, that file records 93% as the level where the mutation harness reported
     `baseline already RED` for six unrelated mutations, and the next addition starts from 68%
     rather than from the 6.4s the existing comments still assume.
+    **MOVED 2026-08-27: 6.78s / 68% -> 7.17s / 72%**, from item 25's three sibling-worktree
+    probes and the one `git init` they need. Recorded at the moment of the addition rather than
+    discovered by a later reader - which is the whole point of this row existing. Still 21 points
+    under the 93% level, but that is the SECOND item in three days to cost this hook ~4 points,
+    and the trend, not the level, is what this row is watching.
 
 17. **Nothing flags a gate TIER whose last run predates the code it covers.**
     Found 2026-08-26 by the close completeness pass as a **silent gap** - the plan does not
@@ -543,10 +548,16 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     Note the trap before building it: `mutation_sweep` is PERMANENTLY stale by design (CI cannot
     write the local ledger), so that tier must be exempted with its reason written down, or the
     new gate is red forever and gets switched off. See "Known-stale by design" below.
-    **SECOND TRAP, found 2026-08-27 and it is a precondition, not a footnote:** the ledger is
-    gitignored and therefore per-worktree, so built naively this gate reports every tier as
-    stale in whichever worktree did not run it. **Answer item 21's question - is the ledger
-    per-worktree state or repository state - BEFORE building this.**
+    **SECOND TRAP, found 2026-08-27 - and item 21 has now ANSWERED it, so this is buildable.**
+    The ledger is gitignored and therefore per-worktree LOCAL state, deliberately and by
+    recorded design. That is not a defect to work around: a gate run proves something about the
+    tree it ran in, so "has THIS worktree verified this tier?" is the correct question and the
+    per-worktree answer is the right one. Measured: the two worktrees' ledgers disagree by TEN
+    DAYS on `mutation_sweep`, and both are correct.
+    **The requirement that follows is phrasing, and it is load-bearing:** this gate must report
+    **"this worktree has not verified <tier> since <commit>"**, never "<tier> is stale". A local
+    record stated as a global fact is how the first write-up of item 21 concluded a correct
+    push-refusal was spurious.
 
 18. **The SHIPPED consistency extractor's placeholder class fires on source-code literals.**
     Found 2026-08-26 by the close consistency pass, on itself. `skills/consistency-audit/scripts/
@@ -649,7 +660,41 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     deferred check actually gets done.
 
 21. **The gate ledger is gitignored, so it is PER-WORKTREE - and a gate reads it to decide a
-    push.** New 2026-08-27, found by pushing `main` and being refused.
+    push.** **ANSWERED 2026-08-27, and the answer was already written down.**
+
+    **DECISION: the ledger is PER-WORKTREE LOCAL STATE. Confirmed, not chosen.** `.gitignore:23`
+    carries its own comment - *"Local gate-run audit trail (evidence of which gates ran, not
+    source)"* - and `gate_ledger.py`'s header treats gitignored-ness as a hazard to DESIGN
+    AROUND (no restore, hence the atomic write and the quarantine path), not as an oversight.
+    The question this item raised had been answered before it was asked, which is the third time
+    in one session that an authority already held the answer (see items 20 and 23).
+    Repository state was considered and REJECTED: an append-only JSON written by every gate run
+    would conflict on every merge, dirty the tree mid-push, and break the content-clean-vs-HEAD
+    preconditions the mutation harness depends on.
+
+    **So the defect is not that the record is local - it is that a LOCAL record was read as a
+    GLOBAL claim, in the prose and in one gate.** Measured, both worktrees at the same commit:
+
+    | | rows | newest `integration` | newest `mutation_sweep` |
+    |---|---|---|---|
+    | `unbluff-enforcing` | 273 | 2026-08-27T06:28Z | 2026-08-27T06:24Z |
+    | `unbluff` (live) | 196 | 2026-08-27T05:33Z | **2026-08-17T11:15Z** |
+
+    **Ten days apart on the tier that certifies everything else.** Both numbers are correct;
+    they answer different questions.
+
+    **And the refusal that started this item was RIGHT, which the first write-up got wrong.**
+    It said the push was blocked "for a reason that had nothing to do with the code." Not so:
+    `readme-scenarios` said the README claims 34/34 while *this tree's* newest recorded run was
+    30/30, and that was true of that tree. Running the tier there produced 34/34 and the push
+    went through. The gate failed CLOSED on honest local evidence - the safe direction.
+
+    **What is left to build** is phrasing, and it is the whole of the fix: every ledger-reading
+    gate must say **"this worktree has not verified X"** rather than "X is stale", so local
+    evidence can never be mistaken for a repository fact. Scoped into items 17 and 24 rather
+    than kept as a separate build row.
+
+    The original finding, kept because the measurement is the evidence:
     `git push origin main` from the live worktree FAILED on `readme-scenarios`: *"README pastes
     34/34; the newest recorded integration run is 30/30."* The same gate had passed minutes
     earlier from the enforcing worktree. Nothing about the code differed - the two worktrees
@@ -754,15 +799,43 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     **Confirm-don't-assume:** check whether `gate_ledger.record()` accepts structured extras
     before designing around it; if it does not, that is the smaller change, not a reason to put
     the number back into prose.
-    Note the interaction with item 21: **the ledger is gitignored and per-worktree**, so a
-    trajectory recorded there is per-worktree too. Item 21's question has to be answered first
-    or this produces two divergent histories. Same precondition as item 17.
+    Interaction with item 21, now ANSWERED and in this case it resolves cleanly: the ledger is
+    per-worktree local state, so a trajectory recorded there is a per-worktree trajectory. **For
+    THIS number that is exactly right** - BUILT IS NOT LIVE is a `MACHINE_STATE` claim about the
+    box it runs on, so a local home is the correct home, not a compromise. No divergent-history
+    problem to solve here; just label the series as this worktree's.
 
 25. **Two gates ask the same question about the same machine and give opposite answers.
     `hook_health_check` never learned the linked-worktree lesson `hook_divergence_report` has
-    in writing.** New 2026-08-27, close meta-review CHECK 6. Found by diffing against a
-    CONVENTION IN ANOTHER FILE, which is now the third session running that this lens produced
-    the session's sharpest finding.
+    in writing.** **FIXED 2026-08-27.** Found by diffing against a CONVENTION IN ANOTHER FILE,
+    which is now the third session running that this lens produced the sharpest finding.
+
+    **Result, measured on the same tree that produced the 8:** `hook-health` went from **8
+    problems to 1**, and the 1 remaining is a genuinely diverged file (`hook_health_check.py`
+    itself, edited and not yet merged). `hook-provenance` INDEPENDENTLY reported the same
+    picture at the same instant - 1 foreign, `1 of 16 entry points stale, 1 of 28`. **The two
+    gates now agree exactly**, which is the check that the fix is right rather than merely quiet.
+
+    `_sibling_worktree_verdict()` REUSES `hook_divergence_report._same_repo_same_bytes` - no
+    second copy of the two-condition rule, so the CRLF half fixed earlier today cannot drift out
+    of it. Three implementation facts worth keeping:
+    - **The import is LAZY because a module-level one is a genuine CYCLE**:
+      `hook_divergence_report` -> `duplicate_registration_check` -> `hook_health_check`.
+      Deferring it also means a SessionStart with no candidate pays nothing.
+    - **It returns None for "could not ask"**, and the caller SAYS so in the message rather than
+      downgrading to the path comparison in silence. A partial checkout has `hooks/` without
+      `tools/`; that must never read as "fine".
+    - The probe fixture imports `subprocess as _sp` rather than reading the bare name, because
+      this module's REBINDING RULE requires it and `subprocess` IS rebindable there (the
+      fake-subprocess case rebinds `_m.subprocess`). A bare read worked only by test ordering.
+
+    **Probed in three directions, and each was shown to FAIL** by stubbing the verdict:
+    reverting the fix entirely, dropping the "same bytes" half, and treating could-not-look as
+    fine - **3 of 3 CAUGHT**. Plus a standing control: a byte-identical copy OUTSIDE this
+    repository must still be flagged, so identical bytes alone are never the test and the real
+    2026-07-30 defect (diverged `~/.claude/hooks` copies) cannot come back.
+
+    The original finding, kept because the measurement is the argument:
     Measured on the fully-merged, fully-synced tree, same instant, same wiring:
 
     | gate | verdict |

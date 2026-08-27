@@ -449,13 +449,61 @@ def stale_root_registrations(cfg: dict, hooks_dir: str = None) -> list:
             reg_dir = os.path.dirname(os.path.abspath(token))
             if os.path.normcase(reg_dir) == os.path.normcase(os.path.abspath(d)):
                 continue
+            verdict = _sibling_worktree_verdict(token, d, name)
+            if verdict is True:
+                # [item 25] A LINKED WORKTREE IS NOT A STALE ROOT. Measured 2026-08-27 on a
+                # fully merged tree: this function reported EIGHT problems, all of them
+                # byte-identical copies reached through a sibling worktree of this same
+                # repository, while hook-provenance reported the same machine clean. Eight
+                # standing problems on a correct machine at every SessionStart is the shape
+                # this repo says gets a guard switched off.
+                continue
             same = _same_file(token, ours[name])
+            note = ("identical copy" if same else
+                    "THE TWO COPIES ARE DIFFERENT PROGRAMS - your fixes are not the code "
+                    "that runs")
+            if verdict is None:
+                # COULD NOT LOOK is not FOUND NOTHING. Say which check did not run, rather
+                # than silently downgrading to the path comparison alone.
+                note += ("; the sibling-worktree check could NOT RUN here, so this may be a "
+                         "worktree rather than a stale root")
             problems.append(
                 "%s is registered from %s but this suite ships it in %s (%s)" % (
-                    name, reg_dir, d,
-                    "identical copy" if same else "THE TWO COPIES ARE DIFFERENT PROGRAMS - "
-                                                  "your fixes are not the code that runs"))
+                    name, reg_dir, d, note))
     return problems
+
+
+def _sibling_worktree_verdict(wired: str, hooks_dir: str, name: str):
+    """True = our own file via another worktree of THIS repo. False = not. None = could not ask.
+
+    [item 25] REUSED, not re-implemented. `hook_divergence_report._same_repo_same_bytes` already
+    owns this exact two-condition rule and records why in `[#39]`: git must say the SAME
+    repository (so a genuinely separate clone still fails) AND the bytes must match (so a STALE
+    worktree still fails). A second copy of that rule is the twin-roster defect this repo keeps
+    digging out, and the CRLF half of it - `_same_program` - was itself a 2026-08-27 fix that a
+    hand-written copy would silently lose.
+
+    The import is LAZY and that is structural, not stylistic: `hook_divergence_report` imports
+    `duplicate_registration_check`, which imports THIS module, so a module-level import here is
+    a genuine cycle. Deferring it to call time also means a SessionStart with no candidate pays
+    nothing, and candidates are rare by construction - the loop only reaches here when a
+    registration resolves outside this suite's own directory.
+
+    Returns None rather than False when the check cannot run, because "I could not look" and
+    "it is a foreign copy" are different facts and the caller says so.
+    """
+    try:
+        _tools = os.path.join(os.path.dirname(_HOOKS_DIR), "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        from hook_divergence_report import _same_repo_same_bytes, norm
+    except ImportError:
+        # A partial checkout can have hooks/ without tools/. Fail to UNKNOWN, never to "fine".
+        return None
+    try:
+        return bool(_same_repo_same_bytes(wired, norm(hooks_dir), name))
+    except Exception:
+        return None
 
 
 def _same_file(a: str, b: str) -> bool:

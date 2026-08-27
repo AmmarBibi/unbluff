@@ -28,6 +28,28 @@ import hook_health_check as _m
 # underscored helpers `from x import *` would skip). READS only - see the rebinding rule above.
 globals().update({k: v for k, v in vars(_m).items() if not k.startswith("__")})
 
+# [#46 item 4] Scrub git's redirect variables at import, before any fixture can run. This file
+# entered tools/check_selftest_isolation.py's DERIVED population on 2026-08-27, the moment item
+# 25's probes added a `git init` - the gate noticed within one run, which is the whole argument
+# for deriving that population from the AST instead of listing it. The parent scrubs inside
+# run_weekly_selftests(), which this path never goes through, so a scrub here is not a duplicate.
+# Under a git hook, GIT_DIR is in scope and `git -C <tmpdir>` is overridden by it, so an
+# unscrubbed fixture writes to the REAL repository. No ImportError fallback beyond the parent's
+# own: a partial checkout without tools/ still gets the explicit variable pop below.
+try:  # noqa: E402
+    import os as _os
+    import sys as _sys
+    _t = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
+    if _t not in _sys.path:
+        _sys.path.insert(0, _t)
+    from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
+    _scrub_environ()
+except ImportError:  # pragma: no cover - partial checkout
+    import os as _os
+    for _v in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+               "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+        _os.environ.pop(_v, None)
+
 
 def _selftest_malformed_config() -> list:
     """[P13 C4/C5] A malformed sub-tree must cost that sub-tree, never the whole report."""
@@ -364,6 +386,74 @@ def selftest() -> int:
             {"command": '"%s" "%s"' % (sys.executable, _spaced)}]}]}}
         if not any(_victim in p for p in stale_root_registrations(_sp_cfg)):
             fails.append("a wrong-root registration with a SPACE in the path was missed")
+
+    # [item 25] A LINKED WORKTREE IS NOT A STALE ROOT - and identical bytes ALONE are not the
+    # test. Measured 2026-08-27 before the fix: this function reported EIGHT problems on a fully
+    # merged tree, all byte-identical copies reached through a sibling worktree of this same
+    # repository, while hook-provenance called the same machine clean. Two gates, one machine,
+    # opposite answers. Both directions are probed here because the fix is a TWO-condition rule
+    # and dropping either one breaks it in a different direction: drop "same repository" and any
+    # identical copy anywhere goes unflagged (the 2026-07-30 defect returns); drop "same bytes"
+    # and a genuinely STALE worktree goes unflagged.
+    # Imported locally as `_sp`, following line 81's precedent, and NOT read as a bare
+    # `subprocess`. This module's REBINDING RULE says a rebindable name must be read through
+    # `_m.<name>` - and `subprocess` IS rebindable here: the fake-subprocess case above does
+    # `_m.subprocess = fake`. A bare read would resolve to the snapshot taken at import, so this
+    # fixture would keep working only because it happens to run AFTER that case restores the
+    # real one. A direct import is immune to the ordering either way, which is what a git
+    # fixture needs.
+    import subprocess as _sp
+
+    with tempfile.TemporaryDirectory() as _wd:
+        _repo = os.path.join(_wd, "r")
+        _rh = os.path.join(_repo, "hooks")
+        _sib = os.path.join(_repo, "sibling")
+        os.makedirs(_rh)
+        os.makedirs(_sib)
+        try:
+            _ok = _sp.run(["git", "-C", _repo, "init", "-q"],
+                          capture_output=True, timeout=30).returncode == 0
+        except (OSError, _sp.SubprocessError):
+            _ok = False
+        _body = "def main():\n    return 0\n"
+        _mine = os.path.join(_rh, "probe_hook.py")
+        with open(_mine, "w", encoding="utf-8") as f:
+            f.write(_body)
+        if _ok:
+            # (a) byte-identical, SAME repository via a sibling directory -> NOT a problem
+            _twin = os.path.join(_sib, "probe_hook.py")
+            with open(_twin, "w", encoding="utf-8") as f:
+                f.write(_body)
+            _twin_cfg = {"hooks": {"SessionStart": [{"hooks": [
+                {"command": '"%s" "%s"' % (sys.executable, _twin)}]}]}}
+            _got = stale_root_registrations(_twin_cfg, _rh)
+            if _got:
+                fails.append("a byte-identical copy in the SAME repository was still flagged "
+                             "(%r) - that is 8 standing problems on a correct machine, which is "
+                             "how a guard gets switched off" % (_got,))
+            # (b) SAME repository but genuinely DIVERGED -> must STILL be flagged
+            with open(_twin, "w", encoding="utf-8") as f:
+                f.write(_body.replace("return 0", "return 1"))
+            _got = stale_root_registrations(_twin_cfg, _rh)
+            if not _got:
+                fails.append("a DIVERGED copy in the same repository was waved through - the "
+                             "bytes half of the rule is gone, so a stale worktree now passes")
+        else:
+            print("  [hook-health] NOTE: git unavailable; the sibling-worktree assertions did "
+                  "NOT run")
+        # (c) byte-identical but NOT in this repository -> must STILL be flagged. This is the
+        #     control that proves the fix keys on the REPOSITORY and not merely on the bytes.
+        _outside = os.path.join(_wd, "outside")
+        os.makedirs(_outside, exist_ok=True)
+        _copy = os.path.join(_outside, "probe_hook.py")
+        with open(_copy, "w", encoding="utf-8") as f:
+            f.write(_body)
+        _out_cfg = {"hooks": {"SessionStart": [{"hooks": [
+            {"command": '"%s" "%s"' % (sys.executable, _copy)}]}]}}
+        if not stale_root_registrations(_out_cfg, _rh):
+            fails.append("a byte-identical copy OUTSIDE this repository was not flagged - "
+                         "identical bytes alone must never be the test, or 2026-07-30's "
+                         "diverged ~/.claude/hooks copies come back unnoticed")
 
     # 1. a known-good config shape: python exe + this very script as an absolute arg
     good = {"hooks": {"Stop": [{"hooks": [{"type": "command",
