@@ -544,11 +544,23 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     for prose deliverables, where `[TABLE]` / `[insert value]` are genuine defects; fed anything
     carrying code, every empty list, slice or subscript reads as an unfilled placeholder. It cost
     11 false candidates in the 2026-08-25 close and 0 real ones.
-    Low materiality - it fails LOUD, as advisory candidates a human adjudicates, never a silent
-    pass - but it is still a guard firing on correct work, which is the shape this repo says gets
-    guards switched off. Fix: require a placeholder token to contain at least one letter, or skip
-    the class for known code extensions. Whichever, probe BOTH directions: `[TODO]` must still
-    fire and `[]` must not.
+    **MEASURED A SECOND TIME 2026-08-27: 7 more false candidates, 0 real** - and all seven were
+    lines of THIS ITEM's own body, which necessarily contains `[TODO]`, `[TABLE]`,
+    `[insert value]` and `[]` in order to describe them. Two sessions, 18 candidates, zero real.
+    **That RETIRES the "low materiality" label this item used to carry.** The original wording -
+    "low materiality; it fails LOUD, as advisory candidates a human adjudicates, never a silent
+    pass" - is still true about the failure MODE and is kept here for that reason, but it is no
+    longer a fair summary of the cost. A class that has never once been right across two
+    sessions and 18 candidates is not advisory noise; it is a detector that cannot distinguish a
+    placeholder from prose ABOUT a placeholder, and it taxes every close.
+    (The two sentences contradicted each other for about ten minutes on 2026-08-27, until the
+    close meta-review's CHECK 1 grep surfaced the older one sitting under the newer verdict.
+    Recorded rather than silently merged: a verdict added above stale prose is the
+    token-vs-body contradiction this plan flags elsewhere, and it was committed here by the
+    same pass that flags it.)
+    Fix, unchanged: require a placeholder token to contain at least one letter, or skip the
+    class for known code extensions. Whichever, probe BOTH directions: `[TODO]` must still fire
+    and `[]` must not.
 
 19. **Nothing asserts that a wired unbluff group carries `ID_PREFIX`.**
     Found 2026-08-26 by the close meta-review's CHECK 2, as the durability half of the id defect
@@ -615,11 +627,13 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     NOT the same as the "Known-stale by design" `mutation_sweep` row below: that is stale
     because CI cannot write a local ledger. This was red because the machine ran a different
     branch, and it recurs on EVERY branch.
-    **Also worth recording:** the wired `piped_gate_guard` (still pre-M10) fired a FALSE POSITIVE
-    on this session's own command - it flagged `hook_divergence_report.py` as "piped into head"
-    when that filename was an argument to `wc -l` in a `for` loop and the `| head` belonged to a
-    different command in the same compound line. Whether M10 fixes that shape is unverified, and
-    it should be checked when item 5's fix goes live rather than assumed.
+    **Also recorded here, and now ANSWERED:** the wired `piped_gate_guard` fired a FALSE
+    POSITIVE on this session's own command. This item originally said "whether M10 fixes that
+    shape is unverified, and it should be checked when item 5's fix goes live rather than
+    assumed." **It went live at 05:21Z in this same session, so it was checked, and M10 does NOT
+    fix it.** Characterised with a control and promoted to **item 22** - a condition written as
+    "check when X happens" where X happened forty minutes later, which is the one case a
+    deferred check actually gets done.
 
 21. **The gate ledger is gitignored, so it is PER-WORKTREE - and a gate reads it to decide a
     push.** New 2026-08-27, found by pushing `main` and being refused.
@@ -643,6 +657,124 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     before answering that.**
     Cheap to confirm and worth confirming: it predicts that any ledger-reading gate can be
     flipped green or red purely by choosing a worktree, with no commit in between.
+
+22. **`piped_gate_guard` fires when a gate's SOURCE FILE is read on the producer side of a
+    pipe. CONFIRMED false positive, in the wired copy, twice in one session.**
+    New 2026-08-27. Item 20 recorded the symptom and said the M10 fix should be CHECKED rather
+    than assumed once it went live. It went live at 05:21Z in this session, so it was checked.
+    **M10 does not fix it.** Reproduced against the wired copy and the repo copy, same verdict.
+    Characterised, with a control:
+
+    | command | verdict | correct? |
+    |---|---|---|
+    | `grep -n "800" tools/check_file_size.py \| head -20` | FIRES | **NO** - `grep` is the producer |
+    | `cat tools/check_file_size.py \| head -20` | FIRES | **NO** |
+    | `wc -l tools/check_file_size.py \| head -1` | FIRES | **NO** |
+    | `grep -n "800" docs/PLAN.md \| head -20` | quiet | yes - CONTROL, a non-gate file |
+    | `python tools/hook_divergence_report.py \| head -20` | FIRES | yes - genuinely piped |
+
+    The control is what makes it a finding rather than a guess: swap the gate's filename for a
+    non-gate file and the guard goes quiet, so it is the NAME triggering it, not the pipe.
+    **The guard already owns this exact reasoning in the mirror direction** - its own corpus
+    carries `cat log.txt | grep run_selftests` as "the gate CONSUMES, it is not the producer",
+    correctly quiet. What is missing is the operand case on the PRODUCER side.
+    **The distinction is the EXECUTABLE, not the operand**, and getting that backwards would
+    break the real detection: `python tools/check_file_size.py | head` must keep firing, where
+    the executable is `python` and the gate is its script. The rule is that a READING tool
+    (`grep`, `cat`, `wc`, `sed`, `awk`, `head`, `tail`, `less`) as the producer's executable
+    means any gate name after it is a FILE BEING READ, not a gate being run.
+    **Materiality is higher than it looks.** This is a wired guard failing on correct work -
+    the shape this repo says gets guards switched off - and it cost two command rewrites in the
+    session that found it. It also mis-attributes: the first firing named `hook_divergence_report`
+    when the offending segment contained `check_file_size`.
+    **Probe both directions**, and reuse the corpus: `tests/false_alarm_corpus.py` already holds
+    the non-firing cases, so the four rows above belong there rather than in a new list.
+
+23. **The item-15 count reintroduces the exact fail-open its own file was rebuilt to remove.**
+    New 2026-08-27, found by the close source-coverage pass reading the DESIGN rather than the
+    code. **This is a defect in code shipped THIS SESSION.**
+    `tools/hook_divergence_report.py`'s module docstring states the rule in its own words:
+    *"BOTH DENOMINATORS ARE PRINTED. A provenance check that examined nothing looks exactly like
+    one that examined everything and found nothing wrong."* `main()` honours it for the
+    provenance verdict, with an explicit two-cause NOTE separating "no wiring surface at all"
+    (inapplicable, e.g. a fresh CI checkout) from "surfaces read, zero commands parsed" (a
+    broken parse wearing a clean result).
+    **The new count honours neither.** Measured: with no wiring, `entry_points()` returns `{}`
+    and the gate prints **`BUILT IS NOT LIVE: 0 of 0 entry points stale`** - which is
+    typographically identical to a perfectly synced machine, and is what a fresh checkout will
+    print forever.
+    Fix: give the count the same two-cause treatment `main()` already gives `examined == 0` -
+    an empty entry-point population is INAPPLICABLE (say so) or a broken derivation (fail), and
+    never a zero that reads as health. Reuse `main()`'s existing branch rather than writing a
+    second copy of that reasoning.
+    Second, smaller half: **`--json` does not carry the counts.** The tool advertises
+    `--json out.json`; the payload has `matched/foreign/unparsed/bare/examined/surfaces` and
+    none of `entry_*` or `files_*`, so a consumer of the JSON cannot see the number this item
+    exists to publish. Add them to the same dict.
+    **Probe both directions**, and the zero case specifically: an empty population must NOT
+    print a bare `0 of 0`, and a genuinely clean machine must still print `0 of 16`.
+
+24. **The BUILT IS NOT LIVE count is now correct and has NO HISTORY. The fix removed the
+    trajectory.** New 2026-08-27, from the close source-coverage pass reading the design.
+    This file says of that number: *"The trajectory is the real point... every session that
+    fixes something makes the live machine MORE stale."* `tools/gate_ledger.py` exists for
+    exactly that reason - its header records that a per-run verdict is not an observable trend.
+    **Item 15 deleted the prose that carried the trajectory and replaced it with a
+    point-in-time print.** The number is right now and unrecoverable later: today's `0 of 16` is
+    only meaningful against yesterday's `6 of 11`, and after the prose deletion that comparison
+    cannot be made from the artifacts at all. The history table above is frozen hand-written
+    rows, not a series - it stops the moment nobody updates it, which is the whole reason item
+    15 existed.
+    **This is a gap created BY the fix**, and it is the honest cost of it: prose that was wrong
+    but longitudinal became a number that is right but instantaneous.
+    Fix: record the counts per run in the gate ledger alongside the tier result -
+    `gate_ledger.record()` already takes a result and a stamp, and `hook-provenance` already
+    calls into that path. Then the trajectory is derived, like the count, instead of retyped.
+    **Confirm-don't-assume:** check whether `gate_ledger.record()` accepts structured extras
+    before designing around it; if it does not, that is the smaller change, not a reason to put
+    the number back into prose.
+    Note the interaction with item 21: **the ledger is gitignored and per-worktree**, so a
+    trajectory recorded there is per-worktree too. Item 21's question has to be answered first
+    or this produces two divergent histories. Same precondition as item 17.
+
+25. **Two gates ask the same question about the same machine and give opposite answers.
+    `hook_health_check` never learned the linked-worktree lesson `hook_divergence_report` has
+    in writing.** New 2026-08-27, close meta-review CHECK 6. Found by diffing against a
+    CONVENTION IN ANOTHER FILE, which is now the third session running that this lens produced
+    the session's sharpest finding.
+    Measured on the fully-merged, fully-synced tree, same instant, same wiring:
+
+    | gate | verdict |
+    |---|---|
+    | `hook-provenance` | rc=0, **0 foreign**, `0 of 16 entry points stale, 0 of 28` |
+    | `hook_health_check` | **8 problem(s)** across 31 hook commands |
+
+    **All 8 are the same shape** - `X.py is registered from ...\unbluff\hooks but this suite
+    ships it in ...\unbluff-enforcing\hooks (identical copy)` - and **0** are the
+    "THE TWO COPIES ARE DIFFERENT PROGRAMS" shape the check was built for.
+    `hook_divergence_report` already solved exactly this, deliberately, and wrote down why:
+    `[#39] A LINKED WORKTREE IS NOT A FOREIGN COPY. Path equality alone called it one ... the
+    gate fired on correct work - hard enough to BLOCK the v1.4.0 push, which is how a guard ends
+    up switched off.` Its `_same_repo_same_bytes` requires TWO conditions - git says the same
+    repository (same common dir, so a separate clone still fails) AND the bytes match (so a
+    genuinely stale worktree still fails).
+    **`hook_health_check` has no concept of a worktree at all** - grep for `worktree` /
+    `common_dir` in it returns nothing. It compares `os.path.dirname` against its own
+    `_HOOKS_DIR`, which is precisely the path-equality test `[#39]` records as insufficient.
+    Its own message already says "identical copy" - it HAS the fact and reports a problem anyway.
+    **Why it matters:** this fires at every SessionStart, and 8 standing problems on a correct
+    machine is the definition of the shape this repo says gets a guard switched off. It is also
+    worktree-dependent, like item 21: run from the main worktree the paths match and it prints
+    `OK - 31 hook commands verified`, which is what this session's own SessionStart banner said.
+    So the answer to "is my wiring healthy?" depends on which directory you ask from.
+    Fix: **REUSE `_same_repo_same_bytes`, do not re-implement it.** A second copy of that
+    two-condition rule is the twin-roster defect this repo keeps paying for, and `hooks/` may
+    not import `tools/` on a partial checkout - so this needs the same ImportError-fallback
+    treatment the other cross-layer imports here already use, and the fallback must be a
+    STATEMENT that the check could not run, never a silent pass.
+    **Probe both directions:** a byte-identical sibling worktree must NOT be flagged; a
+    genuinely diverged `~/.claude/hooks` copy (the real 2026-07-30 defect this check exists for)
+    must STILL be flagged.
 
 ## Retired, not forgotten - and why each one died
 
