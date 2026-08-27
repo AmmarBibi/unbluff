@@ -201,6 +201,33 @@ ENTRIES = (
      lambda td: {"tool_name": "Bash",
                  "tool_input": {"command": 'python run_selftests.py; echo "EXIT=$?"'}}),
 
+    # [item 22] CONFIRMED false alarms, fixed 2026-08-27. Not hypotheticals: the first fired on
+    # this guard's own author twice in one session, and the message MIS-NAMED the gate - it
+    # reported `hook_divergence_report`, which appears only in the `for` loop on the line ABOVE
+    # the pipe. Two separate defects: a READER on the producer side (the gate's file is an
+    # operand, not a command), and a pipeline attributed ACROSS a statement boundary.
+    ("gate_file_grepped_not_run", "PreToolUse", False, ("piped_gate_guard",),
+     "grep READS a gate's source file; grep's status is the only one in the pipeline, so there "
+     "is no gate status to lose. The control that makes this a finding rather than a guess: "
+     "swapping the gate filename for a non-gate file was ALREADY quiet, so the NAME was what "
+     "triggered it",
+     lambda td: {"tool_name": "Bash",
+                 "tool_input": {"command": 'grep -n "800" tools/check_file_size.py | head -20'}}),
+
+    ("gate_file_read_by_wc", "PreToolUse", False, ("piped_gate_guard",),
+     "same class via wc - the READER SET is what decides, not the operand",
+     lambda td: {"tool_name": "Bash",
+                 "tool_input": {"command": "wc -l tools/check_file_size.py | head -1"}}),
+
+    ("gate_named_on_a_previous_line", "PreToolUse", False, ("piped_gate_guard",),
+     "a pipeline does not cross a statement boundary: the gate name is in a `for` loop on the "
+     "LINE ABOVE, and the pipe below it runs grep. Verbatim, this is the command that produced "
+     "the mis-attributed message",
+     lambda td: {"tool_name": "Bash",
+                 "tool_input": {"command":
+                                "for f in tools/hook_divergence_report.py; do wc -l < $f; done\n"
+                                'grep -n "800" tools/check_file_size.py | head -20'}}),
+
     ("powershell_safe_consumer", "PreToolUse", False, ("piped_gate_guard",),
      "MEASURED 2026-08-13: Select-Object -Last PRESERVES $LASTEXITCODE, so blocking it is a "
      "false alarm - this is the entry that would have caught the prescribed PGG-PS fix",

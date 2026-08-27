@@ -263,6 +263,85 @@ def _base(tok: str) -> str:
     return os.path.basename(tok.replace("\\", "/"))
 
 
+# [item 22] Commands that READ files. If one of these is what a segment actually runs, a gate's
+# name in that segment is a FILE BEING READ, never a gate being run - `grep -n "800"
+# tools/check_file_size.py | head` runs grep, and grep's exit status is the only one there is.
+FILE_READERS = frozenset({
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "cat", "bat", "tac", "wc", "head", "tail",
+    "less", "more", "sed", "awk", "gawk", "nawk", "cut", "nl", "od", "xxd", "strings", "file",
+    "stat", "diff", "cmp", "md5sum", "sha256sum",
+    # PowerShell / cmd equivalents, lowercased like everything else here
+    "type", "findstr", "select-string", "sls", "get-content", "gc", "format-hex",
+})
+
+# Wrappers that run something ELSE - resolve past them to find the real executable, or
+# `sudo python gate.py | head` stops firing and the guard loses a real case.
+_EXEC_PREFIXES = frozenset({"sudo", "env", "time", "nice", "nohup", "command", "exec",
+                            "builtin", "stdbuf", "xargs", "doas"})
+
+
+def _executable(segment) -> str:
+    """What this segment actually RUNS, past env assignments, flags and wrapper prefixes."""
+    for tok in segment:
+        t = tok.strip()
+        if not t or t.startswith("-"):
+            continue
+        head = t.split(" ")[0]
+        if "=" in head and not head.startswith("/") and not head.startswith("."):
+            continue                                   # VAR=value prefix
+        low = _base(t.lower()).strip('"').strip("'")
+        if low in _EXEC_PREFIXES:
+            continue
+        return low
+    return ""
+
+
+_STATEMENT_SEPARATORS = frozenset({";", "&&", "||", "&", "\n"})
+
+
+def _logical_lines(command: str):
+    """Physical lines, with backslash-continuations rejoined first.
+
+    A pipeline written across a `\\` continuation is ONE statement and must stay one, or the
+    fix for cross-statement attribution would introduce a false NEGATIVE - `python gate.py \\`
+    / `| head` would become two lines and the producer would vanish.
+    """
+    joined = command.replace("\\\n", " ")
+    return [ln for ln in joined.split("\n") if ln.strip()]
+
+
+def _last_statement(segment):
+    """The tokens after the final statement separator - the only ones that feed the pipe.
+
+    `echo gate_name.py; grep -n x other.py | head` pipes `grep`, not `echo`. Before this, every
+    token in the segment was searched for a gate name, so anything mentioned earlier in the line
+    was attributed to the pipe at the end of it.
+    """
+    last = 0
+    for i, tok in enumerate(segment):
+        if tok in _STATEMENT_SEPARATORS:
+            last = i + 1
+    return segment[last:]
+
+
+def _reads_a_file(segment) -> bool:
+    """True when the segment's executable only READS - so a gate name in it is an operand.
+
+    [item 22] CONFIRMED false positive, and it fired on this guard's own author twice in one
+    session: `grep -n "800" tools/check_file_size.py | head -20` was reported as
+    "`check_file_size` is piped into `head`". No gate ran. The control that proves it is the
+    NAME triggering it: swap the gate's filename for a non-gate file and the guard goes quiet.
+    The distinction is the EXECUTABLE, not the operand, and getting that backwards would break
+    real detection - `python tools/check_file_size.py | head` must keep firing, because there
+    the executable is `python` and the gate is its script.
+    The guard already owns this reasoning in the MIRROR direction: `cat log.txt | grep
+    run_selftests` is in SHOULD_STAY_QUIET as "the gate CONSUMES, it is not the producer". That
+    case is quiet only because of POSITION - the gate name sits in the final segment. Put the
+    same shape in a producer segment and nothing was looking at what ran.
+    """
+    return _executable(segment) in FILE_READERS
+
+
 def _eater(segment, dialect: str):
     """The consumer in `segment` that destroys a gate's evidence, or None.
 
@@ -300,24 +379,41 @@ def piped_gates(command: str, dialect: str = "bash") -> list:
     `dialect` defaults to "bash", which is what every caller got before PowerShell was covered
     at all: an unknown shell gets the STRICTER semantics rather than silently getting none.
     """
+    # `_is_protected` keeps reading the WHOLE command: `set -o pipefail` on one line protects a
+    # pipe on the next, so per-statement protection would invent false positives.
     if _is_protected(command, dialect):
         return []
-    segments = _segments(command)
-    if segments is None or len(segments) < 2:
-        return []
     offenders, seen = [], set()
-    for i, segment in enumerate(segments[:-1]):
-        gate = next((g for tok in segment for g in GATE_TOKENS if _is_gate_token(tok, g)), None)
-        if gate is None:
+    # [item 22] A PIPELINE DOES NOT CROSS A STATEMENT BOUNDARY. `_segments` splits on `|` alone,
+    # so every statement in a multi-statement command landed in one "segment" and a gate named
+    # in statement A was reported as the producer for a pipe in statement B. That is not a
+    # theoretical ordering bug - it is why the firing that opened this item named
+    # `hook_divergence_report` when the offending pipe contained `check_file_size`: the name
+    # came from a `for` loop on the PREVIOUS LINE. Newlines vanish into whitespace inside shlex,
+    # so the line boundary has to be honoured before tokenising.
+    for line in _logical_lines(command):
+        segments = _segments(line)
+        if segments is None or len(segments) < 2:
             continue
-        found = _eater(segments[i + 1], dialect)
-        if found is None:
-            continue
-        eater, kind = found
-        key = (gate, _base(eater), kind)
-        if key not in seen:
-            seen.add(key)
-            offenders.append(key)
+        for i, segment in enumerate(segments[:-1]):
+            # Only the LAST statement in a segment actually feeds the pipe.
+            producer = _last_statement(segment)
+            # Ask WHAT RAN before asking what was named. A reader's exit status is the reader's,
+            # so a gate name it opens is evidence of nothing being gated.
+            if _reads_a_file(producer):
+                continue
+            gate = next((g for tok in producer for g in GATE_TOKENS
+                         if _is_gate_token(tok, g)), None)
+            if gate is None:
+                continue
+            found = _eater(segments[i + 1], dialect)
+            if found is None:
+                continue
+            eater, kind = found
+            key = (gate, _base(eater), kind)
+            if key not in seen:
+                seen.add(key)
+                offenders.append(key)
     return offenders
 
 
@@ -381,6 +477,21 @@ def main() -> int:
 SHOULD_FIRE = (
     ("the exact shape measured in the session that built this",
      "python run_selftests.py 2>&1 | tail -2"),
+    # [item 22] The PAIR to the SHOULD_STAY_QUIET reader rows. Same gate, same file, same
+    # consumer - only the EXECUTABLE differs, and that is the whole distinction. If a fix ever
+    # keys on the operand instead, this row goes red and the quiet rows stay green, which is the
+    # signal that the rule was inverted.
+    ("a gate file RUN, not read - the executable is what decides",
+     "python tools/check_file_size.py | head -20"),
+    # The statement-boundary fix must not cost a real case. Both of these are genuine offenders
+    # whose gate happens to sit after a separator, and a fix that keyed on "first statement"
+    # instead of "last statement before the pipe" would go silent on them.
+    ("a real gate on the SECOND line still fires",
+     "echo hello\npython run_selftests.py | tail -2"),
+    ("a real gate after a `;` still fires",
+     "echo hello; python run_selftests.py | tail -2"),
+    ("a backslash-continued pipeline is ONE statement",
+     "python run_selftests.py \\\n | tail -2"),
     ("anchors piped to head", "python tools/check_mutation_anchors.py 2>&1 | head -1"),
     ("no_regression piped to grep", "python tools/no_regression.py 2>&1 | grep OK"),
     ("a hook selftest piped to tail", "python hooks/cap_shapes.py --selftest | tail -1"),
@@ -407,6 +518,23 @@ SHOULD_STAY_QUIET = (
     ("the gate CONSUMES, it is not the producer", "cat log.txt | grep run_selftests"),
     ("|| with no spaces is still not a pipe", "python run_selftests.py||echo failed"),
     ("a no-space pipe with no gate in it", "ls -la|head -20"),
+    # [item 22] A gate's SOURCE FILE read on the PRODUCER side. All four fired before the fix;
+    # the first is the exact command that fired on this guard's author, twice, in one session.
+    ("a gate file GREPPED, not run", 'grep -n "800" tools/check_file_size.py | head -20'),
+    ("a gate file CATted, not run", "cat tools/check_file_size.py | head -20"),
+    ("a gate file measured by wc, not run", "wc -l tools/check_file_size.py | head -1"),
+    ("a gate file read by sed, not run", "sed -n '1,20p' tools/hook_divergence_report.py | tail"),
+    ("a reader behind a wrapper is still a reader",
+     'env LC_ALL=C grep -n "x" tools/check_file_size.py | head -3'),
+    # [item 22, second layer] A PIPELINE DOES NOT CROSS A STATEMENT BOUNDARY. Both of these
+    # fired before the fix, and the first is the verbatim command that produced the
+    # mis-attributed message - it named `hook_divergence_report`, which appears only in the
+    # `for` loop on the LINE ABOVE the pipe.
+    ("a gate named on a PREVIOUS LINE is not this pipe's producer",
+     'for f in tools/hook_divergence_report.py; do wc -l < $f; done\n'
+     'grep -n "800" tools/check_file_size.py | head -20'),
+    ("a gate named in an earlier STATEMENT on the same line",
+     "echo tools/run_selftests.py; grep -n x tools/check_file_size.py | head"),
 )
 
 # [PGG-PS] PowerShell. Every entry below is a MEASURED case, 2026-08-13, not a guess - the

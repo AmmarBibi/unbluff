@@ -453,6 +453,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     the clone. The dangerous one was silent - backticks inside a `python -c "..."` string were
     COMMAND-SUBSTITUTED BY THE SHELL before Python saw them, the script printed its success
     message, and it wrote a file with every backticked filename deleted. Nothing failed.
+    **FIFTH INCIDENT 2026-08-27, and it WIDENS THE SCOPE: it was not a heredoc.** A commit
+    message was written with `printf '...'`, and `printf` treated the `%` in "68% -> 7.17s/72%"
+    as a format specifier, died on it, and wrote a TRUNCATED file. `git commit -F` then
+    succeeded on the truncated message: the commit is real, its body stops mid-word at
+    `6.78s/68`, and its final paragraph and `Co-Authored-By` trailer are simply gone. **`git
+    commit` reported success and the shell reported an error that scrolled past above it** -
+    caught only by reading the message back, which is the remedy this rule already prescribes.
+    Not amended: the commit was already pushed, and rewriting published history to tidy a commit
+    message is a worse trade than recording it. `edabd81` is the instance.
+    **So the guard cannot key on heredocs alone.** The family is *any inline content passed to
+    a shell*: an unquoted heredoc, backticks inside `python -c`, AND a format string given to
+    `printf`. The rule that would have caught all five is the simple one - content goes in a
+    FILE written by the Write tool, then `git commit -F` / `python file.py`. A `PreToolUse`
+    check for `printf`/`echo` writing a file that is then passed to `-F` is as mechanical as the
+    heredoc case and covers the incident that actually happened most recently.
     This repo already converts exactly this kind of recurring prose into a hook, twice:
     `piped_gate_guard` (a gate piped into `head`/`tail` returns the pipe's status) and
     `timing_claim_guard` (a duration written as MEASURED with no control marker). A heredoc /
@@ -718,7 +733,38 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
 22. **`piped_gate_guard` fires when a gate's SOURCE FILE is read on the producer side of a
     pipe. CONFIRMED false positive, in the wired copy, twice in one session.**
-    New 2026-08-27. Item 20 recorded the symptom and said the M10 fix should be CHECKED rather
+    **FIXED 2026-08-27 - and it was TWO defects, not one.** The item as written described only
+    the first; the second was found by fixing the first and watching the original command STILL
+    fire.
+
+    **Layer 1 - a READER on the producer side.** `_reads_a_file()` resolves what a segment
+    actually RUNS (past env assignments and `sudo`/`env`/`time` wrappers) and skips it when that
+    is a file reader. The distinction is the EXECUTABLE, never the operand, and both directions
+    are pinned: `grep -n "800" tools/check_file_size.py | head` is now quiet, while
+    `python tools/check_file_size.py | head` still fires. A fix that keyed on the operand would
+    turn the second one green, which is why it is a SHOULD_FIRE row rather than a comment.
+
+    **Layer 2 - A PIPELINE DOES NOT CROSS A STATEMENT BOUNDARY, and this is the one that
+    explains the mis-attribution.** `_segments()` splits on `|` alone, so every statement in a
+    multi-statement command landed in a single "segment" and a gate named in statement A was
+    reported as the producer for a pipe in statement B. That is exactly why the original message
+    named `hook_divergence_report` while the offending pipe contained `check_file_size` - the
+    name came from a `for` loop on the LINE ABOVE. Newlines vanish into whitespace inside
+    `shlex`, so the line boundary has to be honoured before tokenising: `_logical_lines()`
+    (rejoining `\` continuations first, or a continued pipeline would become a false NEGATIVE)
+    plus `_last_statement()`, since only the last statement in a segment feeds the pipe.
+    `_is_protected()` deliberately still reads the WHOLE command - `set -o pipefail` on one line
+    protects a pipe on the next.
+
+    **Verified 10 cases, 0 mismatches**, four quiet-directions and six fire-directions including
+    the three the statement fix could have broken (a gate on the second line, a gate after `;`,
+    a backslash-continued pipeline). The guard's own corpus grew from `sh 10 fire / 17 quiet` to
+    `13 fire / 19 quiet`, and three rows went into `tests/false_alarm_corpus.py` as the item
+    asked - the shared corpus, not a new list.
+
+    The original finding, kept because the control is the part that made it a finding:
+
+    Item 20 recorded the symptom and said the M10 fix should be CHECKED rather
     than assumed once it went live. It went live at 05:21Z in this session, so it was checked.
     **M10 does not fix it.** Reproduced against the wired copy and the repo copy, same verdict.
     Characterised, with a control:
