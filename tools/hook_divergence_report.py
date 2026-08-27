@@ -604,8 +604,21 @@ def main() -> int:
     else:
         files_row = ("hooks/*.py row WITHHELD - %d wired hook dirs, so 'the live copy' is "
                      "ambiguous" % len(st["wired_dirs"]))
-    print("  BUILT IS NOT LIVE: %d of %d entry points stale, %s"
-          % (n_entry, st["entry_total"], files_row))
+    # [item 23] A ZERO POPULATION IS NOT A CLEAN MACHINE, and this gate's own docstring says so:
+    # "a provenance check that examined nothing looks exactly like one that examined everything
+    # and found nothing wrong". main() has honoured that for the VERDICT since the rebuild, with
+    # a two-cause split. The count shipped without it and printed a bare "0 of 0 entry points
+    # stale" on a machine with no wiring - typographically identical to a fully synced one, and
+    # what every fresh CI checkout would print forever. Same two causes, same split, said here.
+    if st["entry_total"] == 0:
+        why = ("no wiring surface on this machine declares any hook, so there is nothing to be "
+               "stale - INAPPLICABLE, not clean" if not r["surfaces"] else
+               "%d wiring surface(s) were read and NOT ONE resolved to an entry point. That is "
+               "a broken derivation wearing a clean result, not a synced machine" % len(r["surfaces"]))
+        print("  BUILT IS NOT LIVE: NO COUNT - %s" % why)
+    else:
+        print("  BUILT IS NOT LIVE: %d of %d entry points stale, %s"
+              % (n_entry, st["entry_total"], files_row))
     for label, key in (("stale", "entry_stale"), ("ABSENT live", "entry_absent"),
                        ("UNREADABLE", "entry_unreadable")):
         if st[key]:
@@ -625,6 +638,10 @@ def main() -> int:
               % (len(st["files_unreadable"]), ", ".join(st["files_unreadable"])))
     for note in wired_divergence_note(st["wired_dirs"]):
         print("      %s" % note)
+    # [item 23, second half] --json is an advertised output, and a consumer of it could not see
+    # the number this gate exists to publish. Merged into the same payload rather than a second
+    # file, so there is one artifact to read.
+    r["staleness"] = st
 
     # [MODE-CONTROL follow-up] A zero denominator has TWO causes and they are not the same fact.
     # No surface at all = this machine has no wiring, so the gate is inapplicable (a fresh CI

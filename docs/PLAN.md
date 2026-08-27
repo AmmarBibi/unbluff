@@ -250,6 +250,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    still here, and this session added a `NOT_A_GATE` entry to prove it. What changed is only
    that there are now 145 lines of headroom instead of 6, so the next gate registration is no
    longer a file-size failure.
+   (The two files measured **667 and 321 AT THE SPLIT. THAT IS AN INSTANT, NOT A CURRENT
+   FACT** - they are 681 and 351 within the same session, because the `sync_phrase()` fix and
+   the M8 probe landed forty minutes later. The close consistency pass caught the drift; the
+   convention for saying so is `file_size_baseline.json`'s own. Current sizes come from
+   `check_file_size`, not from this line.)
    **Why it was done now rather than in its scheduled slot:** it became hard-blocking. Item 15
    split `hook_divergence_report.py`, the new sibling had to be classified in `NOT_A_GATE`, and
    at 803/800 there was no room to write the line. The 08-25 baseline note predicted this in
@@ -277,11 +282,19 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    baseline - which is the one move `tooling-discipline` section 4 is entirely about.
    (`tools/check_readme_fresh.py:190` also does `from run_selftests import AUX_GATES`; that one is
    fine, a re-export keeps it working.)
-   **THE FORCED ORDER IS NOW SATISFIED.** It waited on item 2's pull (ran 2026-08-26T20:24Z),
-   then on a clean full sweep - which item 20's push+merge produced: **44/44, rc=0,
-   2026-08-27T05:26Z at `aeba569`**. The registry cut is no longer blocked by anything except
-   `mutation_sweep`, which is the baseline the cut must be compared against and which is itself
-   now unblocked for the first time in six days. Next session: run the sweep, THEN cut.
+   **THE FORCED ORDER IS NOW FULLY SATISFIED - THE REGISTRY CUT IS UNBLOCKED.** It waited on
+   item 2's pull (ran 2026-08-26T20:24Z), then on a clean full sweep, then on `mutation_sweep`
+   as the baseline to compare the cut against. All three landed:
+   - suite **44/44 rc=0** (2026-08-27T06:30Z)
+   - `integration` **34/34 rc=0** (06:28Z, re-run because it was stale BY CONTENT)
+   - **`mutation_sweep` 2026-08-27T06:24:42Z PASS** - **223 of 225 executed, every executed
+     mutation CAUGHT, 0 skipped, 0 unproven**; the 2 remaining are not-runnable-on-this-platform
+     (`pre_push_gate` #30, `fast_test_on_stop` #D10c) and are named as proven by the OTHER
+     platform's job or nowhere. First PASS of this tier since 2026-08-20, six days.
+   **This is the baseline the registry cut must be measured against.** Cut it next session and
+   re-run the sweep immediately after: `mutation_check.aux_gates()` reads `AUX_GATES` out of
+   `run_selftests.py`'s source text, so the cut edits the instrument that certifies every other
+   fix, and that is only honest with a green sweep on both sides.
 
 8. **Nothing enforces that `--code-only` stays off the turn-end command.**
    **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
@@ -690,9 +703,17 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     **Probe both directions**, and reuse the corpus: `tests/false_alarm_corpus.py` already holds
     the non-firing cases, so the four rows above belong there rather than in a new list.
 
-23. **The item-15 count reintroduces the exact fail-open its own file was rebuilt to remove.**
-    New 2026-08-27, found by the close source-coverage pass reading the DESIGN rather than the
-    code. **This is a defect in code shipped THIS SESSION.**
+23. **The item-15 count reintroduced the exact fail-open its own file was rebuilt to remove.**
+    **FOUND AND FIXED 2026-08-27, same session as the defect.** Found by the close
+    source-coverage pass reading the DESIGN rather than the code.
+    Fixed: the count now takes `main()`'s own two-cause split. Verified end to end via
+    `--repo` on an empty hooks dir, which now prints
+    `BUILT IS NOT LIVE: NO COUNT - 3 wiring surface(s) were read and NOT ONE resolved to an
+    entry point. That is a broken derivation wearing a clean result, not a synced machine`
+    instead of a bare `0 of 0`. `--json` now carries `staleness` (verified: `entry_total 16`,
+    `files_total 28`). Probe 4c added, asserting the zero survives to `main()` so the branch is
+    reachable at all. Suite 44/44 rc=0 after.
+    The record of what it was, kept because the lesson is the point:
     `tools/hook_divergence_report.py`'s module docstring states the rule in its own words:
     *"BOTH DENOMINATORS ARE PRINTED. A provenance check that examined nothing looks exactly like
     one that examined everything and found nothing wrong."* `main()` honours it for the
@@ -805,9 +826,14 @@ recoverable from the archived plan.
     file against itself and means nothing. That one is worth un-retiring if it ever trips.
 - **#42, #43, #6/#28 (the 243-claim inventory).** Claim-proofs and cardinality gates for
   documents nobody but me reads.
-- **The `pre_push_gate_selftest.py` split (#41's remaining half).** 1192 lines and the largest
-  file here, but splitting it is refactoring an instrument. Its seam and the reason it was not
-  attempted are recorded in `file_size_baseline.json`.
+- **The `pre_push_gate_selftest.py` split (#41's remaining half).** The largest file here, but
+  splitting it is refactoring an instrument. Its size, its seam and the reason it was not
+  attempted are recorded in `file_size_baseline.json` - **which is the only place the number
+  lives now.** This line said "1192 lines" from 2026-08-25 until 2026-08-27, while the file was
+  1213 and the baseline recorded 1213: the `_accepted_growth_2026_08_25` note moved the baseline
+  and left this copy behind. Caught by the close consistency pass. **Third instance in this file
+  of a number restated in a second place drifting in one of them** - so the number is deleted
+  here rather than corrected, which is item 15's rule applied by hand where no gate reaches.
 - **`install_selftest.py` has never been adversarially reviewed.** 358 lines, split out
   2026-08-24. `check_review_freshness` will keep asking; that is fine and it can keep asking.
 

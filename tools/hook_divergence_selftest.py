@@ -172,6 +172,32 @@ def _selftest_item15() -> list:
         fails.append("a genuinely ahead branch produced %r - it must name the remedy and the "
                      "count, since a pull cannot clear unpushed commits" % diverged)
 
+    # 4c. [item 23] A ZERO POPULATION MUST NOT READ AS A CLEAN MACHINE. This gate's docstring
+    #     says a check that examined nothing looks exactly like one that found nothing wrong,
+    #     and the count shipped without honouring it - printing a bare "0 of 0 entry points
+    #     stale" on a machine with no wiring, which is what a fresh CI checkout produces. Probed
+    #     as STATE here (the phrasing lives in main()); the zero must be reachable and visible.
+    with tempfile.TemporaryDirectory() as td:
+        hooks = os.path.join(td, "hooks")
+        os.makedirs(hooks)
+        with open(os.path.join(hooks, "solo.py"), "w", encoding="utf-8") as fh:
+            fh.write("def main():\n    return 0\n")
+        nothing = os.path.join(td, "nowiring.json")
+        with open(nothing, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {}}, fh)
+        ep0 = entry_points([nothing], [], hooks)
+        st0 = staleness(ep0, hooks)
+        if ep0:
+            fails.append("a settings file declaring no hooks still produced entry points (%r)"
+                         % (sorted(ep0),))
+        if st0["entry_total"] != 0:
+            fails.append("an empty population reported entry_total=%r; the zero must survive to "
+                         "main() or the INAPPLICABLE branch can never fire"
+                         % st0["entry_total"])
+        if st0["wired_dirs"]:
+            fails.append("an empty population still reported wired hook dirs (%r), which would "
+                         "print a files row derived from nothing" % (st0["wired_dirs"],))
+
     # 5. THE REGRESSION THIS SESSION FIXED. _same_repo_same_bytes must delegate to
     #    _same_program: a linked worktree checked out with different line endings is our own
     #    file, and calling it FOREIGN blocked a push once already.
