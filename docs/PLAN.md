@@ -530,6 +530,10 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     Note the trap before building it: `mutation_sweep` is PERMANENTLY stale by design (CI cannot
     write the local ledger), so that tier must be exempted with its reason written down, or the
     new gate is red forever and gets switched off. See "Known-stale by design" below.
+    **SECOND TRAP, found 2026-08-27 and it is a precondition, not a footnote:** the ledger is
+    gitignored and therefore per-worktree, so built naively this gate reports every tier as
+    stale in whichever worktree did not run it. **Answer item 21's question - is the ledger
+    per-worktree state or repository state - BEFORE building this.**
 
 18. **The SHIPPED consistency extractor's placeholder class fires on source-code literals.**
     Found 2026-08-26 by the close consistency pass, on itself. `skills/consistency-audit/scripts/
@@ -616,6 +620,29 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     when that filename was an argument to `wc -l` in a `for` loop and the `| head` belonged to a
     different command in the same compound line. Whether M10 fixes that shape is unverified, and
     it should be checked when item 5's fix goes live rather than assumed.
+
+21. **The gate ledger is gitignored, so it is PER-WORKTREE - and a gate reads it to decide a
+    push.** New 2026-08-27, found by pushing `main` and being refused.
+    `git push origin main` from the live worktree FAILED on `readme-scenarios`: *"README pastes
+    34/34; the newest recorded integration run is 30/30."* The same gate had passed minutes
+    earlier from the enforcing worktree. Nothing about the code differed - the two worktrees
+    were on the identical commit. What differed is that `docs/audits/gate_runs.json` is
+    **gitignored** (`gate_ledger.py` says so in its own header), so each worktree keeps its own
+    ledger, and today's 34/34 integration run had been recorded in the OTHER one.
+    So a gate whose input is local, gitignored state gives a **different verdict depending on
+    which worktree you push from**, and the failure names the README rather than the cause. The
+    fix taken was the honest one - run the integration tier where `main` actually sits, which
+    recorded 34/34 there and let the push through - but that is the instance, not the mechanism.
+    **This lands directly on item 17**, which proposes a gate comparing each tier's newest
+    ledger stamp against the commits it covers. Built naively it inherits this exactly: in a
+    two-worktree setup every tier looks stale in whichever worktree did not run it, so the new
+    gate would be red half the time and get switched off - the same failure mode as the
+    `mutation_sweep` trap already written into item 17, arriving by a second route. Item 17 must
+    therefore decide, in writing, whether the ledger is per-worktree state (and the gate reads
+    only its own) or repository state (and it stops being gitignored). **Do not build item 17
+    before answering that.**
+    Cheap to confirm and worth confirming: it predicts that any ledger-reading gate can be
+    flipped green or red purely by choosing a worktree, with no commit in between.
 
 ## Retired, not forgotten - and why each one died
 
