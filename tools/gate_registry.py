@@ -104,6 +104,15 @@ AUX_GATES = (
     # the review-freshness gate's own scope check: it asked about 17 of 31 tracked .py files
     # and could not detect its own sabotage until P13 A1
     ("review-freshness-scope", ("tools", "check_review_freshness.py"), ("--selftest",)),
+    # [item 17 2026-08-28] "Has THIS WORKTREE verified each gate TIER since the code it covers
+    # last changed?" The ledger has carried the data for weeks and nothing ASKED it; the gap was
+    # found as a SILENT one - the plan mentioned the `integration` tier nowhere, so its freshness
+    # was never scheduled OR excluded. Registered --selftest for the reason written in
+    # SELFTEST_IS_THE_GATE below: after any commit EVERY tier is legitimately unverified, so the
+    # measurement cannot be the enforced form without firing on correct work every time.
+    # THIS ROW IS ALSO THE FIRST GATE ADDED SINCE THE REGISTRY CUT, and it is the proof item 7
+    # wanted: registering it touched this file and not run_selftests.py.
+    ("tier-freshness", ("tools", "check_tier_freshness.py"), ("--selftest",)),
     # the README pastes a run_selftests transcript as EVIDENCE; it claimed 18 while the suite
     # ran 21. A stale paste reads exactly like a fresh one.
     ("readme-fresh", ("tools", "check_readme_fresh.py"), ()),
@@ -255,6 +264,16 @@ SELFTEST_IS_THE_GATE = {
     "review-freshness-scope":
         "its enforcing mode is --release, which blocks only at a release; the default run is a "
         "measurement. The SCOPE check - does it ask about every tracked file - is the selftest",
+    "tier-freshness":
+        "same shape as review-freshness-scope, and for a MEASURED reason: the normal order is "
+        "verify-then-commit, so the instant a commit lands EVERY tier is legitimately unverified "
+        "at HEAD - observed 7 of 7 immediately after 0d9e8a5. Enforcing the measurement would "
+        "therefore fire on entirely correct work every single time, and a guard that fires on "
+        "correct work gets switched off. Its enforcing mode is --release, run AFTER the commit "
+        "being shipped. The selftest is what carries the real assertions: that the detector SEES "
+        "a tier eight days behind, does NOT flag one that ran after HEAD, treats a missing row "
+        "as NEVER rather than fresh, keeps the per-worktree phrasing item 17 requires, and reads "
+        "HEAD in UTC - that last one caught a live fail-open where local time wore a Z suffix",
     "selftest-isolation-selftest":
         "the PAIRED row; 'selftest-isolation' runs the measurement enforcing. This half asks "
         "what its subject cannot: can the detector still SEE an unscrubbed fixture? A blind "

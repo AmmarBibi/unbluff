@@ -172,9 +172,9 @@ file-size: OK  ship-bar: OK  gate-ledger: OK  false-alarm-scorer: OK  no-network
 python-floor: OK  skill-deps: OK  review-freshness-scope: OK  readme-fresh: OK
 no-regression: OK  hook-provenance: OK  hook-provenance-selftest: OK
 git-isolation: OK  selftest-isolation: OK  selftest-isolation-selftest: OK
-mutation-anchors: OK  corpus-scorer: OK
--- gate modes: 20 row(s) examined, 6 adjudicated as selftest-is-the-gate
-all 44 selftests passed
+mutation-anchors: OK  corpus-scorer: OK  tier-freshness: OK
+-- gate modes: 21 row(s) examined, 7 adjudicated as selftest-is-the-gate
+all 45 selftests passed
 
 $ python tests/test_integration.py     # installs, FIRES every hook, uninstalls
 [PASS] A1 install exit 0

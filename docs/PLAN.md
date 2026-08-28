@@ -604,6 +604,43 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     and the trend, not the level, is what this row is watching.
 
 17. **Nothing flags a gate TIER whose last run predates the code it covers.**
+    **DONE 2026-08-28** - `tools/check_tier_freshness.py`, registered as `tier-freshness`.
+    **IT FOUND A REAL ONE ON ITS FIRST RUN, and that is the argument for it:**
+    `false_alarm_scorer`'s newest row was **EIGHT DAYS old** (2026-08-20) while every gate was
+    green and `unrecorded_tiers()` reported it "still recording". Those are two different facts:
+    `unrecorded_tiers()` is an AST walk proving the CALL EXISTS, and the tier is registered
+    `("--selftest",)`, so the suite never reaches the enforcing path where the call lives.
+    **Declared-and-present is not recently-executed, and only this gate asks the second one.**
+    `integration` was also behind, which is the tier the row was written about. See item 31.
+    **BOTH TRAPS HANDLED AS WRITTEN.**
+    - *Exemption:* `mutation_sweep` is in `CANNOT_BLOCK` with the reason from the "Known-stale by
+      design" section - a CI runner cannot write this local ledger. Checked in BOTH directions:
+      an exemption naming a tier that is in no `RECORDING_TIERS` row is a selftest failure, and an
+      exemption without a real reason written is too, so the roster cannot rot into cover.
+      **Exempt means CANNOT BLOCK, never hidden** - its status is still printed and still labelled.
+    - *Phrasing:* every verdict is `THIS WORKTREE has not verified <tier> since <commit>`, and the
+      selftest ASSERTS both halves - that the string is present, and that `is stale` never appears.
+    **A THIRD trap the row did not predict, and it decided the mode.** The normal order is
+    verify-then-commit, so the instant a commit lands EVERY tier is legitimately unverified at
+    HEAD - observed 7 of 7 immediately after `0d9e8a5`. Enforcing the measurement would fire on
+    entirely correct work every single time, and a guard that fires on correct work gets switched
+    off. So it follows `review-freshness`'s adjudicated shape: the default run is a MEASUREMENT
+    returning 0, `--release` blocks, and the registered gate is the SELFTEST. The output says this
+    out loud when every tier reads NOT-SINCE, rather than leaving the next reader to rediscover it.
+    **A LIVE FAIL-OPEN IN THIS GATE, caught by reading its own first output rather than by its
+    selftest.** `head()` used `--date=format-local:...Z`, which renders LOCAL time and labels it
+    `Z`: a commit at `03:08:30-04:00` came back as `03:08:30Z`, four hours early. Against UTC
+    ledger stamps that compares as LATER than it is, so a tier that ran at 07:07Z - genuinely
+    BEFORE a 07:08Z commit - reported VERIFIED. **The selftest passed anyway**, because every
+    case used synthetic timestamps and none of them called `head()`. Fixed with `TZ=UTC0`, and
+    the selftest now asserts `head()` against git's own `%cI` - which carries a real offset, so it
+    cannot agree with a wrong answer the way a second local read would. This is section 6 again:
+    the author's probes and the author's blind spot were the same object.
+    **This is also the first gate registered since item 7's registry cut**, and it is the proof
+    that cut wanted: adding it touched `tools/gate_registry.py` and NOT `run_selftests.py`.
+    Suite 45/45 rc=0 (`readme-fresh` correctly caught the 44 -> 45 change first).
+
+    Original statement of the problem, kept:
     Found 2026-08-26 by the close completeness pass as a **silent gap** - the plan does not
     mention the `integration` tier anywhere (grep: zero hits), so nothing about its freshness was
     ever scheduled or excluded.
@@ -1156,6 +1193,29 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     cannot explain, or have the git-derived gates name untracked `.py` files as
     NOT-EXAMINED rather than omitting them silently. The second is cheaper and is the
     "say what you dropped" rule this repo already applies to skips and caps.
+
+31. **`false_alarm_scorer` is a DECLARED recording tier whose registered mode never reaches its
+    `record()` call.** New 2026-08-28, found by item 17's gate on its first real run.
+    MEASURED: its newest ledger row was **2026-08-20T13:46:26Z - eight days old** - while the
+    suite ran it every time and reported `false-alarm-scorer: OK`, and while
+    `unrecorded_tiers()` reported "7 tier(s) declared, 7 still recording".
+    **Both statements were true and neither was the fact anyone wanted.** `unrecorded_tiers()`
+    walks the declared file's AST and proves the `gate_ledger.record(...)` CALL EXISTS. The tier
+    is registered `("--selftest",)` - adjudicated in `SELFTEST_IS_THE_GATE` for a good reason,
+    that its measurement carries a known false alarm - so the suite runs the selftest and never
+    reaches the enforcing path where the call lives. **DECLARED-AND-PRESENT is not
+    RECENTLY-EXECUTED**, and until item 17 nothing asked the second question.
+    `integration` is behind for a different and more ordinary reason: it is not run by the suite
+    at all. That one is the tier item 17 was originally written about.
+    **Why this is a row and not a quick fix:** the honest options conflict. Recording from the
+    selftest path would put a row in the ledger that says "this tier ran" when what ran was its
+    self-check, which is the mode-flip defect `MODE-1` pins. Running it enforcing in the suite is
+    what `SELFTEST_IS_THE_GATE` already refused, with its reason. So the fix is probably neither:
+    it is to make `RECORDING_TIERS` say WHICH MODE is expected to record, so a tier that can only
+    record in a mode the suite never runs is visible as such rather than looking identical to a
+    tier that simply stopped.
+    Until then `tier-freshness` reports it every run, which is strictly better than the eight days
+    of silence that preceded it.
 
 ## Retired, not forgotten - and why each one died
 
