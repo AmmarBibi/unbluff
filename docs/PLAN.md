@@ -902,7 +902,45 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     print a bare `0 of 0`, and a genuinely clean machine must still print `0 of 16`.
 
 24. **The BUILT IS NOT LIVE count is now correct and has NO HISTORY. The fix removed the
-    trajectory.** New 2026-08-27, from the close source-coverage pass reading the design.
+    trajectory.** **DONE 2026-08-28.** `hook-provenance` now records its counts every run and
+    PRINTS the comparison against the previous run in this worktree, e.g.
+    `trajectory: 1 of 16 now vs 1 of 16 in THIS WORKTREE at <utc> - unchanged.`
+    - **The row's confirm-don't-assume note paid for itself twice.** (1) `gate_ledger.record()`
+      DOES take structured extras - `def record(gate, result, **fields)`, already exercised as
+      `record("probe_gate", "FAIL", passed=0, total=1)`. (2) But this row also said
+      *"`hook-provenance` already calls into that path"* and **that was FALSE**:
+      `hook_divergence_report.py` had no `gate_ledger` call at all and was in no
+      `RECORDING_TIERS` row. It is now the 7th declared tier, so `unrecorded_tiers()` enforces the
+      recording BY AST in both directions - deleting the call reddens the suite.
+    - **A ZERO IS NOT A COUNT, and in a series it matters more than in a printout.** A run with no
+      population records `entry_stale: null` plus the REASON, carrying the same two-cause split
+      `main()` prints (`no-wiring-surface` vs `surfaces-declared-no-entry-point`). Recording a
+      literal `0` would make every fresh CI checkout deposit a row reading "perfectly clean"
+      forever, and the trend would be built out of rows meaning "inapplicable". Both causes were
+      DRIVEN and asserted, with a control proving a recorded `0` would be caught.
+    - **The first version reintroduced the same defect one field over** and the probe output
+      caught it: `files_withheld=len(wired_dirs)` serialised as `files_withheld: 0` on an unwired
+      machine - a field reading "nothing was withheld" while meaning "everything was". Now a
+      reason string, mirroring `no_count`.
+    - **All 7 `trajectory()` branches exercised**, asserted on CONTENT, with a control. The probe
+      FAILED on first run - every branch returned the identical sentence - and that failure is
+      what exposed item 29 below. A probe that had only checked "it returns a string" would have
+      passed and proved nothing.
+    - **The denominator moving is its own verdict**: `1 of 16` vs `6 of 11` reports
+      *"the DENOMINATOR moved, so the two numerators are not comparable"* rather than a delta.
+      That is precisely the defect item 15 was built for, where five corrections each fixed the
+      numerator and left the denominator scoped to whatever the author had in mind.
+    - **Per-worktree phrasing throughout**, satisfying item 17's requirement in advance: every
+      sentence says THIS WORKTREE, and no-history is a STATEMENT rather than an omission.
+    - **Landed as a split, not a squeeze.** The additions took `hook_divergence_report.py` over
+      the 800-line ratchet twice and its comments were trimmed twice; the third time it was SPLIT
+      instead - `tools/hook_divergence_trend.py` (105 lines) holds the field shaping and the trend
+      sentence, and the file went 803 -> 732. **The `gate_ledger.record()` CALL deliberately
+      stayed behind**, because `unrecorded_tiers()` walks the DECLARED tier file's AST for it and
+      moving it would have named the wrong file as the tier. See item 27.
+
+    Original statement of the problem, kept:
+    New 2026-08-27, from the close source-coverage pass reading the design.
     This file says of that number: *"The trajectory is the real point... every session that
     fixes something makes the live machine MORE stale."* `tools/gate_ledger.py` exists for
     exactly that reason - its header records that a per-run verdict is not an observable trend.
@@ -1018,10 +1056,28 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     hand-rolled substring probe was worse, flagging 52 of 225 with obvious false positives.
     Derive the predicate, and prove it against a known-good control BEFORE trusting any zero.
 
-27. **`hooks/piped_gate_guard.py` is at EXACTLY 800 lines - zero headroom.**
-    New 2026-08-28, measured while item 7 was landing. Adding a five-line comment to it made it
-    812 and a NEW `file-size` offender; it took FOUR rounds of shaving prose to get back to
-    exactly 800.
+27. **THREE files hit the 800-line ratchet in a single session, and shaving prose was the first
+    instinct every time.** New 2026-08-28. `hooks/piped_gate_guard.py` is now at EXACTLY 800 -
+    zero headroom. This is the general form; the specific file is the least of it.
+    **The session's own record, because it is the evidence:**
+    - `run_selftests.py` - item 7's registry cut. Resolved by SPLITTING (655 -> 444). Correct.
+    - `hooks/piped_gate_guard.py` - a five-line comment took it 800 -> 812. Resolved by FOUR
+      rounds of shaving prose back to exactly 800. **Wrong, and left at zero headroom.**
+    - `tools/hook_divergence_report.py` - item 24. Went over TWICE, was trimmed TWICE, and on the
+      third hit was SPLIT instead (803 -> 732 plus a 105-line sibling). Correct, and only because
+      the pattern had by then been noticed three times.
+    **The rule this yields, and it belongs beside `file_size_baseline.json`'s own:** that file
+    already calls re-recording a baseline "THE LOOPHOLE IN THIS DESIGN". Shaving comments until
+    the number passes is the SAME loophole wearing different clothes - it keeps the gate green
+    while deleting the reasoning the gate exists to protect, and it leaves the file at zero
+    headroom so the next person faces the identical choice with less prose left to cut. The
+    ratchet's honest responses are SPLIT or deliberately RECORD; "trim the explanation" is
+    neither.
+    **Consider making that mechanical rather than remembered** (7.3, REMEMBER vs ENFORCE): a file
+    that passes only by losing comment lines while its code lines are unchanged is a detectable
+    shape, and it is exactly the move this session made twice.
+    **`piped_gate_guard.py` specifically**: adding a five-line comment made it 812 and a NEW
+    `file-size` offender; it took FOUR rounds of shaving to get back to exactly 800.
     **This is item 7's finding in a second file, and item 7's own words apply unchanged:** the
     overage was never the finding - *"the orchestrator having only 6 lines of headroom is the
     actual finding here, and it will bite the next person who adds a gate."* Here it is ZERO. The
@@ -1058,6 +1114,48 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     Fix candidates, cheapest first: have `record()` refuse - and SAY SO - when the working tree is
     content-dirty vs HEAD, which is precisely the state a hand probe creates; or give probes a
     wrapper that sets the variable so there is nothing to remember.
+
+29. **`gate_ledger`'s WRITER and its READERS can disagree about which file they are using.**
+    New 2026-08-28, found by item 24's trajectory probe FAILING - all seven branches returned the
+    identical sentence, because the function was reading a different ledger from the one the probe
+    had just written.
+    `record()` resolves the module global `LEDGER` at CALL time. Every reader - `read()`,
+    `last_run()`, `tiers()` - declares `path: str = LEDGER`, so the default binds at DEF time.
+    Anything that reassigns `gate_ledger.LEDGER` therefore WRITES one file and READS another.
+    **This is not hypothetical and the repo already works around it:** `gate_ledger`'s own
+    selftest does `global LEDGER; LEDGER = <tmp>` and then passes `LEDGER` EXPLICITLY to
+    `tiers(LEDGER)` and `last_run(..., LEDGER)`. The workaround is load-bearing and undocumented
+    as such - a caller who omits the argument silently reads the real ledger while writing a temp
+    one, which is what happened here.
+    **Severity is real but bounded:** in production nothing reassigns `LEDGER`, so the two agree.
+    It bites TEST and PROBE code - the code whose entire job is to be trusted about what it
+    measured - and it fails toward a FALSE PASS: the reader returns plausible real data, so the
+    probe looks like it ran.
+    Fix: make the readers resolve the global at call time (`path=None` -> `path or LEDGER`), which
+    matches `record()` and makes the existing explicit-path call sites redundant rather than
+    load-bearing. Then delete the workaround in the selftest and confirm it still passes.
+    Item 24's `trajectory()` already passes the path explicitly, with the reason written at the
+    call site; that is an instance guard, not the fix.
+
+30. **A gate whose population comes from git cannot see an UNTRACKED file, and nothing compares
+    the denominators that would reveal it.** New 2026-08-28, found by reading two gates' output
+    lines in the same suite run.
+    MEASURED: with `tools/hook_divergence_trend.py` written but not yet `git add`ed, the same suite
+    run printed `file-size: 67 .py file(s) in population (source: git)`,
+    `no-network: OK - 67 file(s) examined (source: git)` and `python-floor: all 68 files parse`.
+    **67 and 68, side by side, in one run, and the suite was GREEN.** After staging, all three
+    read 68 and both git-derived gates re-ran clean - so nothing was actually wrong here, which is
+    exactly why it is worth writing down: the gap was invisible in a passing run.
+    **The exposure:** a session can write a new 900-line module with a network call in it, run the
+    full suite, and get a green from both gates that exist to catch precisely that - because
+    neither one can see the file until it is staged. `python-floor` walks the filesystem and would
+    have seen it. The population source is a deliberate choice (git keeps scratch files out), so
+    the defect is not the choice; it is that **two gates report different denominators for the
+    same population and nothing notices.**
+    Fix: have the suite compare the denominators the gates already print and fail on a mismatch it
+    cannot explain, or have the git-derived gates name untracked `.py` files as
+    NOT-EXAMINED rather than omitting them silently. The second is cheaper and is the
+    "say what you dropped" rule this repo already applies to skips and caps.
 
 ## Retired, not forgotten - and why each one died
 

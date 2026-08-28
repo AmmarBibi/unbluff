@@ -194,6 +194,12 @@ NOT_A_GATE = {
     # graded with it and a scorer that lives only in a scratchpad is a measurement nobody can
     # reproduce.
     "make_hook_screenshot.py",      # docs asset generation
+    # [item 24 2026-08-28] Pure VIEW code for hook-provenance's ledger series - it shapes the
+    # recorded fields and formats the trend sentence. Not a gate: it declares no check, has no
+    # pass/fail opinion and exposes no dispatch. The gate that USES it is `hook-provenance`,
+    # registered above, and the gate_ledger.record() CALL deliberately stayed in
+    # hook_divergence_report.py so RECORDING_TIERS keeps naming the real tier.
+    "hook_divergence_trend.py",
 }
 
 # [#45 2026-08-24] Labels whose SUBJECT is this machine's environment, not this repository's
@@ -272,4 +278,10 @@ RECORDING_TIERS = {
     os.path.join("tools", "check_file_size.py"): "file_size",
     os.path.join("tools", "score_false_alarms.py"): "false_alarm_scorer",
     os.path.join("tests", "test_integration.py"): "integration",
+    # [item 24 2026-08-28] BUILT IS NOT LIVE needs a TRAJECTORY, not a point-in-time print, and
+    # this row is what makes the recording enforced rather than merely present: unrecorded_tiers()
+    # checks it by AST, in both directions, so deleting the call reddens the suite. The plan
+    # asserted this gate "already calls into that path" - it did not, and had no ledger call at
+    # all, which is why the row carried a confirm-don't-assume note.
+    os.path.join("tools", "hook_divergence_report.py"): "hook_provenance",
 }
