@@ -282,6 +282,16 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    executed mutation CAUGHT, 0 survivors.** That is the clean baseline this cut required.
    **The finding that outlived the instance is now item 26**: a data module handed an unrecognised
    argv exits 0, so the harness scored MODE-1 `SURVIVED` rather than `HARNESS ERROR`.
+
+   **THE SESSION'S CLOSING BASELINE - compare against THIS, not against 223 of 225.**
+   Sweep 3 (07:20:59Z-08:06:28Z, **rc=0**) verified items 24 and 17: 223 of 225, 0 survivors.
+   Sweep 4 (08:18:41Z, **rc=0**) verified the coverage added for both new modules:
+   **228 of 230 executed, 0 skipped, 0 unproven, EVERY executed mutation CAUGHT, 0 survivors.**
+   The table grew 225 -> 230 (TR-ZERO, TR-SILENT, TF-UTC, TF-BLIND, TF-EXEMPT-ALL); the 2
+   not-runnable-here are unchanged (`pre_push_gate` #30, `fast_test_on_stop` #D10c) and are proven
+   by the other platform's job or nowhere. **Four full sweeps ran this session and two of them
+   found something no other signal did** - MODE-1 surviving the registry cut, and TF-UTC proving
+   a new assertion decorative.
    **What landed (2026-08-26T20:51Z):** `selftest()` -> `run_selftests_selftest.py`, 803 -> 655
    lines, removed from the file-size baseline by the ratchet's own rule. **This is a DIFFERENT
    cut from the one specified below, chosen precisely because it does not touch the trap:**
@@ -1288,7 +1298,17 @@ permanently-stale row is dangerous: it is #44's defect ("anything reading the le
 whether the gates passed would conclude the gate fails at HEAD") reintroduced structurally rather
 than by a polluting write. **Recorded here rather than papered over by a 30-minute local re-run
 whose only purpose would be to make a row look right.** If CHECK 4 is ever automated, it must
-read CI for this tier. Every other tier is current as of 2026-08-24T21:23Z.
+read CI for this tier.
+
+**[2026-08-28] The hand-maintained half of this section is now a GATE.** It used to end "Every
+other tier is current as of 2026-08-24T21:23Z" - a retyped claim about seven tiers, which is the
+shape that rots silently and is exactly what item 15 was about one level down. `tier-freshness`
+(item 17) now derives it every run, and on its first run it found that `false_alarm_scorer` had
+been EIGHT DAYS stale while every gate was green (item 31). Ask the gate, do not read a date here.
+`mutation_sweep` stays exempt for the reason above, and its status is still printed - and note the
+premise is about where the sweep CAN run, not that a local row is impossible: it was run locally
+four times on 2026-08-28, so the local row is current today and will go stale again the moment the
+sweep runs only in CI.
 
 ## Standing checks on every change
 
