@@ -235,9 +235,53 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    forever gets the hook deleted. This one is a security disclosure, so the trade inverts.
    Note for the record: the probe was INVALID on its first two writes (wrong entry point, then
    wrong `source` constant) and both times returned an answer that looked like a finding.
-7. **Split `run_selftests.py`.** **PARTIAL 2026-08-26 - the headroom is bought, the REGISTRY cut
-   this item actually specifies is NOT done and still waits on a clean sweep.** Read the two
-   halves separately before marking this row anything else.
+7. **Split `run_selftests.py`.** **DONE 2026-08-28 - BOTH halves.** The `selftest()` cut landed
+   2026-08-26; the REGISTRY cut this item actually specifies landed 2026-08-28, verified against
+   a full mutation sweep on both sides. Read the two halves separately.
+
+   **THE REGISTRY CUT (2026-08-28).** `AUX_GATES`, `NOT_A_GATE`, `MACHINE_STATE`,
+   `SELFTEST_IS_THE_GATE`, `RECORDING_TIERS` and their prose -> `tools/gate_registry.py`.
+   `run_selftests.py` 655 -> 444 lines. **This item's stated goal is now met**: adding a gate no
+   longer touches the orchestrator. The re-export is an `import`, not a re-assignment, so
+   `check_readme_fresh.py:190`'s `from run_selftests import AUX_GATES` and
+   `run_selftests_selftest.py`'s four imports keep working untouched - verified, 20 rows. A
+   re-ASSIGNMENT would have been WORSE than nothing: it leaves an `ast.Assign` named `AUX_GATES`
+   whose value is an Attribute, so the source-text readers below would find the assignment, fail
+   `literal_eval`, and report corruption rather than a move.
+
+   **THE TRAP AS WRITTEN NAMED ONE INSTRUMENT. THERE WERE THREE.** All three were found by
+   grepping the five names BEFORE cutting, which is the only reason none surfaced mid-refactor:
+   - `tools/mutation_check.py:aux_gates()` - the one this row named. Repointed.
+   - `hooks/piped_gate_guard.py` - a **SECOND** source-text reader of the same assignment, doing
+     the same `ast` walk to derive its coverage denominator. Named nowhere in this plan.
+     Repointed.
+   - mutation **`MODE-1`** - a pinned anchor INSIDE the moved region; it anchors an `AUX_GATES`
+     row. The 2026-08-26 half was chosen precisely BECAUSE zero anchors sat in `selftest()`, and
+     this row never said that property fails here. Unit moved to `tools/gate_registry`.
+   Both readers were PROVEN to fail closed before being repointed, not assumed to: `aux_gates()`
+   returned `no AUX_GATES assignment in .\run_selftests.py`, and the guard's selftest returned
+   rc=1 printing `gate coverage 0 of 0`.
+   **A fourth consequence, structural rather than a trap:** `classify_tools()` fails on any
+   `tools/*.py` in neither roster, so `gate_registry.py` names ITSELF in the `NOT_A_GATE` it now
+   contains. That is the check working as designed.
+   **The two readers were deliberately NOT unified** behind one helper, despite this repo's own
+   rule that two implementations of one rule is the defect. `piped_gate_guard` SHIPS -
+   `install.py` copies it to `~/.claude/hooks/`, where `tools/` does not exist - so the single
+   implementation would have to be a conditional import whose two branches nothing exercises
+   together. Recorded as a decision with its reason in `tools/gate_registry.py`, not left implicit.
+
+   **THE SWEEP EARNED ITS 46 MINUTES, SECOND SESSION RUNNING.**
+   Sweep 1 (2026-08-28T05:05:59Z-05:51:37Z, **rc=1**): 223 of 225 executed, 0 skipped, 0 unproven,
+   2 not-runnable-here (`pre_push_gate` #30, `fast_test_on_stop` #D10c) - every number identical
+   to the 08-27 baseline - and **1 SURVIVOR, `MODE-1`**, while the suite was 44/44 green under
+   `--code-only`. Adjudicated per the standing rule and it is **NEITHER narrowed NOR redundant**:
+   the regression test bites fine, the VERIFIER was unrunnable. `verify` defaults to the mutated
+   unit's own `--selftest`, which used to be `run_selftests.py` and had become a data module.
+   Fixed to a 6-tuple, `verify="./run_selftests"`; re-probed CAUGHT (rc=1).
+   Sweep 2 (05:54:47Z-06:40:06Z, 45m19s, **rc=0**): **223 of 225 executed, 0 skipped, 0 unproven, EVERY
+   executed mutation CAUGHT, 0 survivors.** That is the clean baseline this cut required.
+   **The finding that outlived the instance is now item 26**: a data module handed an unrecognised
+   argv exits 0, so the harness scored MODE-1 `SURVIVED` rather than `HARNESS ERROR`.
    **What landed (2026-08-26T20:51Z):** `selftest()` -> `run_selftests_selftest.py`, 803 -> 655
    lines, removed from the file-size baseline by the ratchet's own rule. **This is a DIFFERENT
    cut from the one specified below, chosen precisely because it does not touch the trap:**
@@ -260,7 +304,9 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    at 803/800 there was no room to write the line. The 08-25 baseline note predicted this in
    those words - "the orchestrator having only 6 lines of headroom is the actual finding here,
    and it will bite the next person who adds a gate." It bit on the next session.
-   **Still open below, unchanged:** the registry cut, its trap, and the forced order.
+   **The text below is the registry cut AS IT WAS SPECIFIED, kept for its trap map and its forced
+   order. It is CLOSED - see the 2026-08-28 record at the top of this row for what actually
+   happened, including the two instruments the trap map below does not name.**
 
    New 2026-08-25. It is a recorded 803-line offender, but the
    overage is not the finding - the finding is that the orchestrator had SIX lines of headroom, so
@@ -295,13 +341,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
      **The sweep in between those two earned its runtime**: it caught PG1 and PG3 SURVIVING
      after item 22's fix, with the suite, the guard's own selftest and `mutation-anchors` all
      green. See item 22.
-   **This is the baseline the registry cut must be measured against.** Cut it next session and
-   re-run the sweep immediately after: `mutation_check.aux_gates()` reads `AUX_GATES` out of
-   `run_selftests.py`'s source text, so the cut edits the instrument that certifies every other
-   fix, and that is only honest with a green sweep on both sides.
+   **This was the baseline the registry cut had to be measured against, and it was.** The cut ran
+   2026-08-28 with a full sweep on both sides; the instruction it carried - "re-run the sweep
+   immediately after, because the cut edits the instrument that certifies every other fix" - is
+   what caught `MODE-1`. Sweep 1 returned rc=1 with one survivor while the suite was 44/44 green.
+   See the 2026-08-28 record at the top of this row.
 
 8. **Nothing enforces that `--code-only` stays off the turn-end command.**
-   **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
+   **UNBLOCKED 2026-08-28 - item 7's registry cut removed the wall this row hit.** The
+   measurement that blocked it was 803 -> 897 against a 800 limit; `run_selftests.py` is now
+   **444 lines**, so the same 94-line check lands near 538 with real headroom, and an `AUX_GATES`
+   row for a `tools/` gate no longer touches the orchestrator at all - it goes in
+   `tools/gate_registry.py`. Re-derive the 94 before quoting it: that figure was measured against
+   the 803-line file and is an INSTANT, not a current fact. The history below is kept because it
+   is the evidence that the ratchet works.
+   **BUILT AND PROBED, THEN REVERTED - was BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
    hoisted into the header 2026-08-26 by the close sweep: it sat 20 lines down, so the row scanned
    as OPEN and could be picked up out of order - which is how it got orphaned the first time.)
    Was #47, ORPHANED by the 2026-08-24 re-cut and re-homed here 2026-08-25 by the close
@@ -936,6 +990,74 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     **Probe both directions:** a byte-identical sibling worktree must NOT be flagged; a
     genuinely diverged `~/.claude/hooks` copy (the real 2026-07-30 defect this check exists for)
     must STILL be flagged.
+
+26. **A mutation whose VERIFIER cannot run scores SURVIVED, not HARNESS ERROR.**
+    New 2026-08-28, produced by item 7's registry cut and MEASURED by the sweep that caught it.
+    `mutation_check.run()` resolves `verify = entry[5] if len(entry) > 5 else ""`, and an empty
+    spec means "the mutated unit's own `--selftest`". When `MODE-1`'s unit became
+    `tools/gate_registry` - a pure DATA module - the harness ran `gate_registry.py --selftest`,
+    which defines its constants, ignores the argv and exits 0. The mutation came back
+    **SURVIVED (1 of 225)**, and the summary printed *"Each one names a fix whose regression test
+    does not actually bite"* - which was FALSE for that row. The test bites; the verifier was
+    unrunnable.
+    **The class, not the instance:** "the regression test does not bite" and "there is no test
+    here at all" produce a BYTE-IDENTICAL result line, inside the instrument that certifies every
+    other fix in this repo. That is the identical-error-and-success-value shape this repo hunts
+    everywhere else - `gate_ledger`'s corrupt-reads-as-empty, `hook_divergence`'s zero-population
+    and `check_file_size`'s unreadable baseline each got a two-cause split for exactly this reason.
+    **Not urgent, and the reason is worth stating:** it fails toward NOISE. A survivor is loud and
+    takes the sweep to rc=1, so nothing passed silently - it cost 46 minutes of sweep to diagnose,
+    not a wrong green.
+    Fix: after resolving the verifier, refuse to proceed unless that file actually dispatches
+    `--selftest` (or carries an enforcing registration), and report
+    `HARNESS ERROR: verifier <x> has no --selftest dispatch`.
+    **THE TRAP, and it bit twice while merely SCOPING this row.** Do NOT reach for
+    `hook_health_check.has_selftest` as the predicate: measured 2026-08-28, it returns False for
+    `install`, `tools/no_regression` and `tools/hook_divergence_report` - all registered gates
+    whose mutations are CURRENTLY CAUGHT - because it is scoped to `hooks/`. An earlier
+    hand-rolled substring probe was worse, flagging 52 of 225 with obvious false positives.
+    Derive the predicate, and prove it against a known-good control BEFORE trusting any zero.
+
+27. **`hooks/piped_gate_guard.py` is at EXACTLY 800 lines - zero headroom.**
+    New 2026-08-28, measured while item 7 was landing. Adding a five-line comment to it made it
+    812 and a NEW `file-size` offender; it took FOUR rounds of shaving prose to get back to
+    exactly 800.
+    **This is item 7's finding in a second file, and item 7's own words apply unchanged:** the
+    overage was never the finding - *"the orchestrator having only 6 lines of headroom is the
+    actual finding here, and it will bite the next person who adds a gate."* Here it is ZERO. The
+    next person to add a line of reasoning to this guard hits a red ratchet, and the cheap move at
+    that moment is to record a baseline rather than split - which is how a ratchet becomes cover.
+    `file_size_baseline.json` already calls re-recording "THE LOOPHOLE IN THIS DESIGN".
+    Fix: split it, the way `run_selftests.py` and `install.py` were split.
+    **The constraint the orchestrator did NOT have, and it decides the seam:** this is a SHIPPED
+    hook. `install.py` copies it to `~/.claude/hooks/`, where `tools/` does not exist - which is
+    also why item 7 deliberately did NOT unify its two `AUX_GATES` readers behind one helper. Any
+    sibling must be copied by `install.py` too; follow the `install`/`install_selftest` and
+    `fast_test_on_stop`/`fast_test_on_stop_selftest` pairs, and check `REQUIRED_HOOKS`.
+    **Measure the seam before cutting**, the way item 7's first half was measured: PGG rows are
+    pinned against this file, and `pre_push_gate_selftest` #SH-8's anchor already matches twice.
+
+28. **`UNBLUFF_LEDGER_OFF` is documented as set by probes, and NOTHING in the repo sets it.**
+    New 2026-08-28. `tools/gate_ledger.py:178` states *"`UNBLUFF_LEDGER_OFF` suppresses the write;
+    probes set it and nothing else does."* A repo-wide grep for the literal finds it in
+    `gate_ledger.py` ONLY - the reader at :180 and its own selftest at :253-269, which sets and
+    clears it inside a temp dir. No other file, no wrapper, no hook.
+    **Adjudicated before filing, and it is NOT a live defect.** Two isolation paths exist and only
+    one is load-bearing: a `mutation_check` scratch run is isolated BY PATH, because `LEDGER`
+    derives from `gate_ledger.py`'s own `__file__` and `COPY_TREES` carries both `tools` and
+    `docs/audits`, so the write lands in the scratch tree's copied ledger and dies with it. The
+    env var does nothing there.
+    **Where it IS load-bearing is the case #44 actually measured:** a HAND probe in the REAL tree
+    - revert a fix, run the gate red, restore - which is exactly how *"the newest `integration`
+    row read FAIL 33/34 from a MUTATED tree"* happened. There the ledger is the real one, and the
+    only thing between a probe and a poisoned ledger is the operator remembering to export it.
+    So the docstring is true and the mechanism is tested in both directions; what is missing is
+    that it is REMEMBER, not ENFORCE - tooling-discipline 7.3, the one class this repo has
+    repeatedly proven prose cannot hold, in a file whose own header says meta-review CHECK 4 READS
+    this ledger rather than reconstructing it.
+    Fix candidates, cheapest first: have `record()` refuse - and SAY SO - when the working tree is
+    content-dirty vs HEAD, which is precisely the state a hand probe creates; or give probes a
+    wrapper that sets the variable so there is nothing to remember.
 
 ## Retired, not forgotten - and why each one died
 
