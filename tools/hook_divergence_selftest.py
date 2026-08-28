@@ -58,6 +58,110 @@ from git_isolation import scrub_environ as _scrub_environ  # noqa: E402
 _scrub_environ()
 
 
+def _selftest_item24() -> list:
+    """[item 24] The LEDGER view: field shaping and the trend sentence.
+
+    These assertions existed as throwaway scratchpad probes when item 24 landed, which is
+    REMEMBER rather than ENFORCE - the split tooling-discipline 7.3 is about, and the reason a
+    warning gets skipped while a test goes red. `hook_divergence_trend.py` ships no `--selftest`
+    of its own and is classified NOT_A_GATE, so it is covered HERE, through the gate that uses
+    it, rather than by registering a second gate for a view module.
+
+    The load-bearing case is the first: a run with no population must record ABSENT plus a
+    reason, never 0. A literal 0 in a SERIES is worse than in a printout - every fresh CI checkout
+    would deposit a row reading "perfectly clean" forever, and the trend would be built out of
+    rows that mean "inapplicable".
+    """
+    import tempfile
+    fails = []
+    try:
+        import hook_divergence_trend as T
+        import gate_ledger
+    except ImportError as exc:
+        return ["item24 battery could not import its subject (%s) - a battery that cannot load "
+                "is not a battery that passed" % exc]
+
+    ST0 = {"entry_total": 0, "files_total": 0, "wired_dirs": []}
+    ST1 = {"entry_total": 16, "files_total": 28, "wired_dirs": ["/one"]}
+
+    # 1. NO POPULATION -> None plus a REASON, and the two causes stay distinguishable.
+    f = T.ledger_fields(ST0, {"surfaces": []}, 0, 0)
+    if f["entry_stale"] is not None:
+        fails.append("an empty population recorded entry_stale=%r, not None. A literal 0 in the "
+                     "SERIES makes every fresh CI checkout deposit a row reading 'perfectly "
+                     "clean' forever." % (f["entry_stale"],))
+    if f["no_count"] != "no-wiring-surface":
+        fails.append("the no-surface cause was recorded as %r" % (f["no_count"],))
+    f2 = T.ledger_fields(ST0, {"surfaces": ["/a"]}, 0, 0)
+    if f2["no_count"] != "surfaces-declared-no-entry-point":
+        fails.append("the broken-derivation cause was recorded as %r - the two causes must stay "
+                     "distinguishable in the series, not only in the printout" % (f2["no_count"],))
+    # WITHHELD must read as withheld, never as 0. The first version wrote files_withheld=0 on an
+    # unwired machine: a field reading "nothing was withheld" while meaning "everything was".
+    if f["files_stale"] is not None or not f["files_no_count"]:
+        fails.append("a withheld hooks/*.py row recorded %r/%r instead of None plus a reason"
+                     % (f["files_stale"], f.get("files_no_count")))
+
+    # 2. A REAL population records the real numbers, with both no_count fields cleared.
+    f3 = T.ledger_fields(ST1, {"surfaces": ["/a"]}, 1, 2)
+    if (f3["entry_stale"], f3["entry_total"], f3["files_stale"]) != (1, 16, 2):
+        fails.append("a real population recorded %r" % (f3,))
+    if f3["no_count"] is not None or f3["files_no_count"] is not None:
+        fails.append("a real population left a no_count reason set: %r" % (f3,))
+
+    # 3. trajectory(): every branch, asserted on CONTENT. A shape-only test would pass against a
+    #    function returning one constant sentence - which is exactly what the first version did,
+    #    because it read a DIFFERENT ledger from the one under test (item 29).
+    saved = gate_ledger.LEDGER
+    try:
+        def with_rows(rows):
+            d = tempfile.mkdtemp(prefix="unbluff-i24-")
+            gate_ledger.LEDGER = os.path.join(d, "gate_runs.json")
+            with open(gate_ledger.LEDGER, "w", encoding="utf-8") as fh:
+                json.dump(rows, fh)
+            return T.trajectory(1, {"entry_total": 16})
+
+        P = "hook_provenance"
+        U = "2026-08-01T00:00:00+00:00"
+        cases = [
+            ("no history", [], "no prior run recorded in THIS WORKTREE"),
+            ("prior no-count", [{"gate": P, "utc": U, "entry_stale": None, "entry_total": 0,
+                                 "no_count": "no-wiring-surface"}], "recorded NO COUNT"),
+            ("denominator moved", [{"gate": P, "utc": U, "entry_stale": 6, "entry_total": 11,
+                                    "no_count": None}], "DENOMINATOR"),
+            ("unchanged", [{"gate": P, "utc": U, "entry_stale": 1, "entry_total": 16,
+                            "no_count": None}], "unchanged"),
+            ("worse", [{"gate": P, "utc": U, "entry_stale": 0, "entry_total": 16,
+                        "no_count": None}], "WORSE by 1"),
+            ("better", [{"gate": P, "utc": U, "entry_stale": 4, "entry_total": 16,
+                         "no_count": None}], "better by 3"),
+        ]
+        seen = set()
+        for label, rows, needle in cases:
+            got = with_rows(rows)
+            seen.add(got)
+            if needle not in got:
+                fails.append("trajectory %s: expected %r in the sentence, got %r"
+                             % (label, needle, got))
+            # Item 17's load-bearing phrasing, asserted rather than trusted: a local record stated
+            # as a global fact is how a correct push-refusal was once written up as spurious.
+            if "THIS WORKTREE" not in got:
+                fails.append("trajectory %s does not say THIS WORKTREE: %r" % (label, got))
+            if "is stale" in got:
+                fails.append("trajectory %s says '<tier> is stale', the phrasing item 17 forbids: "
+                             "%r" % (label, got))
+        # ONE CONSTANT SENTENCE would satisfy the membership tests above if the needles happened to
+        # be substrings of it, so assert the branches actually DIVERGE. That is the shape that hid
+        # item 29 through a full probe run.
+        if len(seen) != len(cases):
+            fails.append("trajectory returned %d distinct sentences for %d different ledgers - "
+                         "the branches are not diverging, which is what a reader pointed at the "
+                         "WRONG LEDGER looks like" % (len(seen), len(cases)))
+    finally:
+        gate_ledger.LEDGER = saved
+    return fails
+
+
 def _selftest_item15() -> list:
     """[item 15] The COUNT must be derived, and every one of these probes was shown to FAIL.
 
@@ -370,6 +474,7 @@ def selftest() -> int:
             fails.append("a bare basename was silently dropped instead of counted: %r" % (r,))
 
     fails += _selftest_item15()
+    fails += _selftest_item24()
 
     for f in fails:
         print("SELFTEST FAIL:", f)

@@ -66,6 +66,14 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 from gate_registry import RECORDING_TIERS                       # noqa: E402
+# [#46] The selftest below builds a throwaway git repository. Under a git hook - which is where
+# this suite actually ships - git exports GIT_DIR, and GIT_DIR OVERRIDES `git -C <tmpdir>`, so an
+# unscrubbed fixture silently operates on the REAL repository. Scrubbed at import, the same place
+# and for the same reason as check_review_freshness.py:39, rather than at each call site: the
+# damage in #46 came from call sites that passed no env at all, and a per-call-site obligation is
+# precisely what failed.
+from git_isolation import scrub_environ as _scrub_environ        # noqa: E402
+_scrub_environ()
 
 # gate name -> why it can never be required to be fresh IN THIS WORKTREE. Checked in BOTH
 # directions by the selftest: a name here that is not a declared tier is a failure.
@@ -80,8 +88,16 @@ CANNOT_BLOCK = {
 VERIFIED, NOT_SINCE, NEVER, UNKNOWN = "VERIFIED", "NOT-SINCE", "NEVER", "UNKNOWN"
 
 
-def _git(*args):
-    """(stdout, error). Never raises - a gate that dies on a git hiccup answers nothing."""
+def _git(*args, **kw):
+    """(stdout, error). Never raises - a gate that dies on a git hiccup answers nothing.
+
+    `cwd=` targets another repository, which the selftest needs: it builds a throwaway repo with
+    a commit at a KNOWN non-UTC offset, because the assertion below cannot depend on this repo's
+    HEAD (see selftest).
+    """
+    cwd = kw.pop("cwd", None) or REPO
+    if kw:
+        return "", "unexpected keyword(s) %r" % sorted(kw)
     # TZ=UTC0 is LOAD-BEARING, not hygiene. `--date=format-local:` renders in the LOCAL zone, so
     # without it HEAD's commit date came back as "2026-08-28T03:08:30Z" for a commit made at
     # 03:08:30-04:00 - local time wearing a Z suffix, four hours early. That is a FAIL-OPEN
@@ -91,7 +107,7 @@ def _git(*args):
     env = dict(os.environ)
     env["TZ"] = "UTC0"
     try:
-        out = subprocess.run(["git", "-C", REPO] + list(args), stdout=subprocess.PIPE,
+        out = subprocess.run(["git", "-C", cwd] + list(args), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, universal_newlines=True, env=env)
     except OSError as e:
         return "", "git could not be run (%s)" % e
@@ -298,38 +314,53 @@ def selftest() -> int:
     # compares as AFTER a UTC ledger stamp it actually precedes. A fail-open, in the direction
     # that reports UNVERIFIED work as VERIFIED. Checked against git's own %cI, which carries a
     # real offset, so this cannot agree with a wrong answer the way a second local read would.
-    sha, when, err = head()
-    if err or not when:
-        print("-- tier-freshness: HEAD unreadable (%s); the UTC assertion below did NOT run"
-              % (err or "no date"))
-    else:
-        strict, serr = _git("show", "-s", "--format=%cI", "HEAD")
-        if serr or not strict:
-            print("-- tier-freshness: %%cI unavailable, UTC assertion SKIPPED (not passed)")
-        else:
-            # %cI is like 2026-08-28T03:08:30-04:00. Normalise it to UTC by hand - no dependency,
-            # and the arithmetic is the point of the check.
-            try:
-                body, sign, off = strict[:19], strict[19:20], strict[20:]
-                hh, mm = int(off.split(":")[0]), int(off.split(":")[1])
-                import datetime as _dt
-                t = _dt.datetime.strptime(body, "%Y-%m-%dT%H:%M:%S")
-                delta = _dt.timedelta(hours=hh, minutes=mm)
-                t = t + delta if sign == "-" else t - delta
-                want = t.strftime("%Y-%m-%dT%H:%M:%SZ")
-            except (ValueError, IndexError) as e:
-                want = None
-                fails.append("could not normalise %%cI %r (%s), so the UTC check did not run"
-                             % (strict, e))
-            if want and when[:19] != want[:19]:
-                fails.append("head() returned %r but HEAD in UTC is %r (from %%cI %s). "
-                             "head() is reporting LOCAL time labelled Z, which compares as "
-                             "LATER than it is and reports unverified tiers as VERIFIED."
-                             % (when, want, strict))
+    # THE UTC ASSERTION, and it is SELF-CONTAINED for a reason the sweep taught.
+    #
+    # v1 compared head() against this repo's own %cI. Mutation TF-UTC (delete `env["TZ"]="UTC0"`)
+    # SURVIVED against it, twice. The cause was not the comparison - that comparison bites fine
+    # against a real checkout, verified by hand. The cause is that mutation_check builds its
+    # scratch tree with `git init -q` and `git add -A` and NEVER COMMITS, so `git show -s HEAD`
+    # fails there, and v1 printed "the assertion did NOT run" and carried on. A SKIP SCORED AS A
+    # PASS - the exact defect this repo hunts everywhere else, inside the probe meant to catch a
+    # different one. The sweep saw it and no other signal did.
+    #
+    # So the assertion now builds its OWN repository with a commit at a KNOWN non-UTC offset.
+    # It depends on nothing outside itself, cannot be skipped by an absent HEAD, and the
+    # difference it looks for exists on every machine including a UTC one.
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="unbluff-tf-utc-") as _td:
+        # -05:00 is fixed in the fixture, so the expected UTC value is arithmetic, not a lookup.
+        stamp, want_utc = "2026-01-02T03:04:05-05:00", "2026-01-02T08:04:05Z"
+        env = dict(os.environ)
+        env.update(GIT_COMMITTER_DATE=stamp, GIT_AUTHOR_DATE=stamp,
+                   GIT_COMMITTER_NAME="t", GIT_AUTHOR_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t", GIT_AUTHOR_EMAIL="t@t")
+        ok = True
+        for cmd in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x",
+                     "--allow-empty"]):
+            r = subprocess.run(["git", "-C", _td] + cmd, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, universal_newlines=True, env=env)
+            if r.returncode != 0:
+                fails.append("the UTC assertion could not build its fixture (%s: %s). It must "
+                             "not be silently skipped - a skip scored as a pass is what let "
+                             "TF-UTC survive twice." % (" ".join(cmd), (r.stderr or "").strip()))
+                ok = False
+                break
+        if ok:
+            got, gerr = _git("show", "-s", "--format=%cd",
+                             "--date=format-local:%Y-%m-%dT%H:%M:%SZ", "HEAD", cwd=_td)
+            if gerr or not got:
+                fails.append("the UTC fixture produced no commit date (%s) - NOT a pass" % gerr)
+            elif got[:19] != want_utc[:19]:
+                fails.append("head()'s date format returned %r for a commit made at %s; in UTC "
+                             "that is %s. LOCAL time labelled Z compares as LATER than it is, so "
+                             "a tier that ran BEFORE a commit reports VERIFIED against it."
+                             % (got, stamp, want_utc))
 
     print("-- tier-freshness: %d declared tier(s), %d exempt with a written reason; "
           "detector probed BOTH ways (sees an 8-day-old tier, does not flag a fresh one); "
-          "head() asserted UTC against git's own %%cI"
+          "date format asserted UTC against a self-built commit at a known -05:00 offset"
           % (len(set(RECORDING_TIERS.values())), len(CANNOT_BLOCK)))
     if fails:
         for f in fails:

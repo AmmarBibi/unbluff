@@ -491,6 +491,14 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     strength of a READ elsewhere in the file and was already adjudicated `scrubbed` by import
     delegation, so no verdict changed. But the gate has never actually seen the write it most
     needs to see. Fix: flatten `BinOp`/`Starred` argument nodes before extracting constants.
+    **SECOND LIVE INSTANCE, 2026-08-28, and this one is a file that did NOT exist when the row was
+    written.** `tools/check_tier_freshness.py`'s selftest builds a throwaway repository with
+    `subprocess.run(["git", "-C", _td] + cmd, ...)` where `cmd` carries `init` / `add` / `commit`.
+    The gate's MUTATING population stayed at 8 and did not include it - measured after the file
+    landed. It was scrubbed anyway, at import, by the author rather than by the gate. **That is
+    the whole finding: this gate's silence is not evidence, and the row's estimate of its own blast
+    radius ("no verdict changed") was true of the tree it was written against and is not a
+    property of the gate.** Every new file that builds a fixture this way is invisible to it.
 
 12. **That gate's POPULATION is decided by a prose mention.** New 2026-08-25, same investigation.
     Membership is `has a mutating verb AND the string "--selftest" appears in the file text` - so

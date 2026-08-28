@@ -757,4 +757,44 @@ ENTRIES = [
      [('BASELINE = os.path.join(REPO, "docs", "audits", "file_size_baseline.json")',
        'BASELINE = os.path.join(REPO, "README.md")')], False,
      {"mode": "enforcing", "marker": ".py file(s) in population"}),
+
+    # ---------------------------------------------------------------------------------------
+    # [items 24 + 17, 2026-08-28] The two modules this session added. Registered HERE and not
+    # left as hand-probes, because that is item 9's entire finding and both were verified with
+    # throwaway scratchpad scripts first - which is REMEMBER, not ENFORCE.
+    #
+    # BOTH carry an explicit `verify`, and that is load-bearing rather than tidy. `verify`
+    # defaults to the MUTATED unit's own --selftest; `hook_divergence_trend.py` has none (it is
+    # a NOT_A_GATE view module) and `check_tier_freshness.py`'s assertions are what must run.
+    # Item 26 is the row for what happens otherwise: a data module handed an unrecognised argv
+    # exits 0, so the mutation scores SURVIVED rather than HARNESS ERROR - measured on MODE-1
+    # in this session's first sweep.
+    # ---------------------------------------------------------------------------------------
+    ("tools/hook_divergence_trend", "TR-ZERO", "an empty population records a literal 0 instead "
+     "of ABSENT, so every fresh CI checkout deposits a row reading 'perfectly clean' forever and "
+     "the TREND is built out of rows that mean 'inapplicable' - item 23's defect inside a series",
+     [('        fields = {"entry_stale": None, "entry_total": 0,',
+       '        fields = {"entry_stale": 0, "entry_total": 0,')], False,
+     "tools/hook_divergence_report"),
+    ("tools/hook_divergence_trend", "TR-SILENT", "no recorded history returns an empty string "
+     "instead of saying so - and an empty line reads EXACTLY like 'nothing changed', which is "
+     "the one thing a trajectory must never be unable to distinguish",
+     [('        return ("trajectory: no prior run recorded in THIS WORKTREE, so there is nothing to "\n'
+       '                "compare against yet. The next run will have one.")',
+       '        return ""')], False, "tools/hook_divergence_report"),
+    # The fail-open this session actually SHIPPED for twenty minutes, pinned so it cannot come
+    # back: --date=format-local renders LOCAL time, and labelling it Z makes a commit compare as
+    # four hours earlier than it is, so a tier that ran BEFORE it reports VERIFIED.
+    ("tools/check_tier_freshness", "TF-UTC", "HEAD's commit date is read in LOCAL time and "
+     "labelled Z, so a tier that ran BEFORE the commit compares as after it and reports VERIFIED",
+     [('    env["TZ"] = "UTC0"', '    env.pop("TZ", None)')], False,
+     "tools/check_tier_freshness"),
+    ("tools/check_tier_freshness", "TF-BLIND", "the staleness comparison is disarmed, so every "
+     "tier reports VERIFIED and the gate can never find the eight-day-old row it was built for",
+     [("        if head_when and when[:19] < head_when[:19]:", "        if False:")], False,
+     "tools/check_tier_freshness"),
+    ("tools/check_tier_freshness", "TF-EXEMPT-ALL", "the exemption swallows every tier rather "
+     "than the declared ones, so --release can never block and the gate becomes decoration",
+     [("                if s in (NOT_SINCE, NEVER, UNKNOWN) and g not in exempt]",
+       "                if False]")], False, "tools/check_tier_freshness"),
 ]
