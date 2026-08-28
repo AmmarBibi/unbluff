@@ -244,7 +244,12 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    `run_selftests.py` 655 -> 444 lines. **This item's stated goal is now met**: adding a gate no
    longer touches the orchestrator. The re-export is an `import`, not a re-assignment, so
    `check_readme_fresh.py:190`'s `from run_selftests import AUX_GATES` and
-   `run_selftests_selftest.py`'s four imports keep working untouched - verified, 20 rows. A
+   `run_selftests_selftest.py`'s four imports keep working untouched - verified at the cut, 20
+   rows. **THAT IS AN INSTANT, NOT A CURRENT FACT** - `AUX_GATES` is 21 rows since
+   `tier-freshness` registered later the same session, and it grows every time a gate is added,
+   which is the entire point of this row. The live count comes from the registry, not from here.
+   (Caught by the close consistency pass; the convention for saying so is
+   `file_size_baseline.json`'s own.) A
    re-ASSIGNMENT would have been WORSE than nothing: it leaves an `ast.Assign` named `AUX_GATES`
    whose value is an Attribute, so the source-text readers below would find the assignment, fail
    `literal_eval`, and report corruption rather than a move.
@@ -285,7 +290,8 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
    **THE SESSION'S CLOSING BASELINE - compare against THIS, not against 223 of 225.**
    Sweep 3 (07:20:59Z-08:06:28Z, **rc=0**) verified items 24 and 17: 223 of 225, 0 survivors.
-   Sweep 4 (08:18:41Z, **rc=0**) verified the coverage added for both new modules:
+   Sweep 4 (08:18:41Z-09:03:55Z, 45m14s, **rc=0**) verified the coverage added for both new
+   modules:
    **228 of 230 executed, 0 skipped, 0 unproven, EVERY executed mutation CAUGHT, 0 survivors.**
    The table grew 225 -> 230 (TR-ZERO, TR-SILENT, TF-UTC, TF-BLIND, TF-EXEMPT-ALL); the 2
    not-runnable-here are unchanged (`pre_push_gate` #30, `fast_test_on_stop` #D10c) and are proven
@@ -655,8 +661,19 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     cannot agree with a wrong answer the way a second local read would. This is section 6 again:
     the author's probes and the author's blind spot were the same object.
     **This is also the first gate registered since item 7's registry cut**, and it is the proof
-    that cut wanted: adding it touched `tools/gate_registry.py` and NOT `run_selftests.py`.
+    that cut wanted: adding it touched `tools/gate_registry.py` and NOT `run_selftests.py`
+    (verified from `964899b`'s own diffstat, which names four files and none of them is the
+    orchestrator).
     Suite 45/45 rc=0 (`readme-fresh` correctly caught the 44 -> 45 change first).
+    **DEVIATION FROM THIS ROW'S OWN WORDING, stated rather than quietly absorbed.** The row asks
+    for a comparison against *"the newest commit touching the surface that tier covers"*. What
+    shipped compares every tier against **HEAD**. That is deliberate and it is the STRICTER of the
+    two - it cannot miss a stale tier - but it is not what the row said, and the reason is this
+    repo's most repeated defect: a per-tier "surface" is a DECLARED ROSTER, and a declared roster
+    that drifts under-scopes the very check it defines. HEAD is derived and cannot drift. The cost
+    is over-reporting, which is why the default is a measurement (see the mode note above). If a
+    per-tier surface is ever wanted, it must be DERIVED - e.g. from the files each tier actually
+    reads - never listed by hand.
 
     Original statement of the problem, kept:
     Found 2026-08-26 by the close completeness pass as a **silent gap** - the plan does not
@@ -1128,9 +1145,10 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     headroom so the next person faces the identical choice with less prose left to cut. The
     ratchet's honest responses are SPLIT or deliberately RECORD; "trim the explanation" is
     neither.
-    **Consider making that mechanical rather than remembered** (7.3, REMEMBER vs ENFORCE): a file
-    that passes only by losing comment lines while its code lines are unchanged is a detectable
-    shape, and it is exactly the move this session made twice.
+    (The mechanical version of this rule is **item 32**, promoted out of this row by the close
+    completeness pass: it was written here as "consider making that mechanical", which is
+    optional-forever framing for work that would DIE when this row closes - this row closes by
+    splitting one file, and the detector is general.)
     **`piped_gate_guard.py` specifically**: adding a five-line comment made it 812 and a NEW
     `file-size` offender; it took FOUR rounds of shaving to get back to exactly 800.
     **This is item 7's finding in a second file, and item 7's own words apply unchanged:** the
@@ -1235,6 +1253,92 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     Until then `tier-freshness` reports it every run, which is strictly better than the eight days
     of silence that preceded it.
 
+32. **Nothing detects a file that passes the 800-line ratchet by SHAVING COMMENTS.**
+    New 2026-08-28, promoted out of item 27 by the close completeness pass - it was written there
+    as "consider making that mechanical", which is optional-forever framing for work that would
+    have died when item 27 closed. Item 27 closes by splitting ONE file; this is the general rule.
+    **The shape is detectable and this session performed it twice**: a file goes over the limit,
+    and the next commit brings it back under with its CODE lines unchanged and only COMMENT lines
+    removed. That is not a fix - it keeps the gate green while deleting the reasoning the gate
+    exists to protect, and it leaves the file at zero headroom so the next person faces the same
+    choice with less prose left to cut. `file_size_baseline.json` already names the sibling move,
+    re-recording a baseline, "THE LOOPHOLE IN THIS DESIGN"; this is the same loophole in different
+    clothes and nothing names it.
+    Fix: at the `file-size` gate, compare a file's CODE-line count and COMMENT-line count against
+    the previous commit. Flag a file whose comment lines fell while its code lines did not, when
+    it is at or near the limit. Report it - do not block: a legitimate comment cleanup exists and
+    a guard that fires on correct work gets switched off.
+    **Probe both directions**, and note the harder one: a genuine prose cleanup with no size
+    pressure must NOT fire, and a shave performed across two commits rather than one must still
+    be visible. Measure the false-alarm rate against this repo's real history before wiring it -
+    the standing bar is that a guard firing on correct work is worse than no guard.
+
+33. **Three GATE-LAYER modules shipped 2026-08-28 with the author as their only reviewer.**
+    Found by the close completeness pass reading `review-freshness`'s own output, which names all
+    three: `tools/gate_registry.py`, `tools/check_tier_freshness.py`, `tools/hook_divergence_trend.py`
+    - *"never adversarially reviewed"*.
+    **Why this is not covered by the existing `install_selftest.py` note.** That note says the
+    gate can keep asking, and for a test file that is a reasonable stance. These three are not
+    test files. `gate_registry.py` is GOVERNANCE - it decides what counts as a gate, which mode
+    each runs in, and which tiers must record. `check_tier_freshness.py` is GATE LOGIC with an
+    exemption roster. tooling-discipline section 6 names exactly these categories as REQUIRING an
+    independent pass, and its reason is structural rather than a matter of care: the author's
+    probe set and the author's blind spot are the same object.
+    **This session produced two live demonstrations of that in its own new code**, which is the
+    argument for the row: the `TF-UTC` assertion passed while being decorative (a skip scored as a
+    pass), and `head()` shipped a fail-open that its own selftest could not see. Both were caught
+    by the mutation sweep and by reading real output - not by the author's reasoning, which had
+    twice concluded the code was right.
+    Scope it by RISK as section 6 says, not by size: `gate_registry.py` and
+    `check_tier_freshness.py` first; `hook_divergence_trend.py` is view code and can follow.
+    Do it BEFORE reporting these units as sound. They are currently reported as DONE in items 7,
+    17 and 24 on the strength of gates that the same author wrote.
+
+34. **The false-alarm corpus covers 1 of 45 units, and the suite prints that every run to nobody.**
+    Found by the close completeness pass: `-- coverage: 1 of 45 units have a corpus (2%);
+    44 uncovered` appears in every suite run and has NO home anywhere in this plan (grep: zero
+    hits for the phrase).
+    **Why it is material and not just a metric.** This repo's most-repeated operational rule is
+    that **a guard which fires on correct work gets switched off** - four measured instances in
+    two sessions, and it is the reason `tier-freshness` defaults to a measurement and `piped-gate`
+    was scoped the way it was. The corpus is the only mechanism that MEASURES that rule rather
+    than asserting it. At 2% coverage, the false-alarm claim for 44 of 45 units rests on nothing
+    but the absence of complaints, which is exactly the "silence is not evidence" shape audited
+    elsewhere in this plan.
+    Not a demand for 45 corpora: most units are not user-facing guards and cannot produce a false
+    alarm. Fix: DERIVE which units can fire at a user (the wired PreToolUse/Stop hooks), report
+    coverage against THAT denominator instead of all 45, and schedule corpora for the ones that
+    can. Then the 2% either becomes a real number or is explained by a derived exclusion.
+    Interacts with item 9 (five guard families hand-probed but unregistered as mutation entries) -
+    same shape, different instrument: 9 is about whether a defect DIES, this is about whether a
+    correct action stays quiet.
+
+35. **An assertion that prints "did not run" and returns PASS. Fixed as an instance; no mechanism
+    exists.** New 2026-08-28, from the close meta-review's CHECK 2.
+    MEASURED, in code written this same session: `check_tier_freshness`'s UTC assertion compared
+    `head()` against the repo's own `%cI`. In `mutation_check`'s scratch tree - which runs
+    `git init -q` and `git add -A` and **never commits** - `git show -s HEAD` fails, so the
+    assertion printed *"the UTC assertion below did NOT run"* and the selftest returned 0.
+    **Mutation `TF-UTC` SURVIVED against it. Twice.** The comparison itself was correct; it was
+    never reached, and nothing distinguished "checked and passed" from "could not check".
+    **The instance is fixed** - the assertion now builds its own repository with a commit at a
+    known `-05:00` offset and depends on nothing outside itself. **The CLASS is not.** Nothing in
+    this repo detects a selftest branch that reports a skip and still returns 0, and the same
+    shape is available to every assertion that reads a file, shells out, or needs a fixture. This
+    repo has already paid for it elsewhere - `gate_ledger.read()` was given three outcomes instead
+    of two for exactly this reason, and `check_file_size` has FS-CANNOTRUN pinning it.
+    **Why it matters more than its size:** a skip scored as a pass is invisible to every signal
+    except a mutation aimed at the code the assertion was supposed to protect. The suite was green,
+    the selftest was green, and only the sweep disagreed. That is the same evidential shape as item
+    22's PG1/PG3 disarm, in a new place.
+    Fix, and probe both directions: have the selftest harness treat a branch that emits a
+    skip/inconclusive marker as NOT PASSED unless it is explicitly adjudicated, the way
+    `selftest_budget` already distinguishes INCONCLUSIVE from ok. A skipped assertion must be
+    reported and must not count toward a green. Note the trap: this must not fire on
+    `SKIPPED (posix only ...)`, which is an ADJUDICATED skip the mutation harness already reports
+    correctly and separately - the distinction is whether the skip was declared in advance or
+    discovered at runtime.
+
 ## Retired, not forgotten - and why each one died
 
 Listed so the retirement is a decision on the record rather than a quiet omission. Every item is
@@ -1336,12 +1440,22 @@ real defect that nothing else did.
    true when written. No mutable count in a title or heading; counts live in the body, dated,
    **next to the commit they were taken at** - a denominator naming `HEAD` is one that will be
    quietly false.
-4. **Is this surface actually LIVE?** A session went into `piped_gate_guard`, which is **NOT
-   wired on this machine** and has never fired. Verified again 2026-08-24T21:20:34Z: zero
-   occurrences in `settings.json`. This wording was corrupted to "wired but had never fired"
-   during the re-cut and caught by the same session's source-coverage pass - the check's whole
-   value is the word NOT, and I deleted it while copying the check that exists to catch exactly
-   this. The 13%-of-the-branch measurement above is this same check applied to a whole release.
+4. **Is this surface actually LIVE?** A session went into `piped_gate_guard` while it was **NOT
+   wired on this machine** and had never fired - verified 2026-08-24T21:20:34Z, zero occurrences
+   in `settings.json`. The wording was then corrupted to "wired but had never fired" during the
+   re-cut and caught by that session's source-coverage pass: the check's whole value was the word
+   NOT, and I deleted it while copying the check that exists to catch exactly this.
+   **[2026-08-28] THE EXAMPLE IS NOW HISTORICAL, AND LEAVING IT IN THE PRESENT TENSE MADE THIS
+   CHECK CARRY A FALSE PREMISE.** Item 5 WIRED `piped_gate_guard` on 2026-08-25 (`unbluff:piped-gate`,
+   PreToolUse, matcher `Bash|PowerShell`); it is in `settings.json` today and it **fired twice on
+   me during this session**, blocking two real commands that would have eaten a gate's exit
+   status. So the check was still being read at every change while asserting the opposite of the
+   truth about its own example - the same defect one level up, found by the close source-coverage
+   pass reading this file as an AUTHORITY rather than as a to-do list.
+   The CHECK is unchanged and still correct; only its example needed a date. Ask it of the
+   surface in front of you, and re-derive liveness rather than trusting any sentence here -
+   including this one. The 13%-of-the-branch measurement above is this same check applied to a
+   whole release.
 5. **Never edit while a gate is in flight.** Broken three times in one day, three sweeps
    discarded.
 6. **A probe that has not been shown to FAIL is not a probe.** Four probes were invalid on first
