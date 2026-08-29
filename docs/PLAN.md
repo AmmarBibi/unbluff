@@ -628,7 +628,40 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     and the trend, not the level, is what this row is watching.
 
 17. **Nothing flags a gate TIER whose last run predates the code it covers.**
-    **DONE 2026-08-28** - `tools/check_tier_freshness.py`, registered as `tier-freshness`.
+    **REVERTED 2026-08-29. `tools/check_tier_freshness.py` is DELETED, not fixed.** The row below
+    describes what was built on 2026-08-28 and is kept because the EVIDENCE is worth more than the
+    gate was.
+    **Why deleted rather than repaired, and this is the whole judgment:** the independent review
+    (item 33, run `wf_a71fb7d3-79d`, 58 agents, 52 findings, 52 adjudicated, 46 confirmed) put
+    **29 of the 52 findings in this one file** - more than half, in a gate built the previous day.
+    CI was RED on it. And it was invoked by NOTHING: registered `("--selftest",)`, so its
+    measurement and `--release` modes never ran outside a hand invocation. A gate nobody runs,
+    carrying the majority of the defects, failing CI, is not a gate - it is a liability with a
+    docstring. The owner's standing preference is explicit: **removing beats an elaborate fix.**
+    Removed with it: the `AUX_GATES` row, the `SELFTEST_IS_THE_GATE` adjudication, mutations
+    TF-UTC / TF-BLIND / TF-EXEMPT-ALL, and the README roster line. Suite 44/44 rc=0 after.
+    **THE THREE FINDINGS WORTH KEEPING, because they are about the REPO and not about this file:**
+    - **A blocking gate can fail OPEN from DATA, where no mutation can reach it.** `--release`
+      returned 0 and printed "RELEASE OK" whenever git could not answer for HEAD (no `.git`, a repo
+      with no commit, `dubious ownership`, git absent from a hook's PATH). Every tier flipped to
+      VERIFIED, including the eight-day-old one. Structurally identical to mutation `TF-BLIND`,
+      which the sweep CATCHES - the difference is that TF-BLIND is an EDIT and this was reachable
+      from input, so the mutation harness could never have found it. Six of six lenses found it.
+      **This is the same defect the repo already recorded as HIGH-7/D4 in `check_review_freshness`**,
+      one function apart, and it was rebuilt from scratch in a new file.
+    - **"VERIFIED" meant "ran recently", pass or fail.** A tier whose newest recorded run was
+      `FAIL` reported VERIFIED and did not block. The `result` field was recorded, printed, and
+      never consulted. Reproduced here in one call.
+    - **A parameter that is accepted, defaulted and never read still passes a selftest that
+      exercises it.** `evaluate()`'s `exempt` had ZERO reads outside its own defaulting line while
+      five selftest call sites passed it as though it worked.
+    Item 17's underlying question - "has this worktree verified tier X since the code changed?" -
+    is still worth asking, and it is answerable in one command against `gate_runs.json` without a
+    gate. The meta-review's CHECK 4 already instructs exactly that, and on 2026-08-28 that manual
+    read is what caught `integration` a day stale (re-run: 34/34). **If this is ever rebuilt, the
+    three findings above are its acceptance criteria.**
+
+    What was built on 2026-08-28, kept for the evidence:
     **IT FOUND A REAL ONE ON ITS FIRST RUN, and that is the argument for it:**
     `false_alarm_scorer`'s newest row was **EIGHT DAYS old** (2026-08-20) while every gate was
     green and `unrecorded_tiers()` reported it "still recording". Those are two different facts:
@@ -1274,6 +1307,27 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     the standing bar is that a guard firing on correct work is worse than no guard.
 
 33. **Three GATE-LAYER modules shipped 2026-08-28 with the author as their only reviewer.**
+    **RUN 2026-08-29 - `wf_a71fb7d3-79d`. 58 agents, 52 findings, 52 adjudicated, 0 dropped,
+    46 CONFIRMED (10 HIGH / 21 MEDIUM / 15 LOW), ~17 distinct defects.** Tree-guard clean: 58
+    agents, zero repo writes, SHA identical to the snapshot.
+    Coverage was reconciled against `journal.jsonl` rather than trusted: the journal held a
+    SEVENTH review agent whose "2 findings" were the strings `"["` and `"]"` - a schema-mangled
+    EMPTY result that was retried. No information lost, and the returned `total` was right; but
+    the harness's own reconciliation block reported `dropped: 0` by comparing against a `produced`
+    dict the retry had overwritten, so **it would not have noticed a real loss there.** Worth
+    knowing before the next run.
+    **Findings by file: `check_tier_freshness.py` 29, `gate_registry.py` 12, `run_selftests.py` 4,
+    `piped_gate_guard.py` 2, `hook_divergence_trend.py` 2, the two selftests 3.**
+    **RESOLVED BY DELETION for the 29** - see item 17; the file is gone.
+    **STILL OPEN: the 12 in `gate_registry.py` and the handful elsewhere.** They are internal
+    rigor, not breakage - `RECORDING_TIERS` and `NOT_A_GATE` are checked in ONE direction while
+    their own comments claim BOTH; `SELFTEST_IS_THE_GATE` reasons are never checked for content;
+    `MACHINE_STATE` could in principle exclude every gate from the `--code-only` verdict and its
+    "disarm probe" re-implements the routing instead of exercising it. None of these misfires in
+    normal use and none is user-facing. They are the next honest piece of work on this file.
+    **The finding that outranks all of them:** section 6 is now measured THREE ways in this repo -
+    the sweep caught a decorative probe, CI caught a second one the sweep could not, and an
+    independent review found 46 confirmed defects in code its author had called sound.
     Found by the close completeness pass reading `review-freshness`'s own output, which names all
     three: `tools/gate_registry.py`, `tools/check_tier_freshness.py`, `tools/hook_divergence_trend.py`
     - *"never adversarially reviewed"*.

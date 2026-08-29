@@ -759,13 +759,13 @@ ENTRIES = [
      {"mode": "enforcing", "marker": ".py file(s) in population"}),
 
     # ---------------------------------------------------------------------------------------
-    # [items 24 + 17, 2026-08-28] The two modules this session added. Registered HERE and not
-    # left as hand-probes, because that is item 9's entire finding and both were verified with
-    # throwaway scratchpad scripts first - which is REMEMBER, not ENFORCE.
+    # [item 24, 2026-08-28] Registered HERE and not left as hand-probes, because that is item 9's
+    # entire finding and this module was verified with throwaway scratchpad scripts first - which
+    # is REMEMBER, not ENFORCE.
     #
-    # BOTH carry an explicit `verify`, and that is load-bearing rather than tidy. `verify`
-    # defaults to the MUTATED unit's own --selftest; `hook_divergence_trend.py` has none (it is
-    # a NOT_A_GATE view module) and `check_tier_freshness.py`'s assertions are what must run.
+    # It carries an explicit `verify`, and that is load-bearing rather than tidy. `verify`
+    # defaults to the MUTATED unit's own --selftest, and `hook_divergence_trend.py` has none
+    # (it is a NOT_A_GATE view module).
     # Item 26 is the row for what happens otherwise: a data module handed an unrecognised argv
     # exits 0, so the mutation scores SURVIVED rather than HARNESS ERROR - measured on MODE-1
     # in this session's first sweep.
@@ -782,19 +782,8 @@ ENTRIES = [
      [('        return ("trajectory: no prior run recorded in THIS WORKTREE, so there is nothing to "\n'
        '                "compare against yet. The next run will have one.")',
        '        return ""')], False, "tools/hook_divergence_report"),
-    # The fail-open this session actually SHIPPED for twenty minutes, pinned so it cannot come
-    # back: --date=format-local renders LOCAL time, and labelling it Z makes a commit compare as
-    # four hours earlier than it is, so a tier that ran BEFORE it reports VERIFIED.
-    ("tools/check_tier_freshness", "TF-UTC", "HEAD's commit date is read in LOCAL time and "
-     "labelled Z, so a tier that ran BEFORE the commit compares as after it and reports VERIFIED",
-     [('    env["TZ"] = "UTC0"', '    env.pop("TZ", None)')], False,
-     "tools/check_tier_freshness"),
-    ("tools/check_tier_freshness", "TF-BLIND", "the staleness comparison is disarmed, so every "
-     "tier reports VERIFIED and the gate can never find the eight-day-old row it was built for",
-     [("        if head_when and when[:19] < head_when[:19]:", "        if False:")], False,
-     "tools/check_tier_freshness"),
-    ("tools/check_tier_freshness", "TF-EXEMPT-ALL", "the exemption swallows every tier rather "
-     "than the declared ones, so --release can never block and the gate becomes decoration",
-     [("                if s in (NOT_SINCE, NEVER, UNKNOWN) and g not in exempt]",
-       "                if False]")], False, "tools/check_tier_freshness"),
+    # [2026-08-29] TF-UTC / TF-BLIND / TF-EXEMPT-ALL removed with their subject. See the plan's
+    # item 17 row: check_tier_freshness.py was DELETED, not fixed. It was a gate nothing invoked,
+    # it carried 29 of the 52 findings from the independent review, and CI was red on TF-UTC
+    # SURVIVING - a mutation that is decorative on any UTC machine, which every CI runner is.
 ]
