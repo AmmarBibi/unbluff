@@ -1,5 +1,11 @@
 # Consistency audit - 2026-08-28
 
+> **[SUPERSEDED IN PART, 2026-08-29]** This artifact describes `tools/check_tier_freshness.py`
+> as shipped. That file was **DELETED** the next day - it was invoked by nothing, it carried 29
+> of the 52 findings from the independent review (`wf_a71fb7d3-79d`), and CI was red on it.
+> See `docs/PLAN.md` item 17 for the reversal and the three findings kept from it. Everything
+> else here stands as written, as the record of what was true on 2026-08-28.
+
 **Scope:** what THIS session authored - commits `34f82eb..f10a242` (items 7, 24, 17, the coverage
 work, and the closing baseline). Plan rows 7, 8, 11, 17, 24, 26-31 and the "Known-stale by design"
 section. Docstrings only for `.py`.

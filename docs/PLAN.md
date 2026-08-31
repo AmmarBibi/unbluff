@@ -245,9 +245,11 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    longer touches the orchestrator. The re-export is an `import`, not a re-assignment, so
    `check_readme_fresh.py:190`'s `from run_selftests import AUX_GATES` and
    `run_selftests_selftest.py`'s four imports keep working untouched - verified at the cut, 20
-   rows. **THAT IS AN INSTANT, NOT A CURRENT FACT** - `AUX_GATES` is 21 rows since
-   `tier-freshness` registered later the same session, and it grows every time a gate is added,
-   which is the entire point of this row. The live count comes from the registry, not from here.
+   rows. **THAT IS AN INSTANT, NOT A CURRENT FACT** - it went to 21 when `tier-freshness`
+   registered later that session and back to 20 when that gate was DELETED on 2026-08-29 (item 17).
+   It moves whenever a gate is added or removed, which is the entire point of this row, and this
+   sentence has now been wrong twice in two days. **The live count comes from the registry, never
+   from here** - `python -c "import sys;sys.path.insert(0,'tools');import gate_registry as g;print(len(g.AUX_GATES))"`.
    (Caught by the close consistency pass; the convention for saying so is
    `file_size_baseline.json`'s own.) A
    re-ASSIGNMENT would have been WORSE than nothing: it leaves an `ast.Assign` named `AUX_GATES`
@@ -507,8 +509,10 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     strength of a READ elsewhere in the file and was already adjudicated `scrubbed` by import
     delegation, so no verdict changed. But the gate has never actually seen the write it most
     needs to see. Fix: flatten `BinOp`/`Starred` argument nodes before extracting constants.
-    **SECOND LIVE INSTANCE, 2026-08-28, and this one is a file that did NOT exist when the row was
-    written.** `tools/check_tier_freshness.py`'s selftest builds a throwaway repository with
+    **SECOND LIVE INSTANCE, 2026-08-28 - recorded here because the EVIDENCE outlives its subject:
+    the file was deleted on 2026-08-29 (item 17), so this instance is no longer reproducible and
+    the finding is not reproducible FROM it. It still happened.**
+    `tools/check_tier_freshness.py`'s selftest built a throwaway repository with
     `subprocess.run(["git", "-C", _td] + cmd, ...)` where `cmd` carries `init` / `add` / `commit`.
     The gate's MUTATING population stayed at 8 and did not include it - measured after the file
     landed. It was scrubbed anyway, at import, by the author rather than by the gate. **That is
@@ -1283,8 +1287,12 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     it is to make `RECORDING_TIERS` say WHICH MODE is expected to record, so a tier that can only
     record in a mode the suite never runs is visible as such rather than looking identical to a
     tier that simply stopped.
-    Until then `tier-freshness` reports it every run, which is strictly better than the eight days
-    of silence that preceded it.
+    **[2026-08-29] NOTHING REPORTS IT ANY MORE.** This row previously ended "until then
+    `tier-freshness` reports it every run", and that gate was DELETED (item 17), so
+    `false_alarm_scorer` is back to the silence that hid it for eight days. That is an accepted
+    consequence of the deletion, not an oversight: the gate cost more than the reporting was
+    worth. The finding is only visible now by reading `docs/audits/gate_runs.json` directly, which
+    is what the meta-review's CHECK 4 already instructs.
 
 32. **Nothing detects a file that passes the 800-line ratchet by SHAVING COMMENTS.**
     New 2026-08-28, promoted out of item 27 by the close completeness pass - it was written there
@@ -1343,10 +1351,9 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     pass), and `head()` shipped a fail-open that its own selftest could not see. Both were caught
     by the mutation sweep and by reading real output - not by the author's reasoning, which had
     twice concluded the code was right.
-    Scope it by RISK as section 6 says, not by size: `gate_registry.py` and
-    `check_tier_freshness.py` first; `hook_divergence_trend.py` is view code and can follow.
-    Do it BEFORE reporting these units as sound. They are currently reported as DONE in items 7,
-    17 and 24 on the strength of gates that the same author wrote.
+    **[2026-08-29] DONE - and `check_tier_freshness.py` was deleted rather than reviewed further.**
+    The remaining unreviewed-by-anyone-else module is `gate_registry.py` (12 confirmed findings,
+    all internal rigor); `hook_divergence_trend.py` is view code with 2.
 
 34. **The false-alarm corpus covers 1 of 45 units, and the suite prints that every run to nobody.**
     Found by the close completeness pass: `-- coverage: 1 of 45 units have a corpus (2%);
@@ -1354,8 +1361,9 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     hits for the phrase).
     **Why it is material and not just a metric.** This repo's most-repeated operational rule is
     that **a guard which fires on correct work gets switched off** - four measured instances in
-    two sessions, and it is the reason `tier-freshness` defaults to a measurement and `piped-gate`
-    was scoped the way it was. The corpus is the only mechanism that MEASURES that rule rather
+    two sessions, and it is why `piped-gate` was scoped the way it was. (It was also why
+    `tier-freshness` defaulted to a measurement, before that gate was deleted on 2026-08-29 -
+    item 17.) The corpus is the only mechanism that MEASURES that rule rather
     than asserting it. At 2% coverage, the false-alarm claim for 44 of 45 units rests on nothing
     but the absence of complaints, which is exactly the "silence is not evidence" shape audited
     elsewhere in this plan.
@@ -1458,11 +1466,16 @@ than by a polluting write. **Recorded here rather than papered over by a 30-minu
 whose only purpose would be to make a row look right.** If CHECK 4 is ever automated, it must
 read CI for this tier.
 
-**[2026-08-28] The hand-maintained half of this section is now a GATE.** It used to end "Every
-other tier is current as of 2026-08-24T21:23Z" - a retyped claim about seven tiers, which is the
-shape that rots silently and is exactly what item 15 was about one level down. `tier-freshness`
-(item 17) now derives it every run, and on its first run it found that `false_alarm_scorer` had
-been EIGHT DAYS stale while every gate was green (item 31). Ask the gate, do not read a date here.
+**[2026-08-28, CORRECTED 2026-08-29] Do not retype a freshness date here - DERIVE it.** This
+section used to end "Every other tier is current as of 2026-08-24T21:23Z", a retyped claim about
+seven tiers, which is the shape that rots silently and is exactly what item 15 was about one level
+down. On 2026-08-28 that was replaced by "`tier-freshness` now derives it every run" - and **that
+sentence was false within a day**, because `tier-freshness` was deleted on 2026-08-29 (item 17).
+Its one real find survives: `false_alarm_scorer` had been EIGHT DAYS stale while every gate was
+green (item 31).
+**So the instruction is now the durable one rather than a pointer at a gate that may not exist:**
+READ `docs/audits/gate_runs.json` - it is the record, it is per-worktree, and the meta-review's
+CHECK 4 already instructs exactly this. Do not read, and do not write, a date in this file.
 `mutation_sweep` stays exempt for the reason above, and its status is still printed - and note the
 premise is about where the sweep CAN run, not that a local row is impossible: it was run locally
 four times on 2026-08-28, so the local row is current today and will go stale again the moment the

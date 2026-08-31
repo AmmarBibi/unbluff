@@ -1,5 +1,11 @@
 # Meta-review - 2026-08-28
 
+> **[SUPERSEDED IN PART, 2026-08-29]** This artifact describes `tools/check_tier_freshness.py`
+> as shipped. That file was **DELETED** the next day - it was invoked by nothing, it carried 29
+> of the 52 findings from the independent review (`wf_a71fb7d3-79d`), and CI was red on it.
+> See `docs/PLAN.md` item 17 for the reversal and the three findings kept from it. Everything
+> else here stands as written, as the record of what was true on 2026-08-28.
+
 **Subject:** commits `34f82eb..f10a242` - items 7 (registry cut), 24 (trajectory), 17
 (tier-freshness), plus the coverage work.
 **Plan:** 32 items (0-31) at entry, **36 (0-35) at exit**, contiguous by parse.
