@@ -564,6 +564,7 @@ def selftest() -> int:
     return _run()
 
 
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
@@ -619,6 +620,14 @@ def main() -> int:
     else:
         print("  BUILT IS NOT LIVE: %d of %d entry points stale, %s"
               % (n_entry, st["entry_total"], files_row))
+    # [item 24] THE TRAJECTORY, DERIVED - the half that makes recording worth doing. Read BEFORE
+    # this run records, or the "previous" row is this one. See hook_divergence_trend.py.
+    try:
+        import hook_divergence_trend
+        print("      %s" % hook_divergence_trend.trajectory(n_entry, st))
+    except Exception as _e:                        # a missing trend view must SAY so, not vanish
+        print("      trajectory: UNAVAILABLE (%s) - no comparison was made, which is NOT the "
+              "same as no change." % type(_e).__name__)
     for label, key in (("stale", "entry_stale"), ("ABSENT live", "entry_absent"),
                        ("UNREADABLE", "entry_unreadable")):
         if st[key]:
@@ -643,6 +652,25 @@ def main() -> int:
     # file, so there is one artifact to read.
     r["staleness"] = st
 
+    # [item 24 2026-08-28] The count now has a HISTORY, derived like the count is. Field shaping
+    # and the trend sentence live in hook_divergence_trend.py - this file hit the 800-line ratchet
+    # twice while they were being written, and trimming a third time is how a ratchet becomes
+    # cover. THE record CALL STAYS HERE ON PURPOSE: unrecorded_tiers() resolves RECORDING_TIERS by
+    # walking THIS file's AST for it, so moving the call would point the tier row at a helper and
+    # describe the wrong file as the tier.
+    #
+    # The plan asserted "hook-provenance already calls into that path". IT DID NOT - this file had
+    # no gate_ledger call and was in no RECORDING_TIERS row, so nothing here was ever recorded
+    # under its own name. Checked before designing around it, per that row's confirm-don't-assume.
+    def _record(result: str) -> None:
+        try:
+            import gate_ledger
+            import hook_divergence_trend
+            gate_ledger.record("hook_provenance", result,
+                               **hook_divergence_trend.ledger_fields(st, r, n_entry, n_files))
+        except Exception:                          # never let bookkeeping fail a gate
+            pass
+
     # [MODE-CONTROL follow-up] A zero denominator has TWO causes and they are not the same fact.
     # No surface at all = this machine has no wiring, so the gate is inapplicable (a fresh CI
     # checkout). Surfaces that exist but declare no hook command = something we READ produced
@@ -658,6 +686,7 @@ def main() -> int:
               "denominator of\nzero from surfaces that exist is a broken parse, not a clean "
               "machine - the surfaces were:\n   %s"
               % (len(r["surfaces"]), "\n   ".join(r["surfaces"])))
+        _record("FAIL")
         return 1
 
     for f in r["foreign"]:
@@ -689,8 +718,13 @@ def main() -> int:
         print("\nFAIL: %d wired reference(s) are not this repo's copy. A copy outside the repo "
               "does not\nshow up in `git status`, so it can drift for weeks unnoticed - that is "
               "how an outdated\nfail-open gate came to run every push on this machine." % bad)
+        _record("FAIL")
         return 1
     print("\nOK: every wired reference to our hooks resolves to this repo.")
+    # EVERY exit after the count records. A recorder wired to only the happy path builds a series
+    # made of successes, which is the one shape that cannot show a trajectory getting worse - and
+    # this gate's subject is precisely a number that grows as the branch pulls ahead.
+    _record("PASS")
     return 0
 
 

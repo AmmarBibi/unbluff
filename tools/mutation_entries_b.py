@@ -445,10 +445,28 @@ ENTRIES = [
     # independent review reproduced it on a clean clone in ONE TOKEN with the suite still
     # reporting green, because the sweep verifies every mutation via `<unit> --selftest`, which
     # is identical whichever mode the row is registered in. MODE-1 is that exact one-token edit.
-    ("./run_selftests", "MODE-1", "an ENFORCING gate is re-registered ('--selftest',), so it "
+    # [ITEM 7 / REGISTRY CUT 2026-08-28] The unit moved `./run_selftests` -> `tools/gate_registry`
+    # because the ANCHOR moved: it is an AUX_GATES row, and AUX_GATES was cut out of the
+    # orchestrator into its own module. The mutation is unchanged and still pins the same defect
+    # in the same text; only its address changed. This was measured BEFORE the cut rather than
+    # discovered by a red anchors gate afterwards - MODE-1 was the one pinned anchor of 225 lying
+    # inside the moved region, and the plan's trap map did not name it. Its two siblings below
+    # stay on `./run_selftests`: their anchors are in functions that did not move.
+    # The sixth field is LOAD-BEARING here and was not needed before the cut. `verify` defaults to
+    # the MUTATED unit's own --selftest, which was run_selftests.py and is now gate_registry.py -
+    # a pure DATA module with no dispatch at all. MEASURED 2026-08-28 in the post-cut sweep: the
+    # mutation came back SURVIVED (1 of 225), not HARNESS ERROR, because running a data module
+    # with an unrecognised argv defines its constants and exits 0. A verifier that CANNOT FAIL
+    # scores identically to one whose test does not bite. The registry holds the defect; the
+    # detector that catches it (enforcing_mode_gaps, via run_selftests_selftest) lives in the
+    # orchestrator, so the two must be named separately - the TWIN shape run()'s docstring
+    # describes. See the plan row for the general fix: the harness should refuse a verifier with
+    # no --selftest dispatch instead of reporting SURVIVED.
+    ("tools/gate_registry", "MODE-1", "an ENFORCING gate is re-registered ('--selftest',), so it "
      "checks its own logic and applies to nothing - the 2026-08-14 defect, one token",
      [('    ("file-size", ("tools", "check_file_size.py"), ()),',
-       '    ("file-size", ("tools", "check_file_size.py"), ("--selftest",)),')], False),
+       '    ("file-size", ("tools", "check_file_size.py"), ("--selftest",)),')], False,
+     "./run_selftests"),
     # ...and the detector itself. MODE-1 dies against the LIVE table; MODE-2 dies against the
     # synthetic tree, so deleting either assertion leaves the other exposed. Without this, the
     # control could be disarmed by making its can-fail test answer "no" for everything - which
@@ -739,4 +757,33 @@ ENTRIES = [
      [('BASELINE = os.path.join(REPO, "docs", "audits", "file_size_baseline.json")',
        'BASELINE = os.path.join(REPO, "README.md")')], False,
      {"mode": "enforcing", "marker": ".py file(s) in population"}),
+
+    # ---------------------------------------------------------------------------------------
+    # [item 24, 2026-08-28] Registered HERE and not left as hand-probes, because that is item 9's
+    # entire finding and this module was verified with throwaway scratchpad scripts first - which
+    # is REMEMBER, not ENFORCE.
+    #
+    # It carries an explicit `verify`, and that is load-bearing rather than tidy. `verify`
+    # defaults to the MUTATED unit's own --selftest, and `hook_divergence_trend.py` has none
+    # (it is a NOT_A_GATE view module).
+    # Item 26 is the row for what happens otherwise: a data module handed an unrecognised argv
+    # exits 0, so the mutation scores SURVIVED rather than HARNESS ERROR - measured on MODE-1
+    # in this session's first sweep.
+    # ---------------------------------------------------------------------------------------
+    ("tools/hook_divergence_trend", "TR-ZERO", "an empty population records a literal 0 instead "
+     "of ABSENT, so every fresh CI checkout deposits a row reading 'perfectly clean' forever and "
+     "the TREND is built out of rows that mean 'inapplicable' - item 23's defect inside a series",
+     [('        fields = {"entry_stale": None, "entry_total": 0,',
+       '        fields = {"entry_stale": 0, "entry_total": 0,')], False,
+     "tools/hook_divergence_report"),
+    ("tools/hook_divergence_trend", "TR-SILENT", "no recorded history returns an empty string "
+     "instead of saying so - and an empty line reads EXACTLY like 'nothing changed', which is "
+     "the one thing a trajectory must never be unable to distinguish",
+     [('        return ("trajectory: no prior run recorded in THIS WORKTREE, so there is nothing to "\n'
+       '                "compare against yet. The next run will have one.")',
+       '        return ""')], False, "tools/hook_divergence_report"),
+    # [2026-08-29] TF-UTC / TF-BLIND / TF-EXEMPT-ALL removed with their subject. See the plan's
+    # item 17 row: check_tier_freshness.py was DELETED, not fixed. It was a gate nothing invoked,
+    # it carried 29 of the 52 findings from the independent review, and CI was red on TF-UTC
+    # SURVIVING - a mutation that is decorative on any UTC machine, which every CI runner is.
 ]

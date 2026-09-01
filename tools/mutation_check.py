@@ -153,14 +153,23 @@ def verify_spec(verify) -> tuple:
 
 
 def aux_gates(root: str) -> tuple:
-    """(rows, error) - run_selftests' AUX_GATES, read from `root` with NO import side effects.
+    """(rows, error) - the gate registry's AUX_GATES, read from `root` with NO import side effects.
 
-    `ast.literal_eval` rather than `import run_selftests`: importing it executes a module that
-    inserts hooks/ on sys.path and pulls in the hook layer, inside a harness whose entire job is
-    to run OTHER programs in a controlled tree. Reading it as data also means the registration
-    that gets read is the one in the SCRATCH tree - the tree actually under test.
+    `ast.literal_eval` rather than `import gate_registry`: importing executes a module inside a
+    harness whose entire job is to run OTHER programs in a controlled tree. Reading it as data
+    also means the registration that gets read is the one in the SCRATCH tree - the tree actually
+    under test. `tools` is in COPY_TREES, so the file is present in every scratch tree.
+
+    [ITEM 7 / REGISTRY CUT 2026-08-28] These rows used to live in `run_selftests.py` and this
+    function hardcoded that filename. When the registry moved, this function - the instrument
+    that certifies every other fix in this repo - returned
+    `no AUX_GATES assignment in .\\run_selftests.py`. That was OBSERVED before the repoint, not
+    assumed: it fails CLOSED, so the move surfaced as a red harness rather than as a sweep that
+    silently verified nothing. `hooks/piped_gate_guard.py` carries the second copy of this walk
+    and was repointed in the same commit; tools/gate_registry.py's docstring records why the two
+    were deliberately NOT merged into one helper.
     """
-    path = os.path.join(root, "run_selftests.py")
+    path = os.path.join(root, "tools", "gate_registry.py")
     try:
         with open(path, encoding="utf-8") as f:
             tree = ast.parse(f.read())

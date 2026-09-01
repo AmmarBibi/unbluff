@@ -653,20 +653,20 @@ def selftest() -> int:
         fails.append("`-i` was treated as truncating - it is ambiguous with -InputObject, so "
                      "PowerShell rejects it and the guard would fire on a command that cannot run")
 
-    # [ROSTER] coverage DERIVED from the gate registry, with the denominator printed. A hardcoded
-    # GATE_TOKENS left 3 enforcing gates invisible, the ship bar among them.
+    # [ROSTER] coverage DERIVED from the gate registry - tools/gate_registry.py since the
+    # 2026-08-28 cut - because a hardcoded GATE_TOKENS hid 3 gates, the ship bar among them.
     import ast
-    _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _registry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "tools", "gate_registry.py")
     try:
-        _tree = ast.parse(io.open(os.path.join(_repo, "run_selftests.py"),
-                                  encoding="utf-8").read())
+        _tree = ast.parse(io.open(_registry, encoding="utf-8").read())
         _rows = next(ast.literal_eval(n.value) for n in ast.walk(_tree)
                      if isinstance(n, ast.Assign)
                      and any(getattr(t, "id", "") == "AUX_GATES" for t in n.targets))
     except (OSError, SyntaxError, ValueError, StopIteration) as _exc:
         _rows = ()
-        fails.append("could not read AUX_GATES to check gate coverage (%s) - this check must "
-                     "never pass by failing to look" % _exc)
+        fails.append("could not read AUX_GATES from %s (%s) - this check must never pass by "
+                     "failing to look" % (_registry, type(_exc).__name__))
     _uncovered = []
     for _label, _parts, _extra in _rows:
         _invocation = "python %s %s | tail -1" % ("/".join(_parts), " ".join(_extra))

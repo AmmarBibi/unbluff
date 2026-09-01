@@ -9,9 +9,18 @@ room to write the line. This is that split, following install / install_selftest
 THE SEAM WAS MEASURED, not chosen by taste:
   * ZERO pinned mutation anchors fall inside selftest() - checked against both entry tables
     before cutting. A3/A3b/MODE-1/MODE-2 all anchor production lines, which stay in the parent.
-  * AUX_GATES DOES NOT MOVE. tools/mutation_check.py does not import it; it `ast.literal_eval`s
-    it straight out of run_selftests.py's source text, so moving that table would break the
-    mutation harness without breaking any import.
+  * AUX_GATES DID NOT MOVE IN THIS SPLIT - and that was the whole reason this seam was chosen
+    over the registry cut, because tools/mutation_check.py does not import AUX_GATES, it
+    `ast.literal_eval`s it out of source text, so moving the table breaks the mutation harness
+    without breaking any import.
+    **[SUPERSEDED 2026-08-28 - item 7's registry cut.]** AUX_GATES has since moved to
+    tools/gate_registry.py, along with NOT_A_GATE, MACHINE_STATE, SELFTEST_IS_THE_GATE and
+    RECORDING_TIERS. There turned out to be TWO source-text readers, not one
+    (hooks/piped_gate_guard.py is the second), and MODE-1's anchor - an AUX_GATES row - was
+    inside the moved region after all, so the line above about MODE-1 anchoring a production
+    line that stays in the parent is true only of A3, A3b and MODE-2 now. All three instruments
+    were repointed in that commit and the full sweep re-run against the 223/225 baseline. The
+    imports below still work unchanged: run_selftests re-exports the five names.
   * tools/check_selftest_isolation.py asserts that run_selftests.main() calls a scrub in its
     DIRECT body. main() stays in the parent.
 

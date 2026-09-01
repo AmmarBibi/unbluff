@@ -104,7 +104,78 @@ source now.)
 
 Replaces *"Would I defend this release under adversarial review?"*, which was a shipping bar. A
 change that only makes the repo more defensible to a stranger is no longer worth doing.
-Materiality still decides ORDER, never WHETHER - anything kept here gets built.
+
+**[2026-09-01] RESTATED BY THE OWNER, AND IT SHARPENS THE BAR RATHER THAN CHANGING IT:** *"I do
+not care to ship any more. I want unbluff to be good for me to use. If it's already good and
+everything's working, we can stop."* Two consequences, and the second one deletes work:
+- **"Materiality decides ORDER, never WHETHER" is now WRONG here and is replaced.** It came from
+  the shipping premise, where every gap was eventually a reviewer's question. With no release, a
+  row that improves nothing about a working session should be RETIRED, not sequenced. Deleting
+  beats fixing; see item 17, where 418 lines went because the gate served nobody.
+- **The test for every open row is now: would I NOTICE if this were never built?** If the honest
+  answer is no, retire it and say so.
+
+## Status and order - THE ONLY PLACE THIS IS RECORDED
+
+**Added 2026-09-01, and its absence was the finding.** This plan had 36 rows and NO order section
+and NO status summary. The order lived in the hand-written session prompts instead, so it survived
+only by being transcribed correctly each time, and it went stale the moment direction changed -
+which is exactly what happened when item 17 was deleted. A plan whose sequence is not IN the plan
+is a plan that has to be reconstructed from memory, and this repo has a standing check about
+reconstructing things from memory.
+
+**Derived 2026-09-01 by parsing the headings, not counted by hand: 37 rows, 0-36, contiguous.
+18 closed, 19 open.**
+(It read "36 rows / 18 open" for the first hour of its existence, until the close completeness
+pass added item 36 and the re-parse caught it. **A hand-typed count in this very section went
+stale within the hour** - which is the argument for the one-line parse below rather than for
+trying harder to type carefully. Re-derive it, do not read it:
+`python -c "import re,io;L=io.open('docs/PLAN.md',encoding='utf-8').read().split(chr(10));print(sorted(int(m.group(1)) for l in L for m in [re.match(r'^(\d+)\. \*\*',l)] if m))"`)
+
+CLOSED: 0, 1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 21, 22, 23, 24, 25, 33 - and **17 REVERTED**
+(built, then deleted; the row keeps the evidence).
+
+**OPEN, IN ORDER, SORTED BY THE BAR ABOVE - not by size, not by age.**
+
+*Tier 1 - I would notice these in a session.* These touch what actually runs when he works.
+  0. **36** - `MACHINE_STATE` has no floor and `--code-only` is what gates every push. Added
+     2026-09-01 by the close completeness pass and placed FIRST: it is the only open row in the
+     verdict path of `.claude/pre-push.cmd`, the one gate he actually relies on. Latent today
+     (1 label of 20 gates), and the repo has already built this exact floor twice elsewhere.
+  1. **13** - the inline-content-through-a-shell guard. FIVE incidents, the newest a `printf`
+     eating a `%` and `git commit -F` succeeding on a truncated file. The only open row that
+     prevents a failure he has actually hit, repeatedly.
+  2. **18** - the SHIPPED `consistency-audit` skill flags `[]` in source as an unfilled
+     placeholder. He RUNS that skill; it cried wolf on its own repo during the 2026-08-28 close.
+  3. **34** - the false-alarm corpus covers 1 of 44 units (derived 2026-09-01; it was 45 before
+     item 17's deletion removed a unit). This is the only mechanism that
+     measures "does a guard fire on correct work", which is the single thing that decides whether
+     these hooks stay switched on.
+  4. **16** - `hook_health_check`'s budget share. User-visible at SessionStart, and a load-flake
+     already turned the suite red once on 2026-09-01 at 105% of budget with every assertion green.
+
+*Tier 2 - the instruments can currently lie to me.* Not felt in a session, but they decide whether
+any green above is worth believing.
+  5. **35** - an assertion that prints "did not run" and still returns PASS. Cost two sessions.
+  6. **26** - a mutation whose VERIFIER cannot run scores SURVIVED, not HARNESS ERROR.
+  7. **30** - a git-derived population cannot see an untracked file; two gates printed 67 and 68
+     side by side in one green run.
+  8. **29** - `gate_ledger`'s writer resolves `LEDGER` at call time, its readers at def time.
+  9. **9** - five guard families hand-probed but unregistered as mutation entries. **UNBLOCKED**:
+     it was waiting on item 2's pull and item 7, both now closed.
+
+*Tier 3 - internal rigor. Real, but nothing misfires today.*
+  10. **31**, **11**, **12**, **19**, **28**, **14**, **8**
+
+*Retire candidates - the bar says these earn nothing.* Decide, do not carry:
+  - **27** and **32** are both about the 800-line ratchet and comment-shaving. The ratchet already
+    works: it caught all three files this session and forced one real split. A detector for
+    *shaving comments to pass it* is a guard on a guard, and the honest reading of the new bar is
+    that he would never notice its absence. **Recommend RETIRE both** unless the ratchet actually
+    gets gamed again.
+  - The 12 `gate_registry.py` findings from review `wf_a71fb7d3-79d` (item 33) are one-directional
+    rosters and unchecked adjudication reasons. None misfires. **Recommend leaving them recorded
+    and unscheduled** rather than opening rows that will never be worth doing.
 
 ## Open - and this list is deliberately short
 
@@ -235,9 +306,71 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    forever gets the hook deleted. This one is a security disclosure, so the trade inverts.
    Note for the record: the probe was INVALID on its first two writes (wrong entry point, then
    wrong `source` constant) and both times returned an answer that looked like a finding.
-7. **Split `run_selftests.py`.** **PARTIAL 2026-08-26 - the headroom is bought, the REGISTRY cut
-   this item actually specifies is NOT done and still waits on a clean sweep.** Read the two
-   halves separately before marking this row anything else.
+7. **Split `run_selftests.py`.** **DONE 2026-08-28 - BOTH halves.** The `selftest()` cut landed
+   2026-08-26; the REGISTRY cut this item actually specifies landed 2026-08-28, verified against
+   a full mutation sweep on both sides. Read the two halves separately.
+
+   **THE REGISTRY CUT (2026-08-28).** `AUX_GATES`, `NOT_A_GATE`, `MACHINE_STATE`,
+   `SELFTEST_IS_THE_GATE`, `RECORDING_TIERS` and their prose -> `tools/gate_registry.py`.
+   `run_selftests.py` 655 -> 444 lines. **This item's stated goal is now met**: adding a gate no
+   longer touches the orchestrator. The re-export is an `import`, not a re-assignment, so
+   `check_readme_fresh.py:190`'s `from run_selftests import AUX_GATES` and
+   `run_selftests_selftest.py`'s four imports keep working untouched - verified at the cut, 20
+   rows. **THAT IS AN INSTANT, NOT A CURRENT FACT** - it went to 21 when `tier-freshness`
+   registered later that session and back to 20 when that gate was DELETED on 2026-08-29 (item 17).
+   It moves whenever a gate is added or removed, which is the entire point of this row, and this
+   sentence has now been wrong twice in two days. **The live count comes from the registry, never
+   from here** - `python -c "import sys;sys.path.insert(0,'tools');import gate_registry as g;print(len(g.AUX_GATES))"`.
+   (Caught by the close consistency pass; the convention for saying so is
+   `file_size_baseline.json`'s own.) A
+   re-ASSIGNMENT would have been WORSE than nothing: it leaves an `ast.Assign` named `AUX_GATES`
+   whose value is an Attribute, so the source-text readers below would find the assignment, fail
+   `literal_eval`, and report corruption rather than a move.
+
+   **THE TRAP AS WRITTEN NAMED ONE INSTRUMENT. THERE WERE THREE.** All three were found by
+   grepping the five names BEFORE cutting, which is the only reason none surfaced mid-refactor:
+   - `tools/mutation_check.py:aux_gates()` - the one this row named. Repointed.
+   - `hooks/piped_gate_guard.py` - a **SECOND** source-text reader of the same assignment, doing
+     the same `ast` walk to derive its coverage denominator. Named nowhere in this plan.
+     Repointed.
+   - mutation **`MODE-1`** - a pinned anchor INSIDE the moved region; it anchors an `AUX_GATES`
+     row. The 2026-08-26 half was chosen precisely BECAUSE zero anchors sat in `selftest()`, and
+     this row never said that property fails here. Unit moved to `tools/gate_registry`.
+   Both readers were PROVEN to fail closed before being repointed, not assumed to: `aux_gates()`
+   returned `no AUX_GATES assignment in .\run_selftests.py`, and the guard's selftest returned
+   rc=1 printing `gate coverage 0 of 0`.
+   **A fourth consequence, structural rather than a trap:** `classify_tools()` fails on any
+   `tools/*.py` in neither roster, so `gate_registry.py` names ITSELF in the `NOT_A_GATE` it now
+   contains. That is the check working as designed.
+   **The two readers were deliberately NOT unified** behind one helper, despite this repo's own
+   rule that two implementations of one rule is the defect. `piped_gate_guard` SHIPS -
+   `install.py` copies it to `~/.claude/hooks/`, where `tools/` does not exist - so the single
+   implementation would have to be a conditional import whose two branches nothing exercises
+   together. Recorded as a decision with its reason in `tools/gate_registry.py`, not left implicit.
+
+   **THE SWEEP EARNED ITS 46 MINUTES, SECOND SESSION RUNNING.**
+   Sweep 1 (2026-08-28T05:05:59Z-05:51:37Z, **rc=1**): 223 of 225 executed, 0 skipped, 0 unproven,
+   2 not-runnable-here (`pre_push_gate` #30, `fast_test_on_stop` #D10c) - every number identical
+   to the 08-27 baseline - and **1 SURVIVOR, `MODE-1`**, while the suite was 44/44 green under
+   `--code-only`. Adjudicated per the standing rule and it is **NEITHER narrowed NOR redundant**:
+   the regression test bites fine, the VERIFIER was unrunnable. `verify` defaults to the mutated
+   unit's own `--selftest`, which used to be `run_selftests.py` and had become a data module.
+   Fixed to a 6-tuple, `verify="./run_selftests"`; re-probed CAUGHT (rc=1).
+   Sweep 2 (05:54:47Z-06:40:06Z, 45m19s, **rc=0**): **223 of 225 executed, 0 skipped, 0 unproven, EVERY
+   executed mutation CAUGHT, 0 survivors.** That is the clean baseline this cut required.
+   **The finding that outlived the instance is now item 26**: a data module handed an unrecognised
+   argv exits 0, so the harness scored MODE-1 `SURVIVED` rather than `HARNESS ERROR`.
+
+   **THE SESSION'S CLOSING BASELINE - compare against THIS, not against 223 of 225.**
+   Sweep 3 (07:20:59Z-08:06:28Z, **rc=0**) verified items 24 and 17: 223 of 225, 0 survivors.
+   Sweep 4 (08:18:41Z-09:03:55Z, 45m14s, **rc=0**) verified the coverage added for both new
+   modules:
+   **228 of 230 executed, 0 skipped, 0 unproven, EVERY executed mutation CAUGHT, 0 survivors.**
+   The table grew 225 -> 230 (TR-ZERO, TR-SILENT, TF-UTC, TF-BLIND, TF-EXEMPT-ALL); the 2
+   not-runnable-here are unchanged (`pre_push_gate` #30, `fast_test_on_stop` #D10c) and are proven
+   by the other platform's job or nowhere. **Four full sweeps ran this session and two of them
+   found something no other signal did** - MODE-1 surviving the registry cut, and TF-UTC proving
+   a new assertion decorative.
    **What landed (2026-08-26T20:51Z):** `selftest()` -> `run_selftests_selftest.py`, 803 -> 655
    lines, removed from the file-size baseline by the ratchet's own rule. **This is a DIFFERENT
    cut from the one specified below, chosen precisely because it does not touch the trap:**
@@ -260,7 +393,9 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
    at 803/800 there was no room to write the line. The 08-25 baseline note predicted this in
    those words - "the orchestrator having only 6 lines of headroom is the actual finding here,
    and it will bite the next person who adds a gate." It bit on the next session.
-   **Still open below, unchanged:** the registry cut, its trap, and the forced order.
+   **The text below is the registry cut AS IT WAS SPECIFIED, kept for its trap map and its forced
+   order. It is CLOSED - see the 2026-08-28 record at the top of this row for what actually
+   happened, including the two instruments the trap map below does not name.**
 
    New 2026-08-25. It is a recorded 803-line offender, but the
    overage is not the finding - the finding is that the orchestrator had SIX lines of headroom, so
@@ -295,13 +430,21 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
      **The sweep in between those two earned its runtime**: it caught PG1 and PG3 SURVIVING
      after item 22's fix, with the suite, the guard's own selftest and `mutation-anchors` all
      green. See item 22.
-   **This is the baseline the registry cut must be measured against.** Cut it next session and
-   re-run the sweep immediately after: `mutation_check.aux_gates()` reads `AUX_GATES` out of
-   `run_selftests.py`'s source text, so the cut edits the instrument that certifies every other
-   fix, and that is only honest with a green sweep on both sides.
+   **This was the baseline the registry cut had to be measured against, and it was.** The cut ran
+   2026-08-28 with a full sweep on both sides; the instruction it carried - "re-run the sweep
+   immediately after, because the cut edits the instrument that certifies every other fix" - is
+   what caught `MODE-1`. Sweep 1 returned rc=1 with one survivor while the suite was 44/44 green.
+   See the 2026-08-28 record at the top of this row.
 
 8. **Nothing enforces that `--code-only` stays off the turn-end command.**
-   **BUILT AND PROBED, THEN REVERTED - BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
+   **UNBLOCKED 2026-08-28 - item 7's registry cut removed the wall this row hit.** The
+   measurement that blocked it was 803 -> 897 against a 800 limit; `run_selftests.py` is now
+   **444 lines**, so the same 94-line check lands near 538 with real headroom, and an `AUX_GATES`
+   row for a `tools/` gate no longer touches the orchestrator at all - it goes in
+   `tools/gate_registry.py`. Re-derive the 94 before quoting it: that figure was measured against
+   the 803-line file and is an INSTANT, not a current fact. The history below is kept because it
+   is the evidence that the ratchet works.
+   **BUILT AND PROBED, THEN REVERTED - was BLOCKED BEHIND ITEM 7 by the file-size ratchet.** (Verdict
    hoisted into the header 2026-08-26 by the close sweep: it sat 20 lines down, so the row scanned
    as OPEN and could be picked up out of order - which is how it got orphaned the first time.)
    Was #47, ORPHANED by the 2026-08-24 re-cut and re-homed here 2026-08-25 by the close
@@ -437,6 +580,16 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     strength of a READ elsewhere in the file and was already adjudicated `scrubbed` by import
     delegation, so no verdict changed. But the gate has never actually seen the write it most
     needs to see. Fix: flatten `BinOp`/`Starred` argument nodes before extracting constants.
+    **SECOND LIVE INSTANCE, 2026-08-28 - recorded here because the EVIDENCE outlives its subject:
+    the file was deleted on 2026-08-29 (item 17), so this instance is no longer reproducible and
+    the finding is not reproducible FROM it. It still happened.**
+    `tools/check_tier_freshness.py`'s selftest built a throwaway repository with
+    `subprocess.run(["git", "-C", _td] + cmd, ...)` where `cmd` carries `init` / `add` / `commit`.
+    The gate's MUTATING population stayed at 8 and did not include it - measured after the file
+    landed. It was scrubbed anyway, at import, by the author rather than by the gate. **That is
+    the whole finding: this gate's silence is not evidence, and the row's estimate of its own blast
+    radius ("no verdict changed") was true of the tree it was written against and is not a
+    property of the gate.** Every new file that builds a fixture this way is invisible to it.
 
 12. **That gate's POPULATION is decided by a prose mention.** New 2026-08-25, same investigation.
     Membership is `has a mutating verb AND the string "--selftest" appears in the file text` - so
@@ -550,6 +703,87 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     and the trend, not the level, is what this row is watching.
 
 17. **Nothing flags a gate TIER whose last run predates the code it covers.**
+    **REVERTED 2026-08-29. `tools/check_tier_freshness.py` is DELETED, not fixed.** The row below
+    describes what was built on 2026-08-28 and is kept because the EVIDENCE is worth more than the
+    gate was.
+    **Why deleted rather than repaired, and this is the whole judgment:** the independent review
+    (item 33, run `wf_a71fb7d3-79d`, 58 agents, 52 findings, 52 adjudicated, 46 confirmed) put
+    **29 of the 52 findings in this one file** - more than half, in a gate built the previous day.
+    CI was RED on it. And it was invoked by NOTHING: registered `("--selftest",)`, so its
+    measurement and `--release` modes never ran outside a hand invocation. A gate nobody runs,
+    carrying the majority of the defects, failing CI, is not a gate - it is a liability with a
+    docstring. The owner's standing preference is explicit: **removing beats an elaborate fix.**
+    Removed with it: the `AUX_GATES` row, the `SELFTEST_IS_THE_GATE` adjudication, mutations
+    TF-UTC / TF-BLIND / TF-EXEMPT-ALL, and the README roster line. Suite 44/44 rc=0 after.
+    **THE THREE FINDINGS WORTH KEEPING, because they are about the REPO and not about this file:**
+    - **A blocking gate can fail OPEN from DATA, where no mutation can reach it.** `--release`
+      returned 0 and printed "RELEASE OK" whenever git could not answer for HEAD (no `.git`, a repo
+      with no commit, `dubious ownership`, git absent from a hook's PATH). Every tier flipped to
+      VERIFIED, including the eight-day-old one. Structurally identical to mutation `TF-BLIND`,
+      which the sweep CATCHES - the difference is that TF-BLIND is an EDIT and this was reachable
+      from input, so the mutation harness could never have found it. Six of six lenses found it.
+      **This is the same defect the repo already recorded as HIGH-7/D4 in `check_review_freshness`**,
+      one function apart, and it was rebuilt from scratch in a new file.
+    - **"VERIFIED" meant "ran recently", pass or fail.** A tier whose newest recorded run was
+      `FAIL` reported VERIFIED and did not block. The `result` field was recorded, printed, and
+      never consulted. Reproduced here in one call.
+    - **A parameter that is accepted, defaulted and never read still passes a selftest that
+      exercises it.** `evaluate()`'s `exempt` had ZERO reads outside its own defaulting line while
+      five selftest call sites passed it as though it worked.
+    Item 17's underlying question - "has this worktree verified tier X since the code changed?" -
+    is still worth asking, and it is answerable in one command against `gate_runs.json` without a
+    gate. The meta-review's CHECK 4 already instructs exactly that, and on 2026-08-28 that manual
+    read is what caught `integration` a day stale (re-run: 34/34). **If this is ever rebuilt, the
+    three findings above are its acceptance criteria.**
+
+    What was built on 2026-08-28, kept for the evidence:
+    **IT FOUND A REAL ONE ON ITS FIRST RUN, and that is the argument for it:**
+    `false_alarm_scorer`'s newest row was **EIGHT DAYS old** (2026-08-20) while every gate was
+    green and `unrecorded_tiers()` reported it "still recording". Those are two different facts:
+    `unrecorded_tiers()` is an AST walk proving the CALL EXISTS, and the tier is registered
+    `("--selftest",)`, so the suite never reaches the enforcing path where the call lives.
+    **Declared-and-present is not recently-executed, and only this gate asks the second one.**
+    `integration` was also behind, which is the tier the row was written about. See item 31.
+    **BOTH TRAPS HANDLED AS WRITTEN.**
+    - *Exemption:* `mutation_sweep` is in `CANNOT_BLOCK` with the reason from the "Known-stale by
+      design" section - a CI runner cannot write this local ledger. Checked in BOTH directions:
+      an exemption naming a tier that is in no `RECORDING_TIERS` row is a selftest failure, and an
+      exemption without a real reason written is too, so the roster cannot rot into cover.
+      **Exempt means CANNOT BLOCK, never hidden** - its status is still printed and still labelled.
+    - *Phrasing:* every verdict is `THIS WORKTREE has not verified <tier> since <commit>`, and the
+      selftest ASSERTS both halves - that the string is present, and that `is stale` never appears.
+    **A THIRD trap the row did not predict, and it decided the mode.** The normal order is
+    verify-then-commit, so the instant a commit lands EVERY tier is legitimately unverified at
+    HEAD - observed 7 of 7 immediately after `0d9e8a5`. Enforcing the measurement would fire on
+    entirely correct work every single time, and a guard that fires on correct work gets switched
+    off. So it follows `review-freshness`'s adjudicated shape: the default run is a MEASUREMENT
+    returning 0, `--release` blocks, and the registered gate is the SELFTEST. The output says this
+    out loud when every tier reads NOT-SINCE, rather than leaving the next reader to rediscover it.
+    **A LIVE FAIL-OPEN IN THIS GATE, caught by reading its own first output rather than by its
+    selftest.** `head()` used `--date=format-local:...Z`, which renders LOCAL time and labels it
+    `Z`: a commit at `03:08:30-04:00` came back as `03:08:30Z`, four hours early. Against UTC
+    ledger stamps that compares as LATER than it is, so a tier that ran at 07:07Z - genuinely
+    BEFORE a 07:08Z commit - reported VERIFIED. **The selftest passed anyway**, because every
+    case used synthetic timestamps and none of them called `head()`. Fixed with `TZ=UTC0`, and
+    the selftest now asserts `head()` against git's own `%cI` - which carries a real offset, so it
+    cannot agree with a wrong answer the way a second local read would. This is section 6 again:
+    the author's probes and the author's blind spot were the same object.
+    **This is also the first gate registered since item 7's registry cut**, and it is the proof
+    that cut wanted: adding it touched `tools/gate_registry.py` and NOT `run_selftests.py`
+    (verified from `964899b`'s own diffstat, which names four files and none of them is the
+    orchestrator).
+    Suite 45/45 rc=0 (`readme-fresh` correctly caught the 44 -> 45 change first).
+    **DEVIATION FROM THIS ROW'S OWN WORDING, stated rather than quietly absorbed.** The row asks
+    for a comparison against *"the newest commit touching the surface that tier covers"*. What
+    shipped compares every tier against **HEAD**. That is deliberate and it is the STRICTER of the
+    two - it cannot miss a stale tier - but it is not what the row said, and the reason is this
+    repo's most repeated defect: a per-tier "surface" is a DECLARED ROSTER, and a declared roster
+    that drifts under-scopes the very check it defines. HEAD is derived and cannot drift. The cost
+    is over-reporting, which is why the default is a measurement (see the mode note above). If a
+    per-tier surface is ever wanted, it must be DERIVED - e.g. from the files each tier actually
+    reads - never listed by hand.
+
+    Original statement of the problem, kept:
     Found 2026-08-26 by the close completeness pass as a **silent gap** - the plan does not
     mention the `integration` tier anywhere (grep: zero hits), so nothing about its freshness was
     ever scheduled or excluded.
@@ -628,6 +862,14 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
 20. **The plan predicted the pull would clear `hook-provenance`. The repo already knew it would
     not, and the plan never read its own design note.**
+    **DONE - marker added 2026-09-01, and its ABSENCE is the point.** The row's correction landed
+    2026-08-26 and its one live consequence - item 7's forced order needing a clean full sweep -
+    was discharged on 2026-08-28 by two clean sweeps. But the row never carried a status token, so
+    a machine parse of this file scored it OPEN while every hand-written session prompt called it
+    DONE. **Two sources of truth disagreed for six days and nobody noticed, because the order and
+    the status lived in the session prompts rather than in this file.** That is precisely what the
+    Status and order section above now exists to prevent, and this row is the instance that proved
+    the gap was real rather than theoretical.
     New 2026-08-26. **The first version of this item called the mechanism an undocumented
     structural finding. That was wrong and is corrected here**, because the correction is the
     more useful fact: the mechanism was already written down, in `.claude/pre-push.cmd` under
@@ -848,7 +1090,45 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     print a bare `0 of 0`, and a genuinely clean machine must still print `0 of 16`.
 
 24. **The BUILT IS NOT LIVE count is now correct and has NO HISTORY. The fix removed the
-    trajectory.** New 2026-08-27, from the close source-coverage pass reading the design.
+    trajectory.** **DONE 2026-08-28.** `hook-provenance` now records its counts every run and
+    PRINTS the comparison against the previous run in this worktree, e.g.
+    `trajectory: 1 of 16 now vs 1 of 16 in THIS WORKTREE at <utc> - unchanged.`
+    - **The row's confirm-don't-assume note paid for itself twice.** (1) `gate_ledger.record()`
+      DOES take structured extras - `def record(gate, result, **fields)`, already exercised as
+      `record("probe_gate", "FAIL", passed=0, total=1)`. (2) But this row also said
+      *"`hook-provenance` already calls into that path"* and **that was FALSE**:
+      `hook_divergence_report.py` had no `gate_ledger` call at all and was in no
+      `RECORDING_TIERS` row. It is now the 7th declared tier, so `unrecorded_tiers()` enforces the
+      recording BY AST in both directions - deleting the call reddens the suite.
+    - **A ZERO IS NOT A COUNT, and in a series it matters more than in a printout.** A run with no
+      population records `entry_stale: null` plus the REASON, carrying the same two-cause split
+      `main()` prints (`no-wiring-surface` vs `surfaces-declared-no-entry-point`). Recording a
+      literal `0` would make every fresh CI checkout deposit a row reading "perfectly clean"
+      forever, and the trend would be built out of rows meaning "inapplicable". Both causes were
+      DRIVEN and asserted, with a control proving a recorded `0` would be caught.
+    - **The first version reintroduced the same defect one field over** and the probe output
+      caught it: `files_withheld=len(wired_dirs)` serialised as `files_withheld: 0` on an unwired
+      machine - a field reading "nothing was withheld" while meaning "everything was". Now a
+      reason string, mirroring `no_count`.
+    - **All 7 `trajectory()` branches exercised**, asserted on CONTENT, with a control. The probe
+      FAILED on first run - every branch returned the identical sentence - and that failure is
+      what exposed item 29 below. A probe that had only checked "it returns a string" would have
+      passed and proved nothing.
+    - **The denominator moving is its own verdict**: `1 of 16` vs `6 of 11` reports
+      *"the DENOMINATOR moved, so the two numerators are not comparable"* rather than a delta.
+      That is precisely the defect item 15 was built for, where five corrections each fixed the
+      numerator and left the denominator scoped to whatever the author had in mind.
+    - **Per-worktree phrasing throughout**, satisfying item 17's requirement in advance: every
+      sentence says THIS WORKTREE, and no-history is a STATEMENT rather than an omission.
+    - **Landed as a split, not a squeeze.** The additions took `hook_divergence_report.py` over
+      the 800-line ratchet twice and its comments were trimmed twice; the third time it was SPLIT
+      instead - `tools/hook_divergence_trend.py` (105 lines) holds the field shaping and the trend
+      sentence, and the file went 803 -> 732. **The `gate_ledger.record()` CALL deliberately
+      stayed behind**, because `unrecorded_tiers()` walks the DECLARED tier file's AST for it and
+      moving it would have named the wrong file as the tier. See item 27.
+
+    Original statement of the problem, kept:
+    New 2026-08-27, from the close source-coverage pass reading the design.
     This file says of that number: *"The trajectory is the real point... every session that
     fixes something makes the live machine MORE stale."* `tools/gate_ledger.py` exists for
     exactly that reason - its header records that a per-run verdict is not an observable trend.
@@ -937,6 +1217,303 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     genuinely diverged `~/.claude/hooks` copy (the real 2026-07-30 defect this check exists for)
     must STILL be flagged.
 
+26. **A mutation whose VERIFIER cannot run scores SURVIVED, not HARNESS ERROR.**
+    New 2026-08-28, produced by item 7's registry cut and MEASURED by the sweep that caught it.
+    `mutation_check.run()` resolves `verify = entry[5] if len(entry) > 5 else ""`, and an empty
+    spec means "the mutated unit's own `--selftest`". When `MODE-1`'s unit became
+    `tools/gate_registry` - a pure DATA module - the harness ran `gate_registry.py --selftest`,
+    which defines its constants, ignores the argv and exits 0. The mutation came back
+    **SURVIVED (1 of 225)**, and the summary printed *"Each one names a fix whose regression test
+    does not actually bite"* - which was FALSE for that row. The test bites; the verifier was
+    unrunnable.
+    **The class, not the instance:** "the regression test does not bite" and "there is no test
+    here at all" produce a BYTE-IDENTICAL result line, inside the instrument that certifies every
+    other fix in this repo. That is the identical-error-and-success-value shape this repo hunts
+    everywhere else - `gate_ledger`'s corrupt-reads-as-empty, `hook_divergence`'s zero-population
+    and `check_file_size`'s unreadable baseline each got a two-cause split for exactly this reason.
+    **Not urgent, and the reason is worth stating:** it fails toward NOISE. A survivor is loud and
+    takes the sweep to rc=1, so nothing passed silently - it cost 46 minutes of sweep to diagnose,
+    not a wrong green.
+    Fix: after resolving the verifier, refuse to proceed unless that file actually dispatches
+    `--selftest` (or carries an enforcing registration), and report
+    `HARNESS ERROR: verifier <x> has no --selftest dispatch`.
+    **THE TRAP, and it bit twice while merely SCOPING this row.** Do NOT reach for
+    `hook_health_check.has_selftest` as the predicate: measured 2026-08-28, it returns False for
+    `install`, `tools/no_regression` and `tools/hook_divergence_report` - all registered gates
+    whose mutations are CURRENTLY CAUGHT - because it is scoped to `hooks/`. An earlier
+    hand-rolled substring probe was worse, flagging 52 of 225 with obvious false positives.
+    Derive the predicate, and prove it against a known-good control BEFORE trusting any zero.
+
+27. **THREE files hit the 800-line ratchet in a single session, and shaving prose was the first
+    instinct every time.** New 2026-08-28. `hooks/piped_gate_guard.py` is now at EXACTLY 800 -
+    zero headroom. This is the general form; the specific file is the least of it.
+    **The session's own record, because it is the evidence:**
+    - `run_selftests.py` - item 7's registry cut. Resolved by SPLITTING (655 -> 444). Correct.
+    - `hooks/piped_gate_guard.py` - a five-line comment took it 800 -> 812. Resolved by FOUR
+      rounds of shaving prose back to exactly 800. **Wrong, and left at zero headroom.**
+    - `tools/hook_divergence_report.py` - item 24. Went over TWICE, was trimmed TWICE, and on the
+      third hit was SPLIT instead (803 -> 732 plus a 105-line sibling). Correct, and only because
+      the pattern had by then been noticed three times.
+    **The rule this yields, and it belongs beside `file_size_baseline.json`'s own:** that file
+    already calls re-recording a baseline "THE LOOPHOLE IN THIS DESIGN". Shaving comments until
+    the number passes is the SAME loophole wearing different clothes - it keeps the gate green
+    while deleting the reasoning the gate exists to protect, and it leaves the file at zero
+    headroom so the next person faces the identical choice with less prose left to cut. The
+    ratchet's honest responses are SPLIT or deliberately RECORD; "trim the explanation" is
+    neither.
+    (The mechanical version of this rule is **item 32**, promoted out of this row by the close
+    completeness pass: it was written here as "consider making that mechanical", which is
+    optional-forever framing for work that would DIE when this row closes - this row closes by
+    splitting one file, and the detector is general.)
+    **`piped_gate_guard.py` specifically**: adding a five-line comment made it 812 and a NEW
+    `file-size` offender; it took FOUR rounds of shaving to get back to exactly 800.
+    **This is item 7's finding in a second file, and item 7's own words apply unchanged:** the
+    overage was never the finding - *"the orchestrator having only 6 lines of headroom is the
+    actual finding here, and it will bite the next person who adds a gate."* Here it is ZERO. The
+    next person to add a line of reasoning to this guard hits a red ratchet, and the cheap move at
+    that moment is to record a baseline rather than split - which is how a ratchet becomes cover.
+    `file_size_baseline.json` already calls re-recording "THE LOOPHOLE IN THIS DESIGN".
+    Fix: split it, the way `run_selftests.py` and `install.py` were split.
+    **The constraint the orchestrator did NOT have, and it decides the seam:** this is a SHIPPED
+    hook. `install.py` copies it to `~/.claude/hooks/`, where `tools/` does not exist - which is
+    also why item 7 deliberately did NOT unify its two `AUX_GATES` readers behind one helper. Any
+    sibling must be copied by `install.py` too; follow the `install`/`install_selftest` and
+    `fast_test_on_stop`/`fast_test_on_stop_selftest` pairs, and check `REQUIRED_HOOKS`.
+    **Measure the seam before cutting**, the way item 7's first half was measured: PGG rows are
+    pinned against this file, and `pre_push_gate_selftest` #SH-8's anchor already matches twice.
+
+28. **`UNBLUFF_LEDGER_OFF` is documented as set by probes, and NOTHING in the repo sets it.**
+    New 2026-08-28. `tools/gate_ledger.py:178` states *"`UNBLUFF_LEDGER_OFF` suppresses the write;
+    probes set it and nothing else does."* A repo-wide grep for the literal finds it in
+    `gate_ledger.py` ONLY - the reader at :180 and its own selftest at :253-269, which sets and
+    clears it inside a temp dir. No other file, no wrapper, no hook.
+    **Adjudicated before filing, and it is NOT a live defect.** Two isolation paths exist and only
+    one is load-bearing: a `mutation_check` scratch run is isolated BY PATH, because `LEDGER`
+    derives from `gate_ledger.py`'s own `__file__` and `COPY_TREES` carries both `tools` and
+    `docs/audits`, so the write lands in the scratch tree's copied ledger and dies with it. The
+    env var does nothing there.
+    **Where it IS load-bearing is the case #44 actually measured:** a HAND probe in the REAL tree
+    - revert a fix, run the gate red, restore - which is exactly how *"the newest `integration`
+    row read FAIL 33/34 from a MUTATED tree"* happened. There the ledger is the real one, and the
+    only thing between a probe and a poisoned ledger is the operator remembering to export it.
+    So the docstring is true and the mechanism is tested in both directions; what is missing is
+    that it is REMEMBER, not ENFORCE - tooling-discipline 7.3, the one class this repo has
+    repeatedly proven prose cannot hold, in a file whose own header says meta-review CHECK 4 READS
+    this ledger rather than reconstructing it.
+    Fix candidates, cheapest first: have `record()` refuse - and SAY SO - when the working tree is
+    content-dirty vs HEAD, which is precisely the state a hand probe creates; or give probes a
+    wrapper that sets the variable so there is nothing to remember.
+
+29. **`gate_ledger`'s WRITER and its READERS can disagree about which file they are using.**
+    New 2026-08-28, found by item 24's trajectory probe FAILING - all seven branches returned the
+    identical sentence, because the function was reading a different ledger from the one the probe
+    had just written.
+    `record()` resolves the module global `LEDGER` at CALL time. Every reader - `read()`,
+    `last_run()`, `tiers()` - declares `path: str = LEDGER`, so the default binds at DEF time.
+    Anything that reassigns `gate_ledger.LEDGER` therefore WRITES one file and READS another.
+    **This is not hypothetical and the repo already works around it:** `gate_ledger`'s own
+    selftest does `global LEDGER; LEDGER = <tmp>` and then passes `LEDGER` EXPLICITLY to
+    `tiers(LEDGER)` and `last_run(..., LEDGER)`. The workaround is load-bearing and undocumented
+    as such - a caller who omits the argument silently reads the real ledger while writing a temp
+    one, which is what happened here.
+    **Severity is real but bounded:** in production nothing reassigns `LEDGER`, so the two agree.
+    It bites TEST and PROBE code - the code whose entire job is to be trusted about what it
+    measured - and it fails toward a FALSE PASS: the reader returns plausible real data, so the
+    probe looks like it ran.
+    Fix: make the readers resolve the global at call time (`path=None` -> `path or LEDGER`), which
+    matches `record()` and makes the existing explicit-path call sites redundant rather than
+    load-bearing. Then delete the workaround in the selftest and confirm it still passes.
+    Item 24's `trajectory()` already passes the path explicitly, with the reason written at the
+    call site; that is an instance guard, not the fix.
+
+30. **A gate whose population comes from git cannot see an UNTRACKED file, and nothing compares
+    the denominators that would reveal it.** New 2026-08-28, found by reading two gates' output
+    lines in the same suite run.
+    MEASURED: with `tools/hook_divergence_trend.py` written but not yet `git add`ed, the same suite
+    run printed `file-size: 67 .py file(s) in population (source: git)`,
+    `no-network: OK - 67 file(s) examined (source: git)` and `python-floor: all 68 files parse`.
+    **67 and 68, side by side, in one run, and the suite was GREEN.** After staging, all three
+    read 68 and both git-derived gates re-ran clean - so nothing was actually wrong here, which is
+    exactly why it is worth writing down: the gap was invisible in a passing run.
+    **The exposure:** a session can write a new 900-line module with a network call in it, run the
+    full suite, and get a green from both gates that exist to catch precisely that - because
+    neither one can see the file until it is staged. `python-floor` walks the filesystem and would
+    have seen it. The population source is a deliberate choice (git keeps scratch files out), so
+    the defect is not the choice; it is that **two gates report different denominators for the
+    same population and nothing notices.**
+    Fix: have the suite compare the denominators the gates already print and fail on a mismatch it
+    cannot explain, or have the git-derived gates name untracked `.py` files as
+    NOT-EXAMINED rather than omitting them silently. The second is cheaper and is the
+    "say what you dropped" rule this repo already applies to skips and caps.
+
+31. **`false_alarm_scorer` is a DECLARED recording tier whose registered mode never reaches its
+    `record()` call.** New 2026-08-28, found by item 17's gate on its first real run.
+    MEASURED: its newest ledger row was **2026-08-20T13:46:26Z - eight days old** - while the
+    suite ran it every time and reported `false-alarm-scorer: OK`, and while
+    `unrecorded_tiers()` reported "7 tier(s) declared, 7 still recording".
+    **Both statements were true and neither was the fact anyone wanted.** `unrecorded_tiers()`
+    walks the declared file's AST and proves the `gate_ledger.record(...)` CALL EXISTS. The tier
+    is registered `("--selftest",)` - adjudicated in `SELFTEST_IS_THE_GATE` for a good reason,
+    that its measurement carries a known false alarm - so the suite runs the selftest and never
+    reaches the enforcing path where the call lives. **DECLARED-AND-PRESENT is not
+    RECENTLY-EXECUTED**, and until item 17 nothing asked the second question.
+    `integration` is behind for a different and more ordinary reason: it is not run by the suite
+    at all. That one is the tier item 17 was originally written about.
+    **Why this is a row and not a quick fix:** the honest options conflict. Recording from the
+    selftest path would put a row in the ledger that says "this tier ran" when what ran was its
+    self-check, which is the mode-flip defect `MODE-1` pins. Running it enforcing in the suite is
+    what `SELFTEST_IS_THE_GATE` already refused, with its reason. So the fix is probably neither:
+    it is to make `RECORDING_TIERS` say WHICH MODE is expected to record, so a tier that can only
+    record in a mode the suite never runs is visible as such rather than looking identical to a
+    tier that simply stopped.
+    **[2026-08-29] NOTHING REPORTS IT ANY MORE.** This row previously ended "until then
+    `tier-freshness` reports it every run", and that gate was DELETED (item 17), so
+    `false_alarm_scorer` is back to the silence that hid it for eight days. That is an accepted
+    consequence of the deletion, not an oversight: the gate cost more than the reporting was
+    worth. The finding is only visible now by reading `docs/audits/gate_runs.json` directly, which
+    is what the meta-review's CHECK 4 already instructs.
+
+32. **Nothing detects a file that passes the 800-line ratchet by SHAVING COMMENTS.**
+    New 2026-08-28, promoted out of item 27 by the close completeness pass - it was written there
+    as "consider making that mechanical", which is optional-forever framing for work that would
+    have died when item 27 closed. Item 27 closes by splitting ONE file; this is the general rule.
+    **The shape is detectable and this session performed it twice**: a file goes over the limit,
+    and the next commit brings it back under with its CODE lines unchanged and only COMMENT lines
+    removed. That is not a fix - it keeps the gate green while deleting the reasoning the gate
+    exists to protect, and it leaves the file at zero headroom so the next person faces the same
+    choice with less prose left to cut. `file_size_baseline.json` already names the sibling move,
+    re-recording a baseline, "THE LOOPHOLE IN THIS DESIGN"; this is the same loophole in different
+    clothes and nothing names it.
+    Fix: at the `file-size` gate, compare a file's CODE-line count and COMMENT-line count against
+    the previous commit. Flag a file whose comment lines fell while its code lines did not, when
+    it is at or near the limit. Report it - do not block: a legitimate comment cleanup exists and
+    a guard that fires on correct work gets switched off.
+    **Probe both directions**, and note the harder one: a genuine prose cleanup with no size
+    pressure must NOT fire, and a shave performed across two commits rather than one must still
+    be visible. Measure the false-alarm rate against this repo's real history before wiring it -
+    the standing bar is that a guard firing on correct work is worse than no guard.
+
+33. **Three GATE-LAYER modules shipped 2026-08-28 with the author as their only reviewer.**
+    **RUN 2026-08-29 - `wf_a71fb7d3-79d`. 58 agents, 52 findings, 52 adjudicated, 0 dropped,
+    46 CONFIRMED (10 HIGH / 21 MEDIUM / 15 LOW), ~17 distinct defects.** Tree-guard clean: 58
+    agents, zero repo writes, SHA identical to the snapshot.
+    Coverage was reconciled against `journal.jsonl` rather than trusted: the journal held a
+    SEVENTH review agent whose "2 findings" were the strings `"["` and `"]"` - a schema-mangled
+    EMPTY result that was retried. No information lost, and the returned `total` was right; but
+    the harness's own reconciliation block reported `dropped: 0` by comparing against a `produced`
+    dict the retry had overwritten, so **it would not have noticed a real loss there.** Worth
+    knowing before the next run.
+    **Findings by file: `check_tier_freshness.py` 29, `gate_registry.py` 12, `run_selftests.py` 4,
+    `piped_gate_guard.py` 2, `hook_divergence_trend.py` 2, the two selftests 3.**
+    **RESOLVED BY DELETION for the 29** - see item 17; the file is gone.
+    **STILL OPEN: the 12 in `gate_registry.py` and the handful elsewhere.** They are internal
+    rigor, not breakage - `RECORDING_TIERS` and `NOT_A_GATE` are checked in ONE direction while
+    their own comments claim BOTH; `SELFTEST_IS_THE_GATE` reasons are never checked for content;
+    `MACHINE_STATE` could in principle exclude every gate from the `--code-only` verdict and its
+    "disarm probe" re-implements the routing instead of exercising it. None of these misfires in
+    normal use and none is user-facing. They are the next honest piece of work on this file.
+    **The finding that outranks all of them:** section 6 is now measured THREE ways in this repo -
+    the sweep caught a decorative probe, CI caught a second one the sweep could not, and an
+    independent review found 46 confirmed defects in code its author had called sound.
+    Found by the close completeness pass reading `review-freshness`'s own output, which names all
+    three: `tools/gate_registry.py`, `tools/check_tier_freshness.py`, `tools/hook_divergence_trend.py`
+    - *"never adversarially reviewed"*.
+    **Why this is not covered by the existing `install_selftest.py` note.** That note says the
+    gate can keep asking, and for a test file that is a reasonable stance. These three are not
+    test files. `gate_registry.py` is GOVERNANCE - it decides what counts as a gate, which mode
+    each runs in, and which tiers must record. `check_tier_freshness.py` is GATE LOGIC with an
+    exemption roster. tooling-discipline section 6 names exactly these categories as REQUIRING an
+    independent pass, and its reason is structural rather than a matter of care: the author's
+    probe set and the author's blind spot are the same object.
+    **This session produced two live demonstrations of that in its own new code**, which is the
+    argument for the row: the `TF-UTC` assertion passed while being decorative (a skip scored as a
+    pass), and `head()` shipped a fail-open that its own selftest could not see. Both were caught
+    by the mutation sweep and by reading real output - not by the author's reasoning, which had
+    twice concluded the code was right.
+    **[2026-08-29] DONE - and `check_tier_freshness.py` was deleted rather than reviewed further.**
+    The remaining unreviewed-by-anyone-else module is `gate_registry.py` (12 confirmed findings,
+    all internal rigor); `hook_divergence_trend.py` is view code with 2.
+
+34. **The false-alarm corpus covers 1 of 44 units, and the suite prints that every run to nobody.**
+    **[2026-09-01] The DENOMINATOR MOVED and this row did not notice for three days.** It read
+    "1 of 45" until the close consistency pass re-derived it: item 17's deletion removed a unit, so
+    the suite now prints `1 of 44 units have a corpus (2%); 43 uncovered`. A hand-copied
+    denominator drifting the moment its population changes is item 15's defect exactly, and it
+    happened inside the row that exists to complain about an unexamined denominator.
+    Found by the close completeness pass: `-- coverage: 1 of 45 units have a corpus (2%);
+    44 uncovered` appears in every suite run and has NO home anywhere in this plan (grep: zero
+    hits for the phrase).
+    **Why it is material and not just a metric.** This repo's most-repeated operational rule is
+    that **a guard which fires on correct work gets switched off** - four measured instances in
+    two sessions, and it is why `piped-gate` was scoped the way it was. (It was also why
+    `tier-freshness` defaulted to a measurement, before that gate was deleted on 2026-08-29 -
+    item 17.) The corpus is the only mechanism that MEASURES that rule rather
+    than asserting it. At 2% coverage, the false-alarm claim for 43 of 44 units rests on nothing
+    but the absence of complaints, which is exactly the "silence is not evidence" shape audited
+    elsewhere in this plan.
+    Not a demand for 45 corpora: most units are not user-facing guards and cannot produce a false
+    alarm. Fix: DERIVE which units can fire at a user (the wired PreToolUse/Stop hooks), report
+    coverage against THAT denominator instead of all 45, and schedule corpora for the ones that
+    can. Then the 2% either becomes a real number or is explained by a derived exclusion.
+    Interacts with item 9 (five guard families hand-probed but unregistered as mutation entries) -
+    same shape, different instrument: 9 is about whether a defect DIES, this is about whether a
+    correct action stays quiet.
+
+35. **An assertion that prints "did not run" and returns PASS. Fixed as an instance; no mechanism
+    exists.** New 2026-08-28, from the close meta-review's CHECK 2.
+    MEASURED, in code written this same session: `check_tier_freshness`'s UTC assertion compared
+    `head()` against the repo's own `%cI`. In `mutation_check`'s scratch tree - which runs
+    `git init -q` and `git add -A` and **never commits** - `git show -s HEAD` fails, so the
+    assertion printed *"the UTC assertion below did NOT run"* and the selftest returned 0.
+    **Mutation `TF-UTC` SURVIVED against it. Twice.** The comparison itself was correct; it was
+    never reached, and nothing distinguished "checked and passed" from "could not check".
+    **The instance is fixed** - the assertion now builds its own repository with a commit at a
+    known `-05:00` offset and depends on nothing outside itself. **The CLASS is not.** Nothing in
+    this repo detects a selftest branch that reports a skip and still returns 0, and the same
+    shape is available to every assertion that reads a file, shells out, or needs a fixture. This
+    repo has already paid for it elsewhere - `gate_ledger.read()` was given three outcomes instead
+    of two for exactly this reason, and `check_file_size` has FS-CANNOTRUN pinning it.
+    **Why it matters more than its size:** a skip scored as a pass is invisible to every signal
+    except a mutation aimed at the code the assertion was supposed to protect. The suite was green,
+    the selftest was green, and only the sweep disagreed. That is the same evidential shape as item
+    22's PG1/PG3 disarm, in a new place.
+    Fix, and probe both directions: have the selftest harness treat a branch that emits a
+    skip/inconclusive marker as NOT PASSED unless it is explicitly adjudicated, the way
+    `selftest_budget` already distinguishes INCONCLUSIVE from ok. A skipped assertion must be
+    reported and must not count toward a green. Note the trap: this must not fire on
+    `SKIPPED (posix only ...)`, which is an ADJUDICATED skip the mutation harness already reports
+    correctly and separately - the distinction is whether the skip was declared in advance or
+    discovered at runtime.
+
+36. **`MACHINE_STATE` has NO FLOOR, and `--code-only` is what gates every push.**
+    New 2026-09-01, from the close completeness pass. Three HIGH findings of review
+    `wf_a71fb7d3-79d` are all about this one mechanism and none of them had a home - the plan
+    disposed of them as "and the handful elsewhere", which is the vague non-disposition that
+    sweep exists to catch.
+    **VERIFIED, not taken on the reviewers' word.** `run_selftests.py:327` reads
+    `if rc != 0 and code_only and label in MACHINE_STATE: ... excluded`. **Nothing caps how many
+    labels `MACHINE_STATE` may hold**, and `grep` finds no assertion anywhere on its size.
+    Today it holds exactly one (`hook-provenance`) against 20 `AUX_GATES` rows, so this is LATENT,
+    not live.
+    **Why it matters under the new bar - this is the one open row that touches his push.**
+    `.claude/pre-push.cmd` runs `python run_selftests.py --code-only`. If `MACHINE_STATE` ever
+    grew to cover every label - by a bad edit, a merge, or someone silencing a noisy gate - the
+    pre-push gate would print a clean pass while every gate under it failed. That is the
+    "green result that cannot fail" shape this whole repo exists to prevent, sitting in the
+    verdict path of the only gate he actually relies on.
+    **The repo already solved this exact shape twice**: `ship_bar` has SHIPBAR-FLOOR and
+    `check_file_size` has FS-FLOOR, both pinning "the population collapsed to zero and the gate
+    still said OK". `MACHINE_STATE` is the same collapse from the other direction - the EXCLUSION
+    set growing to swallow the population rather than the population shrinking.
+    Fix, cheapest first: assert in `run_selftests --selftest` that `MACHINE_STATE` is a strict
+    subset of `AUX_GATES` labels AND that at least one non-exempt gate remains in the `--code-only`
+    verdict; pin it with a mutation that grows `MACHINE_STATE` to cover everything.
+    **Probe both directions:** today's single-entry roster must NOT fire, and an all-swallowing
+    roster MUST. The two related findings - that `MACHINE_STATE`'s only consumer is pinned by a
+    probe which re-implements the routing instead of exercising it, and that the `#45` disarm
+    probe does the same - belong in the same fix: a probe that re-implements its subject tests
+    the probe.
+
 ## Retired, not forgotten - and why each one died
 
 Listed so the retirement is a decision on the record rather than a quiet omission. Every item is
@@ -1000,7 +1577,22 @@ permanently-stale row is dangerous: it is #44's defect ("anything reading the le
 whether the gates passed would conclude the gate fails at HEAD") reintroduced structurally rather
 than by a polluting write. **Recorded here rather than papered over by a 30-minute local re-run
 whose only purpose would be to make a row look right.** If CHECK 4 is ever automated, it must
-read CI for this tier. Every other tier is current as of 2026-08-24T21:23Z.
+read CI for this tier.
+
+**[2026-08-28, CORRECTED 2026-08-29] Do not retype a freshness date here - DERIVE it.** This
+section used to end "Every other tier is current as of 2026-08-24T21:23Z", a retyped claim about
+seven tiers, which is the shape that rots silently and is exactly what item 15 was about one level
+down. On 2026-08-28 that was replaced by "`tier-freshness` now derives it every run" - and **that
+sentence was false within a day**, because `tier-freshness` was deleted on 2026-08-29 (item 17).
+Its one real find survives: `false_alarm_scorer` had been EIGHT DAYS stale while every gate was
+green (item 31).
+**So the instruction is now the durable one rather than a pointer at a gate that may not exist:**
+READ `docs/audits/gate_runs.json` - it is the record, it is per-worktree, and the meta-review's
+CHECK 4 already instructs exactly this. Do not read, and do not write, a date in this file.
+`mutation_sweep` stays exempt for the reason above, and its status is still printed - and note the
+premise is about where the sweep CAN run, not that a local row is impossible: it was run locally
+four times on 2026-08-28, so the local row is current today and will go stale again the moment the
+sweep runs only in CI.
 
 ## Standing checks on every change
 
@@ -1028,12 +1620,22 @@ real defect that nothing else did.
    true when written. No mutable count in a title or heading; counts live in the body, dated,
    **next to the commit they were taken at** - a denominator naming `HEAD` is one that will be
    quietly false.
-4. **Is this surface actually LIVE?** A session went into `piped_gate_guard`, which is **NOT
-   wired on this machine** and has never fired. Verified again 2026-08-24T21:20:34Z: zero
-   occurrences in `settings.json`. This wording was corrupted to "wired but had never fired"
-   during the re-cut and caught by the same session's source-coverage pass - the check's whole
-   value is the word NOT, and I deleted it while copying the check that exists to catch exactly
-   this. The 13%-of-the-branch measurement above is this same check applied to a whole release.
+4. **Is this surface actually LIVE?** A session went into `piped_gate_guard` while it was **NOT
+   wired on this machine** and had never fired - verified 2026-08-24T21:20:34Z, zero occurrences
+   in `settings.json`. The wording was then corrupted to "wired but had never fired" during the
+   re-cut and caught by that session's source-coverage pass: the check's whole value was the word
+   NOT, and I deleted it while copying the check that exists to catch exactly this.
+   **[2026-08-28] THE EXAMPLE IS NOW HISTORICAL, AND LEAVING IT IN THE PRESENT TENSE MADE THIS
+   CHECK CARRY A FALSE PREMISE.** Item 5 WIRED `piped_gate_guard` on 2026-08-25 (`unbluff:piped-gate`,
+   PreToolUse, matcher `Bash|PowerShell`); it is in `settings.json` today and it **fired twice on
+   me during this session**, blocking two real commands that would have eaten a gate's exit
+   status. So the check was still being read at every change while asserting the opposite of the
+   truth about its own example - the same defect one level up, found by the close source-coverage
+   pass reading this file as an AUTHORITY rather than as a to-do list.
+   The CHECK is unchanged and still correct; only its example needed a date. Ask it of the
+   surface in front of you, and re-derive liveness rather than trusting any sentence here -
+   including this one. The 13%-of-the-branch measurement above is this same check applied to a
+   whole release.
 5. **Never edit while a gate is in flight.** Broken three times in one day, three sweeps
    discarded.
 6. **A probe that has not been shown to FAIL is not a probe.** Four probes were invalid on first
