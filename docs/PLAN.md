@@ -104,7 +104,78 @@ source now.)
 
 Replaces *"Would I defend this release under adversarial review?"*, which was a shipping bar. A
 change that only makes the repo more defensible to a stranger is no longer worth doing.
-Materiality still decides ORDER, never WHETHER - anything kept here gets built.
+
+**[2026-09-01] RESTATED BY THE OWNER, AND IT SHARPENS THE BAR RATHER THAN CHANGING IT:** *"I do
+not care to ship any more. I want unbluff to be good for me to use. If it's already good and
+everything's working, we can stop."* Two consequences, and the second one deletes work:
+- **"Materiality decides ORDER, never WHETHER" is now WRONG here and is replaced.** It came from
+  the shipping premise, where every gap was eventually a reviewer's question. With no release, a
+  row that improves nothing about a working session should be RETIRED, not sequenced. Deleting
+  beats fixing; see item 17, where 418 lines went because the gate served nobody.
+- **The test for every open row is now: would I NOTICE if this were never built?** If the honest
+  answer is no, retire it and say so.
+
+## Status and order - THE ONLY PLACE THIS IS RECORDED
+
+**Added 2026-09-01, and its absence was the finding.** This plan had 36 rows and NO order section
+and NO status summary. The order lived in the hand-written session prompts instead, so it survived
+only by being transcribed correctly each time, and it went stale the moment direction changed -
+which is exactly what happened when item 17 was deleted. A plan whose sequence is not IN the plan
+is a plan that has to be reconstructed from memory, and this repo has a standing check about
+reconstructing things from memory.
+
+**Derived 2026-09-01 by parsing the headings, not counted by hand: 37 rows, 0-36, contiguous.
+18 closed, 19 open.**
+(It read "36 rows / 18 open" for the first hour of its existence, until the close completeness
+pass added item 36 and the re-parse caught it. **A hand-typed count in this very section went
+stale within the hour** - which is the argument for the one-line parse below rather than for
+trying harder to type carefully. Re-derive it, do not read it:
+`python -c "import re,io;L=io.open('docs/PLAN.md',encoding='utf-8').read().split(chr(10));print(sorted(int(m.group(1)) for l in L for m in [re.match(r'^(\d+)\. \*\*',l)] if m))"`)
+
+CLOSED: 0, 1, 2, 3, 4, 5, 6, 7, 10, 15, 20, 21, 22, 23, 24, 25, 33 - and **17 REVERTED**
+(built, then deleted; the row keeps the evidence).
+
+**OPEN, IN ORDER, SORTED BY THE BAR ABOVE - not by size, not by age.**
+
+*Tier 1 - I would notice these in a session.* These touch what actually runs when he works.
+  0. **36** - `MACHINE_STATE` has no floor and `--code-only` is what gates every push. Added
+     2026-09-01 by the close completeness pass and placed FIRST: it is the only open row in the
+     verdict path of `.claude/pre-push.cmd`, the one gate he actually relies on. Latent today
+     (1 label of 20 gates), and the repo has already built this exact floor twice elsewhere.
+  1. **13** - the inline-content-through-a-shell guard. FIVE incidents, the newest a `printf`
+     eating a `%` and `git commit -F` succeeding on a truncated file. The only open row that
+     prevents a failure he has actually hit, repeatedly.
+  2. **18** - the SHIPPED `consistency-audit` skill flags `[]` in source as an unfilled
+     placeholder. He RUNS that skill; it cried wolf on its own repo during the 2026-08-28 close.
+  3. **34** - the false-alarm corpus covers 1 of 44 units (derived 2026-09-01; it was 45 before
+     item 17's deletion removed a unit). This is the only mechanism that
+     measures "does a guard fire on correct work", which is the single thing that decides whether
+     these hooks stay switched on.
+  4. **16** - `hook_health_check`'s budget share. User-visible at SessionStart, and a load-flake
+     already turned the suite red once on 2026-09-01 at 105% of budget with every assertion green.
+
+*Tier 2 - the instruments can currently lie to me.* Not felt in a session, but they decide whether
+any green above is worth believing.
+  5. **35** - an assertion that prints "did not run" and still returns PASS. Cost two sessions.
+  6. **26** - a mutation whose VERIFIER cannot run scores SURVIVED, not HARNESS ERROR.
+  7. **30** - a git-derived population cannot see an untracked file; two gates printed 67 and 68
+     side by side in one green run.
+  8. **29** - `gate_ledger`'s writer resolves `LEDGER` at call time, its readers at def time.
+  9. **9** - five guard families hand-probed but unregistered as mutation entries. **UNBLOCKED**:
+     it was waiting on item 2's pull and item 7, both now closed.
+
+*Tier 3 - internal rigor. Real, but nothing misfires today.*
+  10. **31**, **11**, **12**, **19**, **28**, **14**, **8**
+
+*Retire candidates - the bar says these earn nothing.* Decide, do not carry:
+  - **27** and **32** are both about the 800-line ratchet and comment-shaving. The ratchet already
+    works: it caught all three files this session and forced one real split. A detector for
+    *shaving comments to pass it* is a guard on a guard, and the honest reading of the new bar is
+    that he would never notice its absence. **Recommend RETIRE both** unless the ratchet actually
+    gets gamed again.
+  - The 12 `gate_registry.py` findings from review `wf_a71fb7d3-79d` (item 33) are one-directional
+    rosters and unchecked adjudication reasons. None misfires. **Recommend leaving them recorded
+    and unscheduled** rather than opening rows that will never be worth doing.
 
 ## Open - and this list is deliberately short
 
@@ -791,6 +862,14 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
 
 20. **The plan predicted the pull would clear `hook-provenance`. The repo already knew it would
     not, and the plan never read its own design note.**
+    **DONE - marker added 2026-09-01, and its ABSENCE is the point.** The row's correction landed
+    2026-08-26 and its one live consequence - item 7's forced order needing a clean full sweep -
+    was discharged on 2026-08-28 by two clean sweeps. But the row never carried a status token, so
+    a machine parse of this file scored it OPEN while every hand-written session prompt called it
+    DONE. **Two sources of truth disagreed for six days and nobody noticed, because the order and
+    the status lived in the session prompts rather than in this file.** That is precisely what the
+    Status and order section above now exists to prevent, and this row is the instance that proved
+    the gap was real rather than theoretical.
     New 2026-08-26. **The first version of this item called the mechanism an undocumented
     structural finding. That was wrong and is corrected here**, because the correction is the
     more useful fact: the mechanism was already written down, in `.claude/pre-push.cmd` under
@@ -1355,7 +1434,12 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     The remaining unreviewed-by-anyone-else module is `gate_registry.py` (12 confirmed findings,
     all internal rigor); `hook_divergence_trend.py` is view code with 2.
 
-34. **The false-alarm corpus covers 1 of 45 units, and the suite prints that every run to nobody.**
+34. **The false-alarm corpus covers 1 of 44 units, and the suite prints that every run to nobody.**
+    **[2026-09-01] The DENOMINATOR MOVED and this row did not notice for three days.** It read
+    "1 of 45" until the close consistency pass re-derived it: item 17's deletion removed a unit, so
+    the suite now prints `1 of 44 units have a corpus (2%); 43 uncovered`. A hand-copied
+    denominator drifting the moment its population changes is item 15's defect exactly, and it
+    happened inside the row that exists to complain about an unexamined denominator.
     Found by the close completeness pass: `-- coverage: 1 of 45 units have a corpus (2%);
     44 uncovered` appears in every suite run and has NO home anywhere in this plan (grep: zero
     hits for the phrase).
@@ -1364,7 +1448,7 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     two sessions, and it is why `piped-gate` was scoped the way it was. (It was also why
     `tier-freshness` defaulted to a measurement, before that gate was deleted on 2026-08-29 -
     item 17.) The corpus is the only mechanism that MEASURES that rule rather
-    than asserting it. At 2% coverage, the false-alarm claim for 44 of 45 units rests on nothing
+    than asserting it. At 2% coverage, the false-alarm claim for 43 of 44 units rests on nothing
     but the absence of complaints, which is exactly the "silence is not evidence" shape audited
     elsewhere in this plan.
     Not a demand for 45 corpora: most units are not user-facing guards and cannot produce a false
@@ -1400,6 +1484,35 @@ Materiality still decides ORDER, never WHETHER - anything kept here gets built.
     `SKIPPED (posix only ...)`, which is an ADJUDICATED skip the mutation harness already reports
     correctly and separately - the distinction is whether the skip was declared in advance or
     discovered at runtime.
+
+36. **`MACHINE_STATE` has NO FLOOR, and `--code-only` is what gates every push.**
+    New 2026-09-01, from the close completeness pass. Three HIGH findings of review
+    `wf_a71fb7d3-79d` are all about this one mechanism and none of them had a home - the plan
+    disposed of them as "and the handful elsewhere", which is the vague non-disposition that
+    sweep exists to catch.
+    **VERIFIED, not taken on the reviewers' word.** `run_selftests.py:327` reads
+    `if rc != 0 and code_only and label in MACHINE_STATE: ... excluded`. **Nothing caps how many
+    labels `MACHINE_STATE` may hold**, and `grep` finds no assertion anywhere on its size.
+    Today it holds exactly one (`hook-provenance`) against 20 `AUX_GATES` rows, so this is LATENT,
+    not live.
+    **Why it matters under the new bar - this is the one open row that touches his push.**
+    `.claude/pre-push.cmd` runs `python run_selftests.py --code-only`. If `MACHINE_STATE` ever
+    grew to cover every label - by a bad edit, a merge, or someone silencing a noisy gate - the
+    pre-push gate would print a clean pass while every gate under it failed. That is the
+    "green result that cannot fail" shape this whole repo exists to prevent, sitting in the
+    verdict path of the only gate he actually relies on.
+    **The repo already solved this exact shape twice**: `ship_bar` has SHIPBAR-FLOOR and
+    `check_file_size` has FS-FLOOR, both pinning "the population collapsed to zero and the gate
+    still said OK". `MACHINE_STATE` is the same collapse from the other direction - the EXCLUSION
+    set growing to swallow the population rather than the population shrinking.
+    Fix, cheapest first: assert in `run_selftests --selftest` that `MACHINE_STATE` is a strict
+    subset of `AUX_GATES` labels AND that at least one non-exempt gate remains in the `--code-only`
+    verdict; pin it with a mutation that grows `MACHINE_STATE` to cover everything.
+    **Probe both directions:** today's single-entry roster must NOT fire, and an all-swallowing
+    roster MUST. The two related findings - that `MACHINE_STATE`'s only consumer is pinned by a
+    probe which re-implements the routing instead of exercising it, and that the `#45` disarm
+    probe does the same - belong in the same fix: a probe that re-implements its subject tests
+    the probe.
 
 ## Retired, not forgotten - and why each one died
 
